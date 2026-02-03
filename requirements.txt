@@ -7,3 +7,4 @@ networkx
 akshare
 httpx
 tenacity>=8.2.0
+scipy

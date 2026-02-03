@@ -1,0 +1,9 @@
+streamlit
+pandas
+numpy
+plotly
+openai
+networkx
+akshare
+httpx
+tenacity>=8.2.0

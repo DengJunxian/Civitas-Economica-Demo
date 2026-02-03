@@ -1,0 +1,1117 @@
+# file: app.py
+"""
+Civitas A股政策仿真平台 - 增强版
+
+新增功能：
+1. 加载进度条（带百分比）
+2. Agent 思维链可视化（fMRI）
+3. 量化群体监控
+4. 历史回测模式
+"""
+
+import streamlit as st
+import asyncio
+import pandas as pd
+import plotly.graph_objects as go
+import time
+from datetime import datetime
+from typing import Optional
+
+# 引入核心模块
+from config import GLOBAL_CONFIG
+from core.scheduler import SimulationController
+from agents.brain import DeepSeekBrain, ThoughtRecord
+from agents.quant_group import QuantGroupManager, QuantStrategyGroup
+from core.backtester import HistoricalBacktester, BacktestConfig, BacktestReportGenerator
+
+# 新增模块
+from agents.debate_brain import DebateBrain, DebateRecord, DebateRole
+from agents.reflection import ReflectionEngine, ReflectiveAgent
+from core.behavioral_finance import (
+    prospect_utility, calculate_csad, herding_intensity,
+    create_behavioral_profile, BehavioralProfile
+)
+from core.regulatory_sandbox import (
+    RegulatoryModule, NationalStabilityFund, CircuitBreaker,
+    ProgrammaticTradingRegulator
+)
+from core.policy_committee import PolicyCommittee
+
+# --- 1. 页面配置 ---
+st.set_page_config(
+    page_title="数治观澜 —— 金融政策风洞推演沙箱",
+    page_icon="🏛️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# 深色主题 CSS 增强
+st.markdown("""
+<style>
+    .stApp { background-color: #0a0a0a; color: #e0e0e0; }
+    div.stButton > button {
+        background-color: #1a1a2e; color: #e0e0e0; border: 1px solid #4a4a6a;
+    }
+    div.stButton > button:hover {
+        background-color: #2a2a4e; color: #ffffff;
+    }
+    /* 认知透镜样式 */
+    .reasoning-box {
+        background-color: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 12px;
+        height: 300px;
+        overflow-y: scroll;
+        font-family: 'Microsoft YaHei', 'PingFang SC', monospace;
+        font-size: 13px;
+        color: #c9d1d9;
+        line-height: 1.6;
+    }
+    /* 政策分析框样式 */
+    .policy-analysis-box {
+        background-color: #161b22;
+        border: 1px solid #f0883e;
+        border-radius: 6px;
+        padding: 12px;
+        max-height: 400px;
+        overflow-y: scroll;
+        font-family: 'Microsoft YaHei', 'PingFang SC', monospace;
+        font-size: 13px;
+        color: #f0883e;
+        line-height: 1.6;
+    }
+    /* 统计指标样式 */
+    .metric-card {
+        background-color: #161b22;
+        border-radius: 8px;
+        padding: 16px;
+        margin: 8px 0;
+    }
+    /* Agent 卡片样式 */
+    .agent-card {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 10px;
+        margin: 5px 0;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .agent-card:hover {
+        border-color: #58a6ff;
+        background-color: #1f2937;
+    }
+    /* 情绪指标条 */
+    .emotion-bar {
+        height: 8px;
+        border-radius: 4px;
+        background: linear-gradient(to right, #34C759, #FFD60A, #FF3B30);
+    }
+    .emotion-indicator {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 5px;
+    }
+    /* 进度条容器 */
+    .progress-container {
+        background-color: #1a1a2e;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 10px 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# --- 2. 状态管理 ---
+
+if 'controller' not in st.session_state:
+    st.session_state.controller = None
+if 'is_running' not in st.session_state:
+    st.session_state.is_running = False
+if 'market_history' not in st.session_state:
+    st.session_state.market_history = []
+if 'csad_history' not in st.session_state:
+    st.session_state.csad_history = []
+if 'policy_analysis' not in st.session_state:
+    st.session_state.policy_analysis = None
+if 'historical_loaded' not in st.session_state:
+    st.session_state.historical_loaded = False
+if 'selected_agent' not in st.session_state:
+    st.session_state.selected_agent = None
+if 'quant_manager' not in st.session_state:
+    st.session_state.quant_manager = None
+if 'backtest_mode' not in st.session_state:
+    st.session_state.backtest_mode = False
+if 'backtester' not in st.session_state:
+    st.session_state.backtester = None
+if 'init_progress' not in st.session_state:
+    st.session_state.init_progress = 0
+if 'init_status' not in st.session_state:
+    st.session_state.init_status = ""
+# 新增: 仿真模式状态
+if 'simulation_mode' not in st.session_state:
+    st.session_state.simulation_mode = "SMART"
+if 'day_cycle_paused' not in st.session_state:
+    st.session_state.day_cycle_paused = False
+
+# --- 3. 辅助函数 ---
+
+def get_emotion_icon(score: float) -> str:
+    """根据情绪分数获取图标"""
+    if score > 0.3:
+        return "🟢"  # 贪婪
+    elif score < -0.3:
+        return "🔴"  # 恐惧
+    else:
+        return "⚪"  # 中性
+
+def get_emotion_color(score: float) -> str:
+    """根据情绪分数获取颜色"""
+    if score > 0.3:
+        return "#34C759"  # 绿色
+    elif score < -0.3:
+        return "#FF3B30"  # 红色
+    else:
+        return "#FFD60A"  # 黄色
+
+def render_progress_bar(current: int, total: int, status: str = ""):
+    """渲染进度条"""
+    progress = current / max(total, 1)
+    percentage = int(progress * 100)
+    
+    st.markdown(f"""
+    <div class="progress-container">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+            <span>{status}</span>
+            <span style="color: #58a6ff; font-weight: bold;">{percentage}%</span>
+        </div>
+        <div style="background: #2a2a4e; border-radius: 4px; height: 12px; overflow: hidden;">
+            <div style="background: linear-gradient(90deg, #58a6ff, #34C759); 
+                        width: {percentage}%; height: 100%; 
+                        transition: width 0.3s ease;"></div>
+        </div>
+        <div style="color: #888; font-size: 12px; margin-top: 5px;">
+            {current} / {total}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# --- 4. 侧边栏配置 ---
+
+with st.sidebar:
+    st.markdown("""
+    <div style="text-align: center; padding: 10px 0;">
+        <div style="font-size: 22px; font-weight: bold; color: #4DA6FF;">🏛️ 数治观澜</div>
+        <div style="font-size: 12px; color: #888; margin-top: 5px;">基于大模型多智能体的金融政策风洞推演沙箱</div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.caption(f"版本: {GLOBAL_CONFIG.VERSION} | DeepSeek R1 + 多模型")
+    
+    # --- API 密钥输入 ---
+    api_key = st.text_input("DeepSeek API 密钥 *", type="password", 
+                            help="必填，用于驱动智能体思考")
+    hunyuan_key = st.text_input("混元 API 密钥 (可选)", type="password",
+                                help="可选，用于多模型增强")
+    zhipu_key = st.text_input("智谱 API 密钥 (快速模式)", type="password",
+                              value="4d963afd591d4c93940b08b06d766e91.bWaMIWJnuKhOUo7y",
+                              help="快速模式专用，使用GLM-4-FlashX模型")
+    
+    st.divider()
+    
+    # --- 仿真模式选择 ---
+    st.subheader("⚡ 仿真模式")
+    sim_mode = st.radio(
+        "选择模式",
+        ["🧠 智能模式", "⚡ 快速模式", "🔬 深度模式"],
+        help="智能:自适应(≤15s/天) | 快速:仅对话模型(≤5s) | 深度:完整推理(≤30s)",
+        key="sim_mode_radio"
+    )
+    mode_map = {"🧠 智能模式": "SMART", "⚡ 快速模式": "FAST", "🔬 深度模式": "DEEP"}
+    st.session_state.simulation_mode = mode_map.get(sim_mode, "SMART")
+    
+    # 如果控制器已初始化，实时切换模式
+    if st.session_state.controller:
+        st.session_state.controller.set_mode(st.session_state.simulation_mode)
+    
+    st.divider()
+    
+    # --- 运行模式切换 ---
+    mode_tab = st.radio(
+        "运行模式",
+        ["🎮 实时仿真", "📊 历史回测"],
+        horizontal=True,
+        help="实时仿真：Agent在模拟市场中交易\n历史回测：使用真实历史数据校准"
+    )
+    st.session_state.backtest_mode = (mode_tab == "📊 历史回测")
+    
+    st.divider()
+    
+    # --- 政策输入模块 ---
+    st.subheader("📜 政策注入")
+    
+    policy_text = st.text_area(
+        "输入政策内容",
+        placeholder="例如：降低证券交易印花税至0.05%以刺激市场流动性...",
+        height=120,
+        help="输入政策文本后，系统会通过DeepSeek推理链分析其对市场和投资者行为的影响"
+    )
+    
+    analyze_btn = st.button("🔍 分析政策影响", use_container_width=True)
+    
+    if analyze_btn and policy_text:
+        if st.session_state.controller:
+            with st.spinner("DeepSeek 正在分析政策影响..."):
+                try:
+                    analysis = st.session_state.controller.market.interpreter.interpret(policy_text)
+                    st.session_state.policy_analysis = {
+                        "text": policy_text,
+                        "result": analysis,
+                        "timestamp": datetime.now().strftime("%H:%M:%S")
+                    }
+                    # 应用政策到市场
+                    st.session_state.controller.market.apply_policy(policy_text)
+                    st.success("✅ 政策已注入市场！")
+                except Exception as e:
+                    st.error(f"分析失败: {e}")
+        else:
+            st.warning("请先启动仿真系统")
+    
+    # 显示政策分析结果
+    if st.session_state.policy_analysis:
+        with st.expander("📊 政策分析结果", expanded=True):
+            result = st.session_state.policy_analysis["result"]
+            st.markdown(f"**分析时间:** {st.session_state.policy_analysis['timestamp']}")
+            st.markdown(f"**印花税率:** {result.get('tax_rate', 0.0005):.4%}")
+            st.markdown(f"**流动性注入概率:** {result.get('liquidity_injection', 0):.1%}")
+            st.markdown(f"**市场恐慌因子:** {result.get('fear_factor', 0):.2f}")
+            st.markdown(f"**初始新闻:** {result.get('initial_news', '无')}")
+    
+    st.divider()
+    
+    # --- 量化群体配置 ---
+    with st.expander("🤖 量化群体设置", expanded=False):
+        quant_strategy = st.selectbox(
+            "策略模板",
+            ["momentum", "mean_reversion", "risk_parity", "news_driven"],
+            format_func=lambda x: {
+                'momentum': '动量追踪',
+                'mean_reversion': '均值回归',
+                'risk_parity': '风险平价',
+                'news_driven': '消息驱动'
+            }.get(x, x)
+        )
+        
+        quant_agents = st.slider("群体规模", min_value=5, max_value=20, value=10)
+        
+        if st.button("创建量化群体", use_container_width=True):
+            if api_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY:
+                if st.session_state.quant_manager is None:
+                    st.session_state.quant_manager = QuantGroupManager(
+                        api_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY
+                    )
+                
+                # 创建进度条占位
+                progress_placeholder = st.empty()
+                status_placeholder = st.empty()
+                
+                def update_progress(current, total, msg):
+                    progress_placeholder.progress(current / total)
+                    status_placeholder.text(f"正在创建 {msg}...")
+                
+                group = st.session_state.quant_manager.create_from_template(
+                    f"quant_{len(st.session_state.quant_manager.groups)}",
+                    quant_strategy,
+                    quant_agents,
+                    update_progress
+                )
+                
+                progress_placeholder.empty()
+                status_placeholder.empty()
+                
+                if group:
+                    st.success(f"✅ 创建了 {quant_agents} 个 {group.strategy_name} Agent")
+            else:
+                st.warning("请先输入 API 密钥")
+    
+    st.divider()
+    
+    # --- 控制按钮 ---
+    col1, col2 = st.columns(2)
+    with col1:
+        start_btn = st.button("▶ 启动", use_container_width=True)
+    with col2:
+        stop_btn = st.button("⏸ 暂停", use_container_width=True)
+    
+    # 启动逻辑
+    if start_btn and not st.session_state.is_running:
+        # 检查API密钥：DeepSeek或智谱至少需要一个
+        has_deepseek = bool(api_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY)
+        has_zhipu = bool(zhipu_key or GLOBAL_CONFIG.ZHIPU_API_KEY)
+        
+        if not has_deepseek and not has_zhipu:
+            st.error("请至少输入一个API密钥（DeepSeek或智谱）!")
+        else:
+            # 如果只有智谱API，强制使用快速模式
+            if not has_deepseek and has_zhipu:
+                st.session_state.simulation_mode = "FAST"
+                st.warning("⚠️ 未检测到DeepSeek API，已自动切换到快速模式（使用智谱GLM）")
+            
+            st.session_state.is_running = True
+            
+            if st.session_state.controller is None:
+                # 显示初始化进度
+                init_container = st.container()
+                
+                with init_container:
+                    st.markdown("### 🚀 正在初始化仿真系统...")
+                    
+                    # 阶段1: 连接API
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    if has_deepseek:
+                        status_text.text("🔌 连接 DeepSeek API...")
+                    else:
+                        status_text.text("🔌 连接 智谱GLM API...")
+                    progress_bar.progress(10)
+                    time.sleep(0.3)
+                    
+                    # 阶段2: 初始化控制器
+                    status_text.text("⚙️ 初始化仿真控制器...")
+                    progress_bar.progress(30)
+                    
+                    st.session_state.controller = SimulationController(
+                        deepseek_key=api_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY or "",
+                        hunyuan_key=hunyuan_key or GLOBAL_CONFIG.HUNYUAN_API_KEY or None,
+                        zhipu_key=zhipu_key or GLOBAL_CONFIG.ZHIPU_API_KEY or None,
+                        mode=st.session_state.simulation_mode
+                    )
+                    
+                    progress_bar.progress(50)
+                    
+                    # 阶段3: 加载历史数据
+                    status_text.text("📈 加载历史K线数据...")
+                    progress_bar.progress(60)
+                    
+                    if not st.session_state.historical_loaded:
+                        total_candles = len(st.session_state.controller.market.candles)
+                        for i, candle in enumerate(st.session_state.controller.market.candles):
+                            st.session_state.market_history.append({
+                                "time": candle.timestamp,
+                                "open": candle.open,
+                                "high": candle.high,
+                                "low": candle.low,
+                                "close": candle.close,
+                                "is_historical": not candle.is_simulated
+                            })
+                            if i % 50 == 0:
+                                progress_bar.progress(60 + int(30 * i / max(total_candles, 1)))
+                        
+                        st.session_state.historical_loaded = True
+                    
+                    # 阶段4: 初始化 Agent 和默认量化群体
+                    status_text.text("🧠 初始化智能体...")
+                    progress_bar.progress(90)
+                    
+                    # 创建默认量化群体（4种策略各3个，共12个）
+                    if st.session_state.quant_manager is None:
+                        from agents.quant_group import QuantGroupManager
+                        effective_key = zhipu_key or GLOBAL_CONFIG.ZHIPU_API_KEY or api_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY
+                        st.session_state.quant_manager = QuantGroupManager(effective_key)
+                        
+                        # 四种策略模板
+                        strategies = ["momentum", "mean_reversion", "risk_parity", "news_driven"]
+                        for strategy in strategies:
+                            st.session_state.quant_manager.create_from_template(
+                                f"default_{strategy}",
+                                strategy,
+                                1,  # 每种策略1个Agent
+                                lambda c, t, m: None  # 静默创建
+                            )
+                    
+                    progress_bar.progress(95)
+                    time.sleep(0.2)
+                    
+                    # 完成
+                    status_text.text("✅ 系统就绪！")
+                    progress_bar.progress(100)
+                    time.sleep(0.5)
+                
+            st.rerun()
+            
+    if stop_btn:
+        st.session_state.is_running = False
+        st.rerun()
+
+    st.markdown("---")
+    if st.button("📑 生成报告", use_container_width=True):
+        st.info("正在基于仿真数据生成研究报告...")
+
+# --- 5. 主界面逻辑 ---
+
+# 创建标签页
+if st.session_state.backtest_mode:
+    tab1, tab2 = st.tabs(["📊 回测结果", "🧠 Agent fMRI"])
+else:
+    tab1, tab2, tab_debate, tab_reg, tab_behavior, tab_quant = st.tabs([
+        "📈 市场走势", 
+        "🧠 Agent fMRI", 
+        "⚔️ 辩论室",
+        "🏛️ 监管沙盒",
+        "📊 行为金融",
+        "🤖 量化群体"
+    ])
+
+
+ctrl = st.session_state.controller
+
+# --- 主内容区 ---
+if st.session_state.backtest_mode:
+    # 回测模式
+    with tab1:
+        st.subheader("📊 历史回测校准")
+        
+        if st.session_state.backtester is None:
+            st.session_state.backtester = HistoricalBacktester(
+                BacktestConfig(period_days=1095)  # 3年数据
+            )
+        
+        col_bt1, col_bt2 = st.columns([2, 1])
+        
+        with col_bt1:
+            if st.button("🚀 开始回测", use_container_width=True):
+                if ctrl:
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    def bt_progress(current, total, msg):
+                        progress_bar.progress(current / max(total, 1))
+                        status_text.text(msg)
+                    
+                    result = st.session_state.backtester.run_backtest(
+                        ctrl.population,
+                        ctrl.market,
+                        bt_progress
+                    )
+                    
+                    status_text.text("✅ 回测完成！")
+                    
+                    # 显示结果
+                    st.markdown(BacktestReportGenerator.generate_html_report(result), 
+                               unsafe_allow_html=True)
+                else:
+                    st.warning("请先启动仿真系统")
+        
+        with col_bt2:
+            st.markdown("""
+            **回测说明**
+            
+            系统将使用近3年的上证指数历史数据，
+            让Agent群体在真实行情中进行交易决策。
+            
+            校准指标包括：
+            - 📈 价格走势相关性
+            - 📊 换手率相关性
+            - 📉 波动率相关性
+            """)
+
+else:
+    # 实时仿真模式
+    with tab1:
+        # K线图全宽显示
+        if ctrl:
+            # --- 100天循环检测 ---
+            if ctrl.day_count > 0 and ctrl.day_count % GLOBAL_CONFIG.SIMULATION_DAY_CYCLE == 0 and st.session_state.is_running:
+                st.session_state.is_running = False
+                st.session_state.day_cycle_paused = True
+            
+            # 100天循环暂停提示
+            if st.session_state.day_cycle_paused:
+                st.warning(f"📅 已完成 {ctrl.day_count} 天仿真！")
+                col_continue, col_stop = st.columns(2)
+                with col_continue:
+                    if st.button("▶ 继续仿真下一个100天", use_container_width=True):
+                        st.session_state.day_cycle_paused = False
+                        st.session_state.is_running = True
+                        st.rerun()
+                with col_stop:
+                    if st.button("⏹️ 结束仿真", use_container_width=True):
+                        st.session_state.day_cycle_paused = False
+                        st.session_state.is_running = False
+            
+            # --- 可视化渲染 ---
+            
+            # 统计面板（K线图上方）
+            st.markdown("### 📊 统计面板")
+            current_price = ctrl.market.engine.last_price
+            prev_close = ctrl.market.engine.prev_close
+            change_pct = (current_price - prev_close) / prev_close * 100 if prev_close else 0
+            
+            if change_pct >= 0:
+                price_color = "#FF3B30"
+                arrow = "↑"
+            else:
+                price_color = "#34C759"
+                arrow = "↓"
+            
+            # 第一行：指数显示
+            st.markdown(f"""
+            <div class="metric-card">
+                <div style="color: #888; font-size: 14px;">上证指数</div>
+                <div style="color: {price_color}; font-size: 32px; font-weight: bold;">
+                    {current_price:.2f} {arrow} <span style="font-size: 18px;">{change_pct:+.2f}%</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # 第二行：四列指标
+            col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+            with col_s1:
+                st.metric("恐慌指数", f"{ctrl.market.panic_level:.2f}")
+            with col_s2:
+                st.metric("仿真天数", f"{ctrl.day_count}")
+            with col_s3:
+                avg_time = ctrl.tick_times[-1] if ctrl.tick_times else 0
+                mode_label = {"SMART": "智能", "FAST": "快速", "DEEP": "深度"}.get(st.session_state.simulation_mode, "智能")
+                st.metric(f"单步耗时({mode_label})", f"{avg_time:.2f}s")
+            with col_s4:
+                avg_all = sum(ctrl.tick_times) / len(ctrl.tick_times) if ctrl.tick_times else 0
+                st.metric("平均耗时", f"{avg_all:.2f}s")
+            
+            st.markdown("---")
+            
+            # 1. K线图 (全宽显示)
+            st.subheader("📈 市场走势（实时）")
+            if st.session_state.market_history:
+                    df = pd.DataFrame(st.session_state.market_history)
+                    
+                    fig = go.Figure()
+                    
+                    # 添加K线图 - 涨红跌绿 (A股习惯)
+                    fig.add_trace(go.Candlestick(
+                        x=df['time'],
+                        open=df['open'], 
+                        high=df['high'],
+                        low=df['low'], 
+                        close=df['close'],
+                        increasing_line_color='#FF3B30',
+                        increasing_fillcolor='#FF3B30',
+                        decreasing_line_color='#34C759',
+                        decreasing_fillcolor='#34C759',
+                        name='上证指数'
+                    ))
+                    
+                    # 标记历史数据与仿真数据的分界线
+                    if 'is_historical' in df.columns:
+                        historical_count = df['is_historical'].sum()
+                        if historical_count > 0 and historical_count < len(df):
+                            # 历史数据使用透明度区分
+                            boundary_idx = int(historical_count)
+                            boundary_date = df.iloc[boundary_idx]['time']
+                            
+                            # 添加明显的分界线
+                            fig.add_vline(
+                                x=boundary_date, 
+                                line_dash="dash", 
+                                line_color="#FFD60A",
+                                line_width=2
+                            )
+                            # 添加分区标签
+                            fig.add_annotation(
+                                x=boundary_date,
+                                y=1.05,
+                                yref='paper',
+                                text="◀ 真实历史数据 | 仿真推演数据 ▶",
+                                showarrow=False,
+                                font=dict(size=12, color="#FFD60A"),
+                                bgcolor="rgba(26, 26, 46, 0.8)"
+                            )
+                    
+                    fig.update_layout(
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(10,10,10,0.8)',
+                        font=dict(color='#e0e0e0', family='Microsoft YaHei'),
+                        height=750,  # K线图全宽显示，高度增加
+                        xaxis_rangeslider_visible=False,
+                        xaxis=dict(gridcolor='rgba(128,128,128,0.2)', title='日期'),
+                        yaxis=dict(gridcolor='rgba(128,128,128,0.2)', title='指数点位'),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+            
+            # CSAD 羊群效应仪表盘（全宽显示）
+            st.subheader("🐑 羊群效应指标 (CSAD)")
+            if st.session_state.csad_history:
+                csad_df = pd.DataFrame({
+                    'step': range(len(st.session_state.csad_history)), 
+                    'csad': st.session_state.csad_history
+                })
+                fig_csad = go.Figure()
+                fig_csad.add_trace(go.Scatter(
+                    x=csad_df['step'], y=csad_df['csad'], 
+                    mode='lines', line=dict(color='#FFD60A', width=2), name='CSAD'
+                ))
+                fig_csad.add_hline(y=0.15, line_dash="dash", line_color="#FF3B30", 
+                                  annotation_text="羊群效应警戒线", annotation_font_color="#FF3B30")
+                fig_csad.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(10,10,10,0.8)',
+                    font=dict(color='#c0c0c0', family='Microsoft YaHei'), height=200,
+                    margin=dict(l=0, r=0, t=30, b=0),
+                    xaxis=dict(title='仿真步数'), yaxis=dict(title='CSAD值')
+                )
+                st.plotly_chart(fig_csad, use_container_width=True)
+            else:
+                st.info("等待仿真数据...")
+
+            # --- 异步仿真循环 ---
+            if st.session_state.is_running and not st.session_state.day_cycle_paused:
+                # 根据模式调整spinner提示
+                mode_tips = {
+                    "SMART": "智能模式运行中 (≤15s/天)...",
+                    "FAST": "快速模式运行中 (≤5s/天)...",
+                    "DEEP": "深度模式运行中 (≤30s/天)..."
+                }
+                spinner_text = mode_tips.get(st.session_state.simulation_mode, "仿真运行中...")
+                
+                with st.spinner(spinner_text):
+                    try:
+                        # 使用 asyncio.run 执行异步步进
+                        metrics = asyncio.run(ctrl.run_tick())
+                        
+                        # 检查是否有降级事件（DeepSeek超时降级到智谱）
+                        if hasattr(ctrl.model_router, 'fallback_events') and ctrl.model_router.fallback_events:
+                            for event in ctrl.model_router.fallback_events:
+                                st.toast(f"⚠️ {event.get('message', '模型已降级')}", icon="⚠️")
+                            # 清空已处理的事件
+                            ctrl.model_router.fallback_events.clear()
+                        
+                        # 更新历史数据
+                        candle = metrics['candle']
+                        st.session_state.market_history.append({
+                            "time": candle.timestamp,
+                            "open": candle.open,
+                            "high": candle.high,
+                            "low": candle.low,
+                            "close": candle.close,
+                            "is_historical": False
+                        })
+                        st.session_state.csad_history.append(metrics['csad'])
+                        
+                        # 根据模式调整刷新延迟
+                        if st.session_state.simulation_mode == "FAST":
+                            pass  # 快速模式无延迟
+                        else:
+                            time.sleep(0.1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"仿真异常: {e}")
+                        st.session_state.is_running = False
+
+        else:
+            # 欢迎页
+            st.markdown("""
+            ## 🏛️ 欢迎使用 Civitas A股政策仿真平台
+            
+            本系统使用 **DeepSeek R1** 大模型驱动智能体进行投资决策，模拟政策对A股市场的影响。
+            
+            ### 快速开始
+            
+            1. 在侧边栏输入您的 **DeepSeek API 密钥**
+            2. 点击 **▶ 启动** 按钮初始化仿真
+            3. 在"政策注入"区域输入政策文本
+            4. 观察智能体如何响应政策变化
+            
+            ### 系统状态
+            
+            | 组件 | 状态 |
+            |------|------|
+            | 仿真引擎 | ✅ 就绪 |
+            | 神经网络 | ⏳ 待连接 |
+            | 市场数据 | ✅ 已加载 |
+            
+            ---
+            
+            > 💡 **提示:** 系统将自动加载近3年的上证指数历史数据作为仿真起点。
+            """)
+
+    # --- Agent fMRI 标签页 ---
+    with tab2:
+        st.subheader("🧠 Agent 心理核磁共振 (fMRI)")
+        st.caption("点击任意 Agent 查看其完整思维链")
+        
+        if ctrl:
+            # Agent 列表
+            col_list, col_detail = st.columns([1, 2])
+            
+            with col_list:
+                st.markdown("### 智能体列表")
+                
+                for agent in ctrl.population.smart_agents[:20]:  # 显示前20个
+                    agent_id = agent.id
+                    
+                    # 获取该 Agent 的情绪
+                    emotion = 0.0
+                    if agent_id in DeepSeekBrain.thought_history:
+                        history = DeepSeekBrain.thought_history[agent_id]
+                        if history:
+                            emotion = history[-1].emotion_score
+                    
+                    # 创建可点击的按钮
+                    if st.button(
+                        f"{get_emotion_icon(emotion)} {agent_id}",
+                        key=f"agent_{agent_id}",
+                        use_container_width=True
+                    ):
+                        st.session_state.selected_agent = agent_id
+            
+            with col_detail:
+                st.markdown("### 思维链详情")
+                
+                selected = st.session_state.selected_agent
+                
+                if selected and selected in DeepSeekBrain.thought_history:
+                    history = DeepSeekBrain.thought_history[selected]
+                    
+                    if history:
+                        latest = history[-1]
+                        
+                        # 情绪仪表盘
+                        st.markdown(f"""
+                        <div style="background: #161b22; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                            <div style="font-size: 18px; font-weight: bold;">
+                                {get_emotion_icon(latest.emotion_score)} {selected}
+                            </div>
+                            <div style="margin-top: 10px;">
+                                <span style="color: #888;">情绪分数:</span>
+                                <span style="color: {get_emotion_color(latest.emotion_score)}; font-size: 20px; font-weight: bold;">
+                                    {latest.emotion_score:+.2f}
+                                </span>
+                            </div>
+                            <div style="margin-top: 5px; color: #888;">
+                                最后更新: {datetime.fromtimestamp(latest.timestamp).strftime('%H:%M:%S')}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # 决策显示
+                        st.markdown("**最终决策:**")
+                        st.json(latest.decision)
+                        
+                        # 完整思维链
+                        st.markdown("**完整思维链 (CoT):**")
+                        st.markdown(f"""
+                        <div class="reasoning-box" style="height: 400px;">
+                            {latest.reasoning_content.replace(chr(10), '<br>')}
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # 历史记录
+                        if len(history) > 1:
+                            st.markdown("**历史思维记录:**")
+                            for i, record in enumerate(reversed(history[:-1])):
+                                with st.expander(f"记录 {len(history) - i - 1}: {get_emotion_icon(record.emotion_score)} {record.decision.get('action', 'HOLD')}"):
+                                    st.text(record.reasoning_content[:500] + "..." if len(record.reasoning_content) > 500 else record.reasoning_content)
+                    else:
+                        st.info("该 Agent 尚未产生思维记录")
+                else:
+                    st.info("👈 请从左侧选择一个 Agent 查看详情")
+        else:
+            st.warning("请先启动仿真系统")
+
+    # --- 辩论室标签页 ---
+    with tab_debate:
+        st.subheader("⚔️ Agent 内心辩论室")
+        st.markdown("*观察 Agent 的 Bull vs Bear 内心对抗过程*")
+        
+        if ctrl:
+            # 获取所有有辩论记录的 Agent
+            debate_agents = list(DebateBrain.debate_history.keys())
+            
+            if debate_agents:
+                col_d1, col_d2 = st.columns([1, 3])
+                
+                with col_d1:
+                    st.markdown("### 🎭 Agent 列表")
+                    selected_debate_agent = st.selectbox(
+                        "选择 Agent",
+                        debate_agents,
+                        key="debate_agent_select"
+                    )
+                
+                with col_d2:
+                    if selected_debate_agent:
+                        debates = DebateBrain.debate_history.get(selected_debate_agent, [])
+                        
+                        if debates:
+                            latest_debate = debates[-1]
+                            
+                            # 辩论头信息
+                            st.markdown(f"""
+                            <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
+                                        padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                                <h4 style="margin: 0; color: #00d4ff;">📋 最新辩论记录</h4>
+                                <p style="color: #888; margin: 5px 0;">
+                                    时间: {datetime.fromtimestamp(latest_debate.timestamp).strftime('%H:%M:%S')} | 
+                                    风控: {'✅ 通过' if latest_debate.risk_approval else '❌ 否决'}
+                                </p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # 辩论内容
+                            for msg in latest_debate.debate_rounds:
+                                if msg.role == DebateRole.BULL:
+                                    bg_color = "#0d2818"
+                                    border_color = "#00ff88"
+                                    icon = "🐂"
+                                    role_name = "牛牛 (看多派)"
+                                elif msg.role == DebateRole.BEAR:
+                                    bg_color = "#2d0d0d"
+                                    border_color = "#ff4444"
+                                    icon = "🐻"
+                                    role_name = "空空 (看空派)"
+                                else:
+                                    bg_color = "#1a1a2e"
+                                    border_color = "#4a4a6a"
+                                    icon = "🛡️"
+                                    role_name = "风控经理"
+                                
+                                st.markdown(f"""
+                                <div style="background: {bg_color}; border-left: 3px solid {border_color}; 
+                                            padding: 12px; margin: 8px 0; border-radius: 5px;">
+                                    <div style="font-weight: bold; color: {border_color}; margin-bottom: 5px;">
+                                        {icon} {role_name}
+                                    </div>
+                                    <div style="color: #e0e0e0; line-height: 1.6;">
+                                        {msg.content}
+                                    </div>
+                                    <div style="color: #666; font-size: 12px; margin-top: 5px;">
+                                        情绪分数: {msg.emotion_score:+.2f}
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            # 最终决策
+                            st.markdown("### 📝 最终决策")
+                            st.json(latest_debate.final_decision)
+                            
+                            # 历史辩论
+                            if len(debates) > 1:
+                                with st.expander(f"📜 历史辩论记录 ({len(debates) - 1} 条)"):
+                                    for i, d in enumerate(reversed(debates[:-1])):
+                                        st.markdown(f"**辩论 #{len(debates) - i - 1}** - {datetime.fromtimestamp(d.timestamp).strftime('%H:%M:%S')}")
+                                        st.text(f"决策: {d.final_decision.get('action', 'N/A')} | 风控: {'通过' if d.risk_approval else '否决'}")
+                                        st.markdown("---")
+                        else:
+                            st.info("该 Agent 尚无辩论记录")
+            else:
+                st.info("💡 使用 DebateBrain 的 Agent 运行后，辩论记录将显示在此处")
+        else:
+            st.warning("请先启动仿真系统")
+    
+    # --- 监管沙盒标签页 ---
+    with tab_reg:
+        st.subheader("🏛️ 监管沙盒")
+        st.markdown("*模拟中国 A 股特色监管机制*")
+        
+        # 初始化监管模块（如果尚未初始化）
+        if 'regulatory_module' not in st.session_state:
+            st.session_state.regulatory_module = RegulatoryModule()
+        
+        reg = st.session_state.regulatory_module
+        
+        col_r1, col_r2 = st.columns(2)
+        
+        with col_r1:
+            st.markdown("### 🛡️ 国家稳定基金")
+            fund_status = reg.stability_fund.get_status_report()
+            
+            st.metric("可用资金", fund_status["可用资金"])
+            st.metric("已投入资金", fund_status["已投入资金"])
+            st.metric("干预次数", fund_status["干预次数"])
+            
+            # 干预历史
+            if reg.stability_fund.intervention_history:
+                st.markdown("**近期干预:**")
+                for intervention in reg.stability_fund.intervention_history[-3:]:
+                    st.markdown(f"""
+                    <div style="background: #1a2e1a; padding: 10px; border-radius: 5px; margin: 5px 0;">
+                        <div style="color: #00ff88;">💰 {intervention['capital']/1e8:.0f} 亿元</div>
+                        <div style="color: #888; font-size: 12px;">
+                            恐慌指数: {intervention['panic_level']:.2f} | 
+                            价格: ¥{intervention['price']:.2f}
+                        </div>
+                        <div style="color: #ccc; margin-top: 5px; font-size: 13px;">
+                            "{intervention['statement']}"
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("国家队尚未出手")
+        
+        with col_r2:
+            st.markdown("### ⚡ 熔断机制")
+            breaker = reg.circuit_breaker
+            
+            if breaker.is_halted:
+                st.error(f"🔴 熔断中 (等级 {breaker.halt_level})")
+            else:
+                st.success("🟢 交易正常")
+            
+            st.metric("历史熔断次数", len(breaker.halt_history))
+            
+            # 熔断历史
+            if breaker.halt_history:
+                st.markdown("**熔断记录:**")
+                for h in breaker.halt_history[-3:]:
+                    level_text = "一级" if h['level'] == 1 else "二级"
+                    st.markdown(f"- Tick {h['tick']}: {level_text}熔断 ({h['price_change']:+.2%})")
+        
+        st.markdown("---")
+        st.markdown("### 📊 程序化交易监控")
+        
+        # 违规统计
+        violations = reg.trading_regulator.violations
+        col_v1, col_v2, col_v3 = st.columns(3)
+        
+        with col_v1:
+            st.metric("监控 Agent 数", len(reg.trading_regulator.agent_stats))
+        with col_v2:
+            st.metric("今日违规次数", len(violations))
+        with col_v3:
+            suspended_count = sum(1 for s in reg.trading_regulator.agent_stats.values() 
+                                  if s.current_restriction.value == 'suspended')
+            st.metric("已停止交易", suspended_count)
+        
+        # 最近违规记录
+        if violations:
+            with st.expander("⚠️ 最近违规记录"):
+                for v in violations[-5:]:
+                    st.markdown(f"""
+                    - **Agent {v['agent_id']}**: {v['type']} - {v['detail']}
+                    """)
+    
+    # --- 行为金融标签页 ---
+    with tab_behavior:
+        st.subheader("📊 行为金融量化面板")
+        st.markdown("*用数学量化人性偏差*")
+        
+        col_b1, col_b2 = st.columns(2)
+        
+        with col_b1:
+            st.markdown("### 📈 前景理论计算器")
+            
+            gain = st.slider("盈亏百分比", -50, 50, 0, 1, key="prospect_gain")
+            loss_aversion = st.slider("损失厌恶系数 (λ)", 1.0, 4.0, 2.25, 0.1, key="prospect_lambda")
+            
+            utility = prospect_utility(gain / 100, loss_aversion=loss_aversion)
+            
+            # 可视化
+            utility_color = "#00ff88" if utility >= 0 else "#ff4444"
+            st.markdown(f"""
+            <div style="text-align: center; padding: 20px; background: #1a1a2e; border-radius: 10px;">
+                <div style="color: #888;">心理效用值</div>
+                <div style="font-size: 48px; color: {utility_color}; font-weight: bold;">
+                    {utility:+.1f}
+                </div>
+                <div style="color: #666; font-size: 12px; margin-top: 10px;">
+                    盈利 {gain}% 带来的心理感受 (λ={loss_aversion})
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # 说明
+            st.markdown("""
+            > **前景理论** (Kahneman & Tversky):
+            > - 人们对损失的痛苦是收益快乐的 2.25 倍
+            > - 这解释了为什么投资者常常"死扛亏损"
+            """)
+        
+        with col_b2:
+            st.markdown("### 🐑 羊群效应检测")
+            
+            # 获取实时 CSAD 数据
+            if 'csad_history' in st.session_state and st.session_state.csad_history:
+                csad_data = st.session_state.csad_history[-20:]
+                
+                # 绘制 CSAD 趋势图
+                fig_csad = go.Figure()
+                fig_csad.add_trace(go.Scatter(
+                    y=csad_data,
+                    mode='lines+markers',
+                    name='CSAD',
+                    line=dict(color='#00d4ff', width=2)
+                ))
+                fig_csad.update_layout(
+                    title="横截面绝对偏差 (CSAD)",
+                    template="plotly_dark",
+                    height=250,
+                    margin=dict(l=40, r=40, t=40, b=40)
+                )
+                st.plotly_chart(fig_csad, use_container_width=True)
+                
+                # 羊群强度
+                latest_csad = csad_data[-1] if csad_data else 0.02
+                market_return = st.session_state.market_history[-1].get('change_pct', 0) if st.session_state.market_history else 0
+                
+                herd_intensity = herding_intensity(latest_csad, market_return)
+                
+                herd_color = "#ff4444" if herd_intensity > 0.5 else "#ffaa00" if herd_intensity > 0.2 else "#00ff88"
+                st.markdown(f"""
+                <div style="text-align: center; padding: 15px; background: #1a1a2e; border-radius: 10px;">
+                    <div style="color: #888;">羊群效应强度</div>
+                    <div style="font-size: 36px; color: {herd_color}; font-weight: bold;">
+                        {herd_intensity:.1%}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.info("启动仿真后将显示 CSAD 走势图")
+            
+            st.markdown("""
+            > **羊群效应检测**:
+            > - CSAD 下降 + 市场大涨/大跌 = 羊群行为
+            > - γ₂ < 0 表示存在显著羊群效应
+            """)
+
+    # --- 量化群体标签页 ---
+    with tab_quant:
+        st.subheader("🤖 量化群体监控")
+        
+        if st.session_state.quant_manager and st.session_state.quant_manager.groups:
+            # 系统风险检测
+            risk = st.session_state.quant_manager.detect_systemic_risk()
+            
+            if risk['warning']:
+                st.warning(risk['warning'])
+            
+            # 显示各群体状态
+            for group_id, group in st.session_state.quant_manager.groups.items():
+                with st.expander(f"📊 {group.strategy_name} ({len(group.agents)} Agents)", expanded=True):
+                    col_g1, col_g2, col_g3 = st.columns(3)
+                    
+                    with col_g1:
+                        st.metric("一致性", f"{group.action_consensus:.2%}")
+                    with col_g2:
+                        st.metric("抛售压力", f"{group.sell_pressure:.2%}")
+                    with col_g3:
+                        action_label = {
+                            'PANIC_SELL': '🔴 集体抛售',
+                            'SELL': '🟠 倾向卖出',
+                            'BUY': '🟢 倾向买入',
+                            'MIXED': '⚪ 分歧'
+                        }.get(group.collective_action, '⚪ 待激活')
+                        st.metric("群体行为", action_label)
+                    
+                    # 情绪分布
+                    emotion_dist = group.get_emotion_distribution()
+                    st.markdown(f"""
+                    **情绪分布:** 
+                    🟢 贪婪 {emotion_dist['greedy']} / 
+                    ⚪ 中性 {emotion_dist['neutral']} / 
+                    🔴 恐惧 {emotion_dist['fearful']}
+                    """)
+        else:
+            st.info("尚未创建量化群体。请在侧边栏\"量化群体设置\"中创建。")

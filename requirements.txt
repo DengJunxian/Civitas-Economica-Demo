@@ -10,3 +10,7 @@ tenacity>=8.2.0
 scipy
 sortedcontainers>=2.4.0
 pytest>=7.0.0
+mesa>=3.0
+finrobot  # optional: CoT templates & financial prompts
+pybind11>=2.10.0
+setuptools>=42.0.0

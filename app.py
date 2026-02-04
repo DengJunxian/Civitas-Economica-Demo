@@ -12,6 +12,7 @@ Civitas A股政策仿真平台 - 增强版
 import streamlit as st
 import asyncio
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 import time
 from datetime import datetime
@@ -448,7 +449,75 @@ with st.sidebar:
 
     st.markdown("---")
     if st.button("📑 生成报告", use_container_width=True):
-        st.info("正在基于仿真数据生成研究报告...")
+        if st.session_state.controller:
+            with st.spinner("正在生成每日市场复盘报告 (GLM-4-FlashX)..."):
+                try:
+                    # 获取市场数据摘要
+                    history = st.session_state.market_history[-10:] # 最近10天
+                    last_candle = history[-1] if history else None
+                    if not last_candle:
+                        st.warning("暂无仿真数据")
+                    else:
+                        summary_prompt = f"""
+                        请作为金融分析师，根据以下最近10日的市场数据生成一份简短的市场复盘报告。
+                        
+                        【最新数据】
+                        日期: {last_candle['time']}
+                        收盘: {last_candle['close']:.2f}
+                        成交量: {last_candle.get('volume',0)}
+                        
+                        【近期趋势】
+                        {history}
+                        
+                        【要求】
+                        1. 简述近期走势
+                        2. 分析市场情绪
+                        3. 给出投资建议
+                        4. 字数控制在200字以内
+                        """
+                        
+                        # 使用 ModelRouter 调用 GLM (Fast Mode)
+                        router = st.session_state.controller.model_router
+                        # 优先使用 GLM
+                        priority = ["glm-4-flashx", "glm-4-flashx-250414", "deepseek-chat"]
+                        
+                        import asyncio
+                        # Streamlit 运行在 loop 中，需处理
+                        try:
+                            loop = asyncio.get_event_loop()
+                        except RuntimeError:
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            
+                        async def _get_report():
+                            return await router.call_with_fallback(
+                                [{"role": "user", "content": summary_prompt}],
+                                priority_models=priority,
+                                timeout_budget=10.0,
+                                fallback_response="报告生成服务暂时不可用 (API TimeOut/Error)，请稍后重试。"
+                            )
+                        
+                        # 同步执行
+                        try:
+                            content, _, model = loop.run_until_complete(_get_report())
+                        except RuntimeError:
+                             import nest_asyncio
+                             nest_asyncio.apply()
+                             content, _, model = loop.run_until_complete(_get_report())
+                        
+                        st.success(f"✅ 报告已生成 (使用模型: {model})")
+                        st.markdown(f"""
+                        <div style="background: #161b22; padding: 15px; border-radius: 8px; border: 1px solid #30363d;">
+                            <h4>📅 市场复盘报告 ({last_candle['time']})</h4>
+                            <div style="font-size: 14px; line-height: 1.6; color: #c9d1d9;">
+                                {content}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"报告生成失败: {e}")
+        else:
+            st.warning("请先启动仿真系统")
 
 # --- 5. 主界面逻辑 ---
 
@@ -567,79 +636,117 @@ else:
             </div>
             """, unsafe_allow_html=True)
             
-            # 第二行：四列指标
-            col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+            # 第二行：两列指标 (移除耗时统计)
+            col_s1, col_s2, col_s3 = st.columns(3)
             with col_s1:
                 st.metric("恐慌指数", f"{ctrl.market.panic_level:.2f}")
             with col_s2:
                 st.metric("仿真天数", f"{ctrl.day_count}")
             with col_s3:
-                avg_time = ctrl.tick_times[-1] if ctrl.tick_times else 0
-                mode_label = {"SMART": "智能", "FAST": "快速", "DEEP": "深度"}.get(st.session_state.simulation_mode, "智能")
-                st.metric(f"单步耗时({mode_label})", f"{avg_time:.2f}s")
-            with col_s4:
-                avg_all = sum(ctrl.tick_times) / len(ctrl.tick_times) if ctrl.tick_times else 0
-                st.metric("平均耗时", f"{avg_all:.2f}s")
+                # 显示总成交量
+                total_vol = sum(c.volume for c in ctrl.market.candles[-5:]) if ctrl.market.candles else 0
+                st.metric("5日累计成交", f"{total_vol:,}")
             
             st.markdown("---")
             
-            # 1. K线图 (全宽显示)
-            st.subheader("📈 市场走势（实时）")
+            # 1. K线图 (东方财富风格)
+            st.subheader("📈 市场走势")
+            
+            # 周期选择器
+            period_col, _ = st.columns([1, 4])
+            with period_col:
+                kline_period = st.radio("周期", ["日K", "周K", "月K"], horizontal=True, label_visibility="collapsed")
+
             if st.session_state.market_history:
-                    df = pd.DataFrame(st.session_state.market_history)
+                raw_df = pd.DataFrame(st.session_state.market_history)
+                raw_df['time'] = pd.to_datetime(raw_df['time'])
+                
+                # 安全检查：确保 volume 列存在 (防止 KeyError)
+                if 'volume' not in raw_df.columns:
+                    raw_df['volume'] = 0
+                
+                # 数据重采样逻辑
+                if kline_period == "周K":
+                    df = raw_df.resample('W-FRI', on='time').agg({
+                        'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'
+                    }).dropna().reset_index()
+                elif kline_period == "月K":
+                    df = raw_df.resample('ME', on='time').agg({
+                        'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'
+                    }).dropna().reset_index()
+                else: # 日K
+                    df = raw_df.copy()
+                
+                # 计算均线
+                if len(df) > 0:
+                    df['MA5'] = df['close'].rolling(window=5).mean()
+                    df['MA10'] = df['close'].rolling(window=10).mean()
+                    df['MA20'] = df['close'].rolling(window=20).mean()
                     
-                    fig = go.Figure()
+                    # 确定涨跌颜色 (用于成交量)
+                    df['color'] = np.where(df['close'] >= df['open'], '#FF3B30', '#34C759')
                     
-                    # 添加K线图 - 涨红跌绿 (A股习惯)
+                    from plotly.subplots import make_subplots
+                    
+                    # 创建子图: K线图占70%，成交量占30%
+                    fig = make_subplots(
+                        rows=2, cols=1, 
+                        shared_xaxes=True, 
+                        vertical_spacing=0.03, 
+                        subplot_titles=('上证指数', '成交量'),
+                        row_heights=[0.7, 0.3]
+                    )
+                    
+                    # 1. K线
                     fig.add_trace(go.Candlestick(
                         x=df['time'],
-                        open=df['open'], 
-                        high=df['high'],
-                        low=df['low'], 
-                        close=df['close'],
+                        open=df['open'], high=df['high'],
+                        low=df['low'], close=df['close'],
                         increasing_line_color='#FF3B30',
                         increasing_fillcolor='#FF3B30',
                         decreasing_line_color='#34C759',
                         decreasing_fillcolor='#34C759',
-                        name='上证指数'
-                    ))
+                        name='K线'
+                    ), row=1, col=1)
                     
-                    # 标记历史数据与仿真数据的分界线
-                    if 'is_historical' in df.columns:
-                        historical_count = df['is_historical'].sum()
-                        if historical_count > 0 and historical_count < len(df):
-                            # 历史数据使用透明度区分
-                            boundary_idx = int(historical_count)
-                            boundary_date = df.iloc[boundary_idx]['time']
-                            
-                            # 添加明显的分界线
-                            fig.add_vline(
-                                x=boundary_date, 
-                                line_dash="dash", 
-                                line_color="#FFD60A",
-                                line_width=2
-                            )
-                            # 添加分区标签
-                            fig.add_annotation(
-                                x=boundary_date,
-                                y=1.05,
-                                yref='paper',
-                                text="◀ 真实历史数据 | 仿真推演数据 ▶",
-                                showarrow=False,
-                                font=dict(size=12, color="#FFD60A"),
-                                bgcolor="rgba(26, 26, 46, 0.8)"
-                            )
+                    # 2. 均线 (仅在非月K显示短期均线，避免混乱，或者全部显示)
+                    fig.add_trace(go.Scatter(x=df['time'], y=df['MA5'], line=dict(color='#E5B80B', width=1), name='MA5'), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=df['time'], y=df['MA10'], line=dict(color='#FF69B4', width=1), name='MA10'), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=df['time'], y=df['MA20'], line=dict(color='#87CEFA', width=1), name='MA20'), row=1, col=1)
+                    
+                    # 3. 成交量
+                    fig.add_trace(go.Bar(
+                        x=df['time'], y=df['volume'],
+                        marker_color=df['color'],
+                        name='成交量'
+                    ), row=2, col=1)
+                    
+                    # 布局优化
+                    
+                    # 默认显示范围 (最近 N 根K线)
+                    default_zoom = 120 if kline_period == "日K" else (60 if kline_period == "周K" else 24)
+                    if len(df) > default_zoom:
+                         start_date = df['time'].iloc[-default_zoom]
+                         end_date = df['time'].iloc[-1]
+                         fig.update_xaxes(range=[start_date, end_date])
                     
                     fig.update_layout(
                         paper_bgcolor='rgba(0,0,0,0)',
                         plot_bgcolor='rgba(10,10,10,0.8)',
                         font=dict(color='#e0e0e0', family='Microsoft YaHei'),
-                        height=750,  # K线图全宽显示，高度增加
+                        height=600,
                         xaxis_rangeslider_visible=False,
-                        xaxis=dict(gridcolor='rgba(128,128,128,0.2)', title='日期'),
-                        yaxis=dict(gridcolor='rgba(128,128,128,0.2)', title='指数点位'),
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                        showlegend=True,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        margin=dict(l=10, r=10, t=30, b=10)
                     )
+                    
+                    # 坐标轴格式
+                    fig.update_xaxes(gridcolor='rgba(128,128,128,0.2)', row=1, col=1)
+                    fig.update_xaxes(gridcolor='rgba(128,128,128,0.2)', row=2, col=1)
+                    fig.update_yaxes(gridcolor='rgba(128,128,128,0.2)', title='点位', row=1, col=1)
+                    fig.update_yaxes(gridcolor='rgba(128,128,128,0.2)', title='成交量', row=2, col=1, showticklabels=False)
+                    
                     st.plotly_chart(fig, use_container_width=True)
             
             # CSAD 羊群效应仪表盘（全宽显示）
@@ -696,6 +803,7 @@ else:
                             "high": candle.high,
                             "low": candle.low,
                             "close": candle.close,
+                            "volume": candle.volume,
                             "is_historical": False
                         })
                         st.session_state.csad_history.append(metrics['csad'])

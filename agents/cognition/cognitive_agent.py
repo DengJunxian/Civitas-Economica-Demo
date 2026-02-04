@@ -16,9 +16,9 @@
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
-
 from agents.cognition.utility import (
     ProspectTheory, ProspectValue, InvestorType,
+    ConfidenceTracker, AnchorTracker,
     create_panic_retail, create_normal_investor, create_disciplined_quant
 )
 from agents.cognition.llm_brain import (
@@ -144,6 +144,10 @@ class CognitiveAgent:
         # 初始化记忆库
         self.memory = TraumaMemory()
         
+        # 初始化心理跟踪器
+        self.confidence_tracker = ConfidenceTracker()
+        self.anchor_tracker = None  # 将在第一次 make_decision 或持仓时初始化
+        
         # 决策历史
         self.decision_history: List[CognitiveDecision] = []
         
@@ -176,6 +180,18 @@ class CognitiveAgent:
         start_time = time.time()
         
         pnl_pct = account_state.get('pnl_pct', 0)
+        current_price = market_state.get('price', 0)
+        avg_cost = account_state.get('avg_cost', 0)
+        
+        # 初始化/更新锚点
+        if self.anchor_tracker is None and avg_cost > 0:
+            self.anchor_tracker = AnchorTracker(initial_cost=avg_cost, reference_point=avg_cost)
+        elif self.anchor_tracker:
+            self.anchor_tracker.update(current_price)
+            
+        # 获取心理状态描述
+        confidence_desc = self.confidence_tracker.get_description()
+        anchor_desc = self.anchor_tracker.get_bias_description(current_price) if self.anchor_tracker else ""
         
         # ========== 阶段 1: 记忆检索 ==========
         memory_context = self.memory.get_context_for_decision(market_state)
@@ -194,7 +210,10 @@ class CognitiveAgent:
                 market_state, account_state,
                 symbol=symbol,
                 lambda_coeff=self.prospect.lambda_coeff,
-                memory_context=memory_context
+                memory_context=memory_context,
+                confidence_desc=confidence_desc,
+                anchor_desc=anchor_desc,
+                csad=market_state.get('csad', None)
             )
         
         llm_action = result.decision.action
@@ -269,6 +288,9 @@ class CognitiveAgent:
             content = f"[持平] {market_summary}。"
         
         self.memory.add_memory(content, outcome=pnl, volatility=volatility)
+        
+        # 更新自信心
+        self.confidence_tracker.update(pnl)
     
     def _generate_lesson(self, pnl: float) -> str:
         """生成教训描述"""

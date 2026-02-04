@@ -222,7 +222,8 @@ class ModelRouter:
         self,
         messages: List[Dict],
         priority_models: List[str],
-        timeout_budget: float = 15.0
+        timeout_budget: float = 15.0,
+        fallback_response: Optional[str] = None
     ) -> Tuple[str, Optional[str], str]:
         """
         带降级的模型调用
@@ -306,7 +307,7 @@ class ModelRouter:
                 continue
         
         # 全部失败，返回降级响应
-        return self._fallback_response(last_error)
+        return self._fallback_response(last_error, fallback_content=fallback_response)
     
     async def _call_model(
         self,
@@ -357,11 +358,13 @@ class ModelRouter:
     
     def _fallback_response(
         self, 
-        error: Optional[str] = None
+        error: Optional[str] = None,
+        fallback_content: Optional[str] = None
     ) -> Tuple[str, Optional[str], str]:
         """降级响应"""
+        content = fallback_content if fallback_content else '{"action": "HOLD", "qty": 0, "error": "MODEL_UNAVAILABLE"}'
         return (
-            '{"action": "HOLD", "qty": 0, "error": "MODEL_UNAVAILABLE"}',
+            content,
             f"所有模型调用失败: {error}" if error else "所有模型不可用",
             "fallback"
         )

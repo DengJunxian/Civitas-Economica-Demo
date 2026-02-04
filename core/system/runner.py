@@ -475,6 +475,26 @@ class SimulationRunner:
         
         return configs
     
+    @staticmethod
+    def calculate_csad(returns: List[float]) -> float:
+        """
+        计算截面绝对偏差 (CSAD) - 羊群效应指标
+        
+        CSAD_t = 1/N * Σ|R_{i,t} - R_{m,t}|
+        
+        Args:
+            returns: 各 Agent 的收益率列表
+            
+        Returns:
+            CSAD 值. 值越小表示羊群效应越显著.
+        """
+        if not returns:
+            return 0.0
+            
+        market_return = sum(returns) / len(returns)
+        abs_deviations = [abs(r - market_return) for r in returns]
+        return sum(abs_deviations) / len(returns)
+    
     def step(self, market_state: Dict) -> List[BatchDecision]:
         """
         执行一个模拟步骤

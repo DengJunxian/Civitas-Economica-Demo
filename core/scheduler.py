@@ -63,8 +63,9 @@ class SimulationController:
         self.model_router = ModelRouter(deepseek_key, hunyuan_key, zhipu_key)
         
         # 初始化核心组件
-        self.market = MarketDataManager(deepseek_key, load_real_data=True)
-        self.matcher = MatchingEngine(prev_close=self.market.engine.last_price)
+        self.market = MarketDataManager(self.model_router, load_real_data=True)
+        # 修正：直接使用 MarketDataManager 的 engine，避免实例不一致
+        self.matcher = self.market.engine
         self.population = StratifiedPopulation(
             n_smart=50, n_vectorized=5000, api_key=deepseek_key
         )
@@ -124,6 +125,15 @@ class SimulationController:
         current_price = self.market.engine.last_price
         timestamp = pd.Timestamp(self.market.candles[-1].timestamp)
         time_budget = self.get_time_budget()
+        
+        time_budget = self.get_time_budget()
+        
+        # --- 0. 更新 Prev Close (用于计算当日涨跌幅) ---
+        # 在每日交易开始前，将 prev_close 设置为昨日收盘价
+        # 注意：market.candles[-1] 是最近一根已完成的K线（即昨日）
+        if self.market.candles:
+            last_candle = self.market.candles[-1]
+            self.matcher.update_prev_close(last_candle.close)
         
         # --- Phase 1: 智能Agent采样和混合调度 ---
         n_deep = self.get_deep_agent_count()

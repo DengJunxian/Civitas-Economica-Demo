@@ -14,6 +14,17 @@ import numpy as np
 import akshare as ak 
 from openai import OpenAI
 import httpx
+import uuid
+
+# Import C++ Optimized OrderBook
+try:
+    from core.exchange.order_book_cpp import OrderBookCPP
+    from core.exchange.order_book import Order as OrderModel
+    USE_CPP_LOB = True
+    print("[*] High-Performance C++ OrderBook Activated")
+except ImportError as e:
+    USE_CPP_LOB = False
+    print(f"[!] Falling back to Python: {e}")
 
 # Assumes a config.py exists with these constants. 
 # If not, please create one or uncomment the mock config below.
@@ -103,6 +114,7 @@ class Order:
     
     # State tracking
     filled_qty: int = field(default=0, compare=False)
+    order_id: str = field(default_factory=lambda: str(uuid.uuid4()), compare=False)
 
     @property
     def remaining_qty(self) -> int:
@@ -178,11 +190,15 @@ class MatchingEngine:
         self.symbol = symbol
         self.prev_close = prev_close
         
-        # Order Books:
-        # Bids: Max Heap (-price, timestamp, Order)
-        # Asks: Min Heap (price, timestamp, Order)
-        self.bids: List[Tuple[float, float, Order]] = []
-        self.asks: List[Tuple[float, float, Order]] = []
+        # Order Books or LOB
+        if USE_CPP_LOB:
+            self.lob = OrderBookCPP(symbol, prev_close)
+        else:
+            # Fallback to legacy heap lists if C++ fails
+            # Bids: Max Heap (-price, timestamp, Order)
+            # Asks: Min Heap (price, timestamp, Order)
+            self.bids: List[Tuple[float, float, Order]] = []
+            self.asks: List[Tuple[float, float, Order]] = []
         
         # Statistics
         self.last_price = prev_close
@@ -231,50 +247,107 @@ class MatchingEngine:
                     side='buy', 
                     timestamp=time.time()
                 )
-                # Inject directly into bids
-                heapq.heappush(self.bids, (-team_order.price, team_order.timestamp, team_order))
+                # Inject directly
+                if USE_CPP_LOB:
+                    lob_team_order = OrderModel.create(
+                        agent_id=team_order.agent_id,
+                        symbol=self.symbol,
+                        side=team_order.side,
+                        order_type="limit",
+                        price=team_order.price,
+                        quantity=team_order.quantity
+                    )
+                    lob_team_order.order_id = team_order.order_id
+                    lob_team_order.timestamp = team_order.timestamp
+                    self.lob.add_order(lob_team_order)
+                else:
+                    heapq.heappush(self.bids, (-team_order.price, team_order.timestamp, team_order))
 
-        # 3. Matching Loop
+        # 3. Matching Logic
         generated_trades = []
-        
-        if order.side == 'buy':
-            # Buy vs Asks
-            while self.asks and order.remaining_qty > 0:
-                best_ask_price, _, best_ask_order = self.asks[0]
-                
-                # Price Priority: Bid Price >= Ask Price
-                if order.price >= best_ask_price:
-                    trade = self._execute_match(buy_order=order, sell_order=best_ask_order)
-                    generated_trades.append(trade)
-                    
-                    if best_ask_order.is_filled:
-                        heapq.heappop(self.asks)
-                else:
-                    break 
+
+        if USE_CPP_LOB:
+            # Adapter: Convert local Order to OrderBookCPP Order
+            # OrderBookCPP expects core.exchange.order_book.Order
+            # We map fields.
+            lob_order = OrderModel.create(
+                agent_id=order.agent_id,
+                symbol=self.symbol,
+                side=order.side,
+                order_type="limit", # Default to limit
+                price=order.price,
+                quantity=order.quantity
+            )
+            # Override ID and timestamp to match input
+            lob_order.order_id = order.order_id
+            lob_order.timestamp = order.timestamp
             
-            # Add remaining to Book
-            if not order.is_filled:
-                heapq.heappush(self.bids, (-order.price, order.timestamp, order))
-                
-        else: # order.side == 'sell'
-            # Sell vs Bids
-            while self.bids and order.remaining_qty > 0:
-                best_bid_neg_price, _, best_bid_order = self.bids[0]
-                best_bid_price = -best_bid_neg_price
-                
-                # Price Priority: Sell Price <= Bid Price
-                if order.price <= best_bid_price:
-                    trade = self._execute_match(buy_order=best_bid_order, sell_order=order)
-                    generated_trades.append(trade)
-                    
-                    if best_bid_order.is_filled:
-                        heapq.heappop(self.bids)
-                else:
-                    break
+            # Execute
+            trades = self.lob.add_order(lob_order)
             
-            # Add remaining to Book
-            if not order.is_filled:
-                heapq.heappush(self.asks, (order.price, order.timestamp, order))
+            # Sync back state
+            order.filled_qty = lob_order.filled_qty
+            
+            # Convert Trades back to local Trade object
+            for t in trades:
+                local_trade = Trade(
+                    price=t.price,
+                    quantity=int(t.quantity),
+                    buy_agent_id=t.taker_agent_id if order.side=='buy' else t.maker_agent_id,
+                    sell_agent_id=t.maker_agent_id if order.side=='buy' else t.taker_agent_id,
+                    timestamp=t.timestamp,
+                    buyer_fee=t.buyer_fee,
+                    seller_fee=t.seller_fee,
+                    seller_tax=t.seller_tax
+                )
+                generated_trades.append(local_trade)
+                
+                # Update Engine Stats
+                self.last_price = local_trade.price
+                self.total_volume += local_trade.quantity
+                self.trades_history.append(local_trade)
+
+        else:
+            # --- Legacy Python Matching ---
+            if order.side == 'buy':
+                # Buy vs Asks
+                while self.asks and order.remaining_qty > 0:
+                    best_ask_price, _, best_ask_order = self.asks[0]
+                    
+                    # Price Priority: Bid Price >= Ask Price
+                    if order.price >= best_ask_price:
+                        trade = self._execute_match(buy_order=order, sell_order=best_ask_order)
+                        generated_trades.append(trade)
+                        
+                        if best_ask_order.is_filled:
+                            heapq.heappop(self.asks)
+                    else:
+                        break 
+                
+                # Add remaining to Book
+                if not order.is_filled:
+                    heapq.heappush(self.bids, (-order.price, order.timestamp, order))
+                    
+            else: # order.side == 'sell'
+                # Sell vs Bids
+                while self.bids and order.remaining_qty > 0:
+                    best_bid_neg_price, _, best_bid_order = self.bids[0]
+                    best_bid_price = -best_bid_neg_price
+                    
+                    # Price Priority: Sell Price <= Bid Price
+                    if order.price <= best_bid_price:
+                        trade = self._execute_match(buy_order=best_bid_order, sell_order=order)
+                        generated_trades.append(trade)
+                        
+                        if best_bid_order.is_filled:
+                            heapq.heappop(self.bids)
+                    else:
+                        break
+                
+                # Add remaining to Book
+                if not order.is_filled:
+                    heapq.heappush(self.asks, (order.price, order.timestamp, order))
+        # --- End Legacy ---
 
         # Add to step buffer for Candle generation
         self.step_trades_buffer.extend(generated_trades)
@@ -334,6 +407,9 @@ class MatchingEngine:
 
     def get_order_book_depth(self, level=5) -> Dict:
         """Get L5 Market Depth."""
+        if USE_CPP_LOB:
+            return self.lob.get_depth(level)
+            
         bids_display = []
         # Sort and slice, then format
         for p, _, o in sorted(self.bids)[:level]:
@@ -518,11 +594,19 @@ class RealMarketLoader:
 
 class PolicyInterpreter:
     """
-    政策解释器：通过 DeepSeek 分析政策文本，量化其对市场的影响。
+    政策解释器：通过 DeepSeek 或 GLM 分析政策文本，量化其对市场的影响。
+    支持使用 ModelRouter 进行多模型路由。
     """
     
-    def __init__(self, api_key):
-        self.api_key = api_key
+    def __init__(self, api_key_or_router):
+        # 支持传入 router 或 key (兼容旧接口)
+        if hasattr(api_key_or_router, 'call_with_fallback'):
+            self.router = api_key_or_router
+            self.api_key = self.router.deepseek_key if self.router.deepseek_key else "dummy"
+        else:
+            self.router = None
+            self.api_key = api_key_or_router
+            
         self.last_reasoning = None  # 保存最近一次的推理过程
 
     def interpret(self, policy_text: str) -> Dict:
@@ -539,6 +623,7 @@ class PolicyInterpreter:
         if not self.api_key: 
             return self._default_policy()
 
+        # 构造 prompt
         prompt = f"""你是一位资深的A股市场政策分析师。请分析以下政策对市场的影响，并给出量化参数。
 
 【待分析政策】
@@ -549,75 +634,112 @@ class PolicyInterpreter:
 - 涨跌停限制: {GLOBAL_CONFIG.PRICE_LIMIT:.0%}
 
 【分析要求】
-请从以下维度进行深入分析：
-
-1. 直接效应（Primary Effect）
-   - 政策对市场流动性的直接影响
-   - 对交易成本的影响
-
-2. 信号效应（Signal Effect）- 重点分析
-   - 这个政策释放了什么"隐含信号"？
-   - 例如：降准可能被解读为"经济基本面恶化"的信号（利空），而非单纯的流动性释放（利好）
-   - 市场可能会如何"解读"这个政策？
-
-3. 二阶认知（Second-Order Cognition）
-   - "市场认为其他投资者会如何反应？"
-   - 这种预期是否会导致自我实现的预言？
-
-4. 短期 vs 中期反应
-   - 短期（1-5天）的情绪反应
-   - 中期（1-3月）的基本面影响
+1. 直接效应：流动性和交易成本影响
+2. 信号效应：政策的隐含信号和市场解读
+3. 二阶认知：投资者预期的自我实现
+4. 时效性：短期情绪 vs 中期基本面
 
 【输出格式】
-请返回严格的 JSON 格式：
+严格返回 JSON 格式，不要包含 Markdown 格式标记：
 {{
-    "tax_rate": <新印花税率，float，如无变化则为 {GLOBAL_CONFIG.TAX_RATE_STAMP}>,
-    "liquidity_injection": <流动性注入概率，0.0-1.0，1.0表示强力护盘>,
-    "fear_factor": <恐慌因子，0.0-1.0，0.0为完全乐观，1.0为极度恐慌>,
-    "sentiment_shift": <情绪偏移量，-1.0到1.0，正值看多，负值看空>,
-    "initial_news": "<政策解读的简短新闻标题，中文>",
-    "market_impact": "<对市场影响的一句话总结，中文>",
-    "signal_effect": {{
-        "direction": "<信号方向: 利多/利空/中性>",
-        "strength": <信号强度: 0.0-1.0>,
-        "hidden_meaning": "<政策隐含的信号解读，中文>"
-    }},
-    "second_order": "<市场参与者会如何预期其他人的反应，一句话，中文>"
+    "tax_rate": <新印花税率，float>,
+    "liquidity_injection": <流动性注入概率，0.0-1.0>,
+    "fear_factor": <恐慌因子，0.0-1.0>,
+    "sentiment_shift": <情绪偏移量，-1.0到1.0>,
+    "initial_news": "<简短新闻标题>",
+    "market_impact": "<一句话总结>",
+    "reasoning_summary": "<分析过程摘要>"
 }}
-        """
-        
+"""
         try:
-            client = OpenAI(
-                api_key=self.api_key, 
-                base_url=GLOBAL_CONFIG.API_BASE_URL,
-                timeout=GLOBAL_CONFIG.API_TIMEOUT
-            )
-            
-            # 使用 deepseek-reasoner 获取推理链
-            resp = client.chat.completions.create(
-                model="deepseek-reasoner",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3
-            )
-            
-            message = resp.choices[0].message
-            
-            # 提取推理过程
-            reasoning = getattr(message, 'reasoning_content', '')
-            self.last_reasoning = reasoning if reasoning else "(推理过程未捕获)"
-            
-            # 解析 JSON 结果
+            # 优先使用 Router (支持 GLM 和 降级)
+            if self.router:
+                # 使用 FAST 模式优先级 (GLM 优先，确保速度) 或 SMART 模式
+                # 用户要求优化为 GLM 且 < 60s，建议优先 GLM
+                priority = ["glm-4-flashx", "deepseek-chat", "hunyuan-turbos-latest"] 
+                
+                # 尝试调用
+                import asyncio
+                # 注意：这里我们是在同步上下文中，需要处理异步调用的问题
+                # 简单起见，如果是在 Streamlit 中，可以直接 run
+                # 但最好 MarketEngine 本身支持异步。
+                # 鉴于 interpret 通常在 UI 线程调用，我们使用 asyncio.run 或 loop
+                
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                if loop.is_running():
+                     # 如果已经在 loop 中 (例如 Streamlit 某些情况)，这会比较棘手
+                     # 但通常 Streamlit 按钮点击是在同步线程
+                     pass
+
+                # 定义异步任务
+                async def _run_router():
+                     return await self.router.call_with_fallback(
+                         [{"role": "user", "content": prompt}],
+                         priority_models=priority,
+                         timeout_budget=55.0 # 预留 5s buffer
+                     )
+                
+                # 执行 (兼容已有 event loop)
+                try:
+                    content, reasoning, model_used = loop.run_until_complete(_run_router())
+                except RuntimeError:
+                     # 已经在 loop 中，使用 nest_asyncio 或其它方案
+                     # 这里简单 fallback 到 requests 或 warning
+                     import nest_asyncio
+                     nest_asyncio.apply()
+                     content, reasoning, model_used = loop.run_until_complete(_run_router())
+
+                print(f"[PolicyInterpreter] 使用模型: {model_used}")
+                if "error" in content and "HOLD" in content:
+                     raise Exception(reasoning) # 这里 reasoning 是错误信息
+                
+                self.last_reasoning = reasoning or "使用了快速模型，未返回完整推理链"
+                
+            else:
+                # 遗留逻辑：直接调用 OpenAI (DeepSeek)
+                client = OpenAI(
+                    api_key=self.api_key, 
+                    base_url=GLOBAL_CONFIG.API_BASE_URL,
+                    timeout=GLOBAL_CONFIG.API_TIMEOUT_REASONER
+                )
+                
+                resp = client.chat.completions.create(
+                    model="deepseek-reasoner",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3
+                )
+                message = resp.choices[0].message
+                content = message.content
+                self.last_reasoning = getattr(message, 'reasoning_content', '')
+
+            # 解析 JSON
             import json
-            content = message.content
+            import re
+            
+            # 清理 Markdown
             if "```" in content: 
                 content = re.sub(r"```json|```", "", content).strip()
             
-            result = json.loads(content)
+            # 尝试解析
+            try:
+                result = json.loads(content)
+            except json.JSONDecodeError:
+                # 尝试修复常见 JSON 错误
+                match = re.search(r'\{.*\}', content, re.DOTALL)
+                if match:
+                    result = json.loads(match.group())
+                else:
+                    raise ValueError("无法提取 JSON")
+
             result['reasoning'] = self.last_reasoning
-            
             print(f"[OK] 政策分析完成: {result.get('initial_news', '未知')}")
             return result
-            
+
         except Exception as e:
             print(f"[!] 政策分析失败: {e}")
             return self._default_policy()
@@ -640,9 +762,9 @@ class PolicyInterpreter:
 # ==========================================
 
 class MarketDataManager:
-    def __init__(self, api_key, load_real_data=True):
+    def __init__(self, api_key_or_router, load_real_data=True):
         self.policy = PolicyState()
-        self.interpreter = PolicyInterpreter(api_key)
+        self.interpreter = PolicyInterpreter(api_key_or_router)
         
         # Load Data
         self.candles = RealMarketLoader.load_history() if load_real_data else []

@@ -8,3 +8,5 @@ akshare
 httpx
 tenacity>=8.2.0
 scipy
+sortedcontainers>=2.4.0
+pytest>=7.0.0

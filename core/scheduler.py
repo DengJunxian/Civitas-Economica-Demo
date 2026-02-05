@@ -331,8 +331,40 @@ class SimulationController:
                         self.matcher.submit_order(Order(price, qty, agent_id, side, timestamp.timestamp()))
 
         # --- Phase 4: 撮合与结算 ---
-        trades = self.matcher.trades_history[-100:]
+        trades = self.matcher.flush_step_trades() # 直接获取并清空
         
+        # 同步 Tier 2 散户成交状态
+        # 需要从成交记录中提取 "Vec_" 开头的条目并汇总
+        vec_indices = []
+        vec_prices = []
+        vec_qtys = []
+        vec_dirs = []
+        
+        for t in trades:
+            # 检查买方是否为散户
+            if t.buy_agent_id.startswith("Vec_"):
+                idx = int(t.buy_agent_id.split("_")[1])
+                vec_indices.append(idx)
+                vec_prices.append(t.price)
+                vec_qtys.append(t.quantity)
+                vec_dirs.append(1) # Buy
+                
+            # 检查卖方是否为散户
+            if t.sell_agent_id.startswith("Vec_"):
+                idx = int(t.sell_agent_id.split("_")[1])
+                vec_indices.append(idx)
+                vec_prices.append(t.price)
+                vec_qtys.append(t.quantity)
+                vec_dirs.append(-1) # Sell
+        
+        if vec_indices:
+            self.population.sync_tier2_execution(
+                np.array(vec_indices),
+                np.array(vec_prices),
+                np.array(vec_qtys),
+                np.array(vec_dirs)
+            )
+            
         # 更新 K 线
         last_date = self.market.candles[-1].timestamp if self.market.candles else "2024-01-01"
         new_candle = self.market.finalize_step(self.step_count, last_date)

@@ -205,12 +205,21 @@ class DeepSeekBrain:
     """
     
     # 类级别的思维链历史存储（用于fMRI可视化）
-    thought_history: Dict[str, List[ThoughtRecord]] = {}
+    # 使用 defaultdict 和 deque 自动管理内存，限制每个 Agent 保留最近 20 条记录
+    from collections import defaultdict, deque, OrderedDict
+    thought_history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=20))
     
     # 类级别的决策缓存（相似市场状态复用决策）
-    decision_cache: Dict[str, Dict] = {}
+    # 使用 OrderedDict 实现 LRU 缓存
+    decision_cache: OrderedDict = OrderedDict()
     CACHE_MAX_SIZE = 100  # 最大缓存条目
     CACHE_TTL_STEPS = 5   # 缓存有效步数
+    
+    @classmethod
+    def clear_memory(cls):
+        """显式清空类级别的静态内存"""
+        cls.thought_history.clear()
+        cls.decision_cache.clear()
     
     def __init__(self, agent_id: str, persona: Dict, api_key: Optional[str] = None, model_router = None):
         self.agent_id = agent_id
@@ -266,17 +275,19 @@ class DeepSeekBrain:
     
     def _update_cache(self, cache_key: str, decision: Dict, current_step: int):
         """更新缓存"""
-        # 缓存大小控制
-        if len(DeepSeekBrain.decision_cache) >= self.CACHE_MAX_SIZE:
-            # 移除最老的条目
-            oldest_key = min(DeepSeekBrain.decision_cache.keys(), 
-                           key=lambda k: DeepSeekBrain.decision_cache[k].get("step", 0))
-            del DeepSeekBrain.decision_cache[oldest_key]
+        # 如果 key 已存在，移动到末尾 (最近使用)
+        if cache_key in DeepSeekBrain.decision_cache:
+            DeepSeekBrain.decision_cache.move_to_end(cache_key)
         
         DeepSeekBrain.decision_cache[cache_key] = {
             "decision": decision,
             "step": current_step
         }
+        
+        # 缓存大小控制
+        if len(DeepSeekBrain.decision_cache) > self.CACHE_MAX_SIZE:
+            # 移除最老的条目 (FIFO)
+            DeepSeekBrain.decision_cache.popitem(last=False)
     
     def _init_client(self):
         """初始化API客户端"""
@@ -497,9 +508,7 @@ class DeepSeekBrain:
                 market_context=market_state
             )
             DeepSeekBrain.thought_history[self.agent_id].append(thought_record)
-            # 保留最近20条记录
-            if len(DeepSeekBrain.thought_history[self.agent_id]) > 20:
-                DeepSeekBrain.thought_history[self.agent_id].pop(0)
+            # deque 自动处理 maxlen，无需手动 pop
             
             return {
                 "decision": decision_json,

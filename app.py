@@ -777,53 +777,125 @@ else:
             else:
                 st.info("等待仿真数据...")
 
-            # --- 异步仿真循环 ---
-            if st.session_state.is_running and not st.session_state.day_cycle_paused:
-                # 根据模式调整spinner提示
-                mode_tips = {
-                    "SMART": "智能模式运行中 (≤15s/天)...",
-                    "FAST": "快速模式运行中 (≤5s/天)...",
-                    "DEEP": "深度模式运行中 (≤30s/天)..."
-                }
-                spinner_text = mode_tips.get(st.session_state.simulation_mode, "仿真运行中...")
-                
-                with st.spinner(spinner_text):
-                    try:
-                        # 使用 asyncio.run 执行异步步进
-                        metrics = asyncio.run(ctrl.run_tick())
-                        
-                        # 检查是否有降级事件（DeepSeek超时降级到智谱）
-                        if hasattr(ctrl.model_router, 'fallback_events') and ctrl.model_router.fallback_events:
-                            for event in ctrl.model_router.fallback_events:
-                                st.toast(f"⚠️ {event.get('message', '模型已降级')}", icon="⚠️")
-                            # 清空已处理的事件
-                            ctrl.model_router.fallback_events.clear()
-                        
-                        # 更新历史数据
-                        candle = metrics['candle']
-                        st.session_state.market_history.append({
-                            "time": candle.timestamp,
-                            "open": candle.open,
-                            "high": candle.high,
-                            "low": candle.low,
-                            "close": candle.close,
-                            "volume": candle.volume,
-                            "is_historical": False
-                        })
-                        st.session_state.csad_history.append(metrics['csad'])
-                        
-                        # 根据模式调整刷新延迟
-                        if st.session_state.simulation_mode == "FAST":
-                            pass  # 快速模式无延迟
-                        else:
-                            time.sleep(0.1)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"仿真异常: {e}")
-                        st.session_state.is_running = False
+# --- 异步仿真与线程管理 ---
+import threading
+import queue
 
+# 全局线程安全队列 (用于跨线程传递 metric)
+if 'metrics_queue' not in st.session_state:
+    st.session_state.metrics_queue = queue.Queue()
+
+def simulation_worker(controller, metrics_queue, is_running_event):
+    """后台仿真线程工作函数"""
+    # 为该线程创建独立的事件循环
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    print("[Thread] 仿真线程启动")
+    
+    while is_running_event.is_set():
+        try:
+            # 执行一步仿真
+            metrics = loop.run_until_complete(controller.run_tick())
+            
+            # 将结果放入队列 (非阻塞)
+            metrics_queue.put(metrics)
+            
+            # 这里的 sleep 控制仿真速度，避免 CPU 100%
+            # 根据模式调整
+            mode = controller.mode.value
+            if mode == "FAST":
+                time.sleep(0.1)
+            elif mode == "SMART":
+                time.sleep(0.5)
+            else:
+                time.sleep(1.0)
+                
+        except Exception as e:
+            print(f"[Thread Error] {e}")
+            metrics_queue.put({"error": str(e)})
+            is_running_event.clear()
+            break
+            
+    loop.close()
+    print("[Thread] 仿真线程停止")
+
+# --- 主界面逻辑中的控制部分 ---
+
+if 'sim_thread' not in st.session_state:
+    st.session_state.sim_thread = None
+if 'stop_event' not in st.session_state:
+    st.session_state.stop_event = threading.Event()
+
+# 启动逻辑 (修改 start_btn 的处理)
+# (这部分代码在 app.py 较上方，这里只能替换 loop 部分)
+
+# --- 接收并更新 UI ---
+if st.session_state.is_running:
+    # 1. 检查线程是否存活，如果没有则启动
+    if st.session_state.sim_thread is None or not st.session_state.sim_thread.is_alive():
+        # 设置停止信号为 False (即 set 为 True 表示运行)
+        st.session_state.stop_event.set()
+        st.session_state.sim_thread = threading.Thread(
+            target=simulation_worker,
+            args=(ctrl, st.session_state.metrics_queue, st.session_state.stop_event),
+            daemon=True
+        )
+        st.session_state.sim_thread.start()
+        st.toast("🚀 仿真后台线程已启动")
+
+    # 2. 消费队列中的数据 (非阻塞，取出所有积压的数据，只渲染最新的)
+    latest_metrics = None
+    while not st.session_state.metrics_queue.empty():
+        latest_metrics = st.session_state.metrics_queue.get()
+    
+    if latest_metrics:
+        if "error" in latest_metrics:
+            st.error(f"仿真异常: {latest_metrics['error']}")
+            st.session_state.is_running = False
+            st.session_state.stop_event.clear()
         else:
-            # 欢迎页
+            # 更新 Session State 数据
+            candle = latest_metrics['candle']
+            
+            # 检查是否重复添加 (通过 timestamp)
+            last_ts = st.session_state.market_history[-1]['time'] if st.session_state.market_history else ""
+            if candle.timestamp != last_ts:
+                st.session_state.market_history.append({
+                    "time": candle.timestamp,
+                    "open": candle.open,
+                    "high": candle.high,
+                    "low": candle.low,
+                    "close": candle.close,
+                    "volume": candle.volume,
+                    "is_historical": False
+                })
+                st.session_state.csad_history.append(latest_metrics['csad'])
+                
+            # 检查是否有降级事件
+            if hasattr(ctrl.model_router, 'fallback_events') and ctrl.model_router.fallback_events:
+                 for event in ctrl.model_router.fallback_events:
+                     st.toast(f"⚠️ {event.get('message', '模型已降级')}", icon="⚠️")
+                 ctrl.model_router.fallback_events.clear()
+
+    # 3. 自动刷新 UI
+    # 使用 sleep 控制前端刷新率，减轻浏览器压力
+    time.sleep(0.5) 
+    st.rerun()
+    
+else:
+    # 如果处于停止状态，确保线程也停止
+    if st.session_state.sim_thread and st.session_state.sim_thread.is_alive():
+        st.session_state.stop_event.clear()
+        st.session_state.sim_thread.join(timeout=1.0)
+        st.session_state.sim_thread = None
+        st.toast("⏸️ 仿真线程已停止")
+
+
+            
+    else:
+        # 欢迎页 - 当不在运行状态且没有初始化完成时显示
+        if not st.session_state.controller:
             st.markdown("""
             ## 🏛️ 欢迎使用 Civitas A股政策仿真平台
             

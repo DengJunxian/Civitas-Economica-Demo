@@ -191,14 +191,16 @@ class MatchingEngine:
         self.prev_close = prev_close
         
         # Order Books or LOB
+        # Unified Interface: self.lob will always be an object with .add_order(), .get_depth(), etc.
         if USE_CPP_LOB:
             self.lob = OrderBookCPP(symbol, prev_close)
+            print("[MatchingEngine] Using high-performance C++ OrderBook")
         else:
-            # Fallback to legacy heap lists if C++ fails
-            # Bids: Max Heap (-price, timestamp, Order)
-            # Asks: Min Heap (price, timestamp, Order)
-            self.bids: List[Tuple[float, float, Order]] = []
-            self.asks: List[Tuple[float, float, Order]] = []
+            # Fallback to Python Implementation
+            # Ensure proper import path and class usage
+            from core.exchange.order_book import OrderBook
+            self.lob = OrderBook(symbol, prev_close)
+            print("[MatchingEngine] Using Pure Python OrderBook (Fallback)")
         
         # Statistics
         self.last_price = prev_close
@@ -266,160 +268,88 @@ class MatchingEngine:
         # 3. Matching Logic
         generated_trades = []
 
+        # 3. Matching Logic
+        generated_trades = []
+
+        # Adapter: Convert local Order to LOB Order (Python or C++)
+        # Both implementations expect similar fields
+        lob_order_cls = OrderModel.create if USE_CPP_LOB else OrderModel.create
+        
+        # Note: core.exchange.order_book.Order.create signature:
+        # agent_id, symbol, side, order_type, price, quantity
+        
+        lob_id = order.order_id
+        lob_ts = order.timestamp
+        
+        # 统一接口调用
+        # 对于 C++ 模块，可以直接构造或者通过 helper
+        # 对于 Python 模块，也是通过 Order.create
+        
         if USE_CPP_LOB:
-            # Adapter: Convert local Order to OrderBookCPP Order
-            # OrderBookCPP expects core.exchange.order_book.Order
-            # We map fields.
-            lob_order = OrderModel.create(
+             lob_order = OrderModel.create(
                 agent_id=order.agent_id,
                 symbol=self.symbol,
                 side=order.side,
-                order_type="limit", # Default to limit
+                order_type="limit",
                 price=order.price,
                 quantity=order.quantity
             )
-            # Override ID and timestamp to match input
-            lob_order.order_id = order.order_id
-            lob_order.timestamp = order.timestamp
-            
-            # Execute
-            trades = self.lob.add_order(lob_order)
-            
-            # Sync back state
-            order.filled_qty = lob_order.filled_qty
-            
-            # Convert Trades back to local Trade object
-            for t in trades:
-                local_trade = Trade(
-                    price=t.price,
-                    quantity=int(t.quantity),
-                    buy_agent_id=t.taker_agent_id if order.side=='buy' else t.maker_agent_id,
-                    sell_agent_id=t.maker_agent_id if order.side=='buy' else t.taker_agent_id,
-                    timestamp=t.timestamp,
-                    buyer_fee=t.buyer_fee,
-                    seller_fee=t.seller_fee,
-                    seller_tax=t.seller_tax
-                )
-                generated_trades.append(local_trade)
-                
-                # Update Engine Stats
-                self.last_price = local_trade.price
-                self.total_volume += local_trade.quantity
-                self.trades_history.append(local_trade)
-
+             lob_order.order_id = lob_id # Override ID if possible
+             lob_order.timestamp = lob_ts
         else:
-            # --- Legacy Python Matching ---
-            if order.side == 'buy':
-                # Buy vs Asks
-                while self.asks and order.remaining_qty > 0:
-                    best_ask_price, _, best_ask_order = self.asks[0]
-                    
-                    # Price Priority: Bid Price >= Ask Price
-                    if order.price >= best_ask_price:
-                        trade = self._execute_match(buy_order=order, sell_order=best_ask_order)
-                        generated_trades.append(trade)
-                        
-                        if best_ask_order.is_filled:
-                            heapq.heappop(self.asks)
-                    else:
-                        break 
-                
-                # Add remaining to Book
-                if not order.is_filled:
-                    heapq.heappush(self.bids, (-order.price, order.timestamp, order))
-                    
-            else: # order.side == 'sell'
-                # Sell vs Bids
-                while self.bids and order.remaining_qty > 0:
-                    best_bid_neg_price, _, best_bid_order = self.bids[0]
-                    best_bid_price = -best_bid_neg_price
-                    
-                    # Price Priority: Sell Price <= Bid Price
-                    if order.price <= best_bid_price:
-                        trade = self._execute_match(buy_order=best_bid_order, sell_order=order)
-                        generated_trades.append(trade)
-                        
-                        if best_bid_order.is_filled:
-                            heapq.heappop(self.bids)
-                    else:
-                        break
-                
-                # Add remaining to Book
-                if not order.is_filled:
-                    heapq.heappush(self.asks, (order.price, order.timestamp, order))
-        # --- End Legacy ---
+            from core.exchange.order_book import Order as PyOrder
+            lob_order = PyOrder.create(
+                agent_id=order.agent_id,
+                symbol=self.symbol,
+                side=order.side,
+                order_type="limit",
+                price=order.price,
+                quantity=order.quantity
+            )
+            # Python implementation specific overrides
+            lob_order.order_id = lob_id
+            lob_order.timestamp = lob_ts
+            
+        # Execute Matching via Polymorphic Interface
+        # Both implementations should have .add_order(order) returning List[Trade]
+        trades = self.lob.add_order(lob_order)
+            
+        # Sync back filled quantity to the local order object
+        order.filled_qty = lob_order.filled_qty
+            
+        # Convert LOB Trades back to local Trade object (if necessary)
+        # The Scheduler expects core.market_engine.Trade objects
+        for t in trades:
+            # Map fields from LOB Trade to MarketEngine Trade
+            # Check attribute names carefully. Python Trade has: trade_id, price, quantity, maker_id...
+            
+            local_trade = Trade(
+                price=t.price,
+                quantity=int(t.quantity),
+                buy_agent_id=t.taker_agent_id if order.side=='buy' else t.maker_agent_id,
+                sell_agent_id=t.maker_agent_id if order.side=='buy' else t.taker_agent_id,
+                timestamp=t.timestamp,
+                buyer_fee=t.buyer_fee,
+                seller_fee=t.seller_fee,
+                seller_tax=t.seller_tax
+            )
+            generated_trades.append(local_trade)
+            
+            # Update Engine Stats
+            self.last_price = local_trade.price
+            self.total_volume += local_trade.quantity
+            self.trades_history.append(local_trade)
 
         # Add to step buffer for Candle generation
         self.step_trades_buffer.extend(generated_trades)
         return generated_trades
 
-    def _execute_match(self, buy_order: Order, sell_order: Order) -> Trade:
-        """
-        Execute match, calculate fees, and update order status.
-        Price is determined by the Maker (Resting Order).
-        """
-        # 1. Determine Execution Price (Maker's price)
-        # If timestamps are equal (rare), prefer the one already in the book.
-        # Logic simplified: The order in the heap (sell_order if buy matches, vice versa) is Maker.
-        # Note: In submit_order loop, 'order' is Taker, 'heap-popped' is Maker.
-        # But this function takes generic buy/sell args. We rely on the caller to handle priority logic.
-        # For this engine, we assume the price overlapping logic in submit_order ensures fairness.
-        # Standard: Price = Maker Price. 
-        # Since we don't know who is maker inside this specific function without context,
-        # we assume strict price-time priority provided by the submit loop.
-        # However, typically the "passive" order (older timestamp) sets the price.
-        exec_price = sell_order.price if buy_order.timestamp > sell_order.timestamp else buy_order.price
-        
-        # 2. Quantity
-        exec_qty = min(buy_order.remaining_qty, sell_order.remaining_qty)
-        
-        # 3. Update Orders
-        buy_order.filled_qty += exec_qty
-        sell_order.filled_qty += exec_qty
-        
-        # 4. Fee Calculation
-        market_val = exec_price * exec_qty
-        comm_rate = GLOBAL_CONFIG.TAX_RATE_COMMISSION
-        b_fee = market_val * comm_rate
-        s_fee = market_val * comm_rate
-        
-        stamp_rate = GLOBAL_CONFIG.TAX_RATE_STAMP
-        s_tax = market_val * stamp_rate
-        
-        # 5. Create Trade
-        trade = Trade(
-            price=exec_price,
-            quantity=exec_qty,
-            buy_agent_id=buy_order.agent_id,
-            sell_agent_id=sell_order.agent_id,
-            timestamp=time.time(),
-            buyer_fee=b_fee,
-            seller_fee=s_fee,
-            seller_tax=s_tax
-        )
-        
-        # Update State
-        self.last_price = exec_price
-        self.total_volume += exec_qty
-        self.trades_history.append(trade)
-        
-        return trade
+
 
     def get_order_book_depth(self, level=5) -> Dict:
         """Get L5 Market Depth."""
-        if USE_CPP_LOB:
-            return self.lob.get_depth(level)
-            
-        bids_display = []
-        # Sort and slice, then format
-        for p, _, o in sorted(self.bids)[:level]:
-            bids_display.append({"price": -p, "qty": o.remaining_qty})
-            
-        asks_display = []
-        for p, _, o in sorted(self.asks)[:level]:
-            asks_display.append({"price": p, "qty": o.remaining_qty})
-            
-        return {"bids": bids_display, "asks": asks_display}
+        # Unified call
+        return self.lob.get_depth(level)
 
     def flush_step_trades(self) -> List[Trade]:
         """Return trades from the current step and clear buffer."""
@@ -767,8 +697,10 @@ class MarketDataManager:
         self.interpreter = PolicyInterpreter(api_key_or_router)
         
         # Load Data
-        self.candles = RealMarketLoader.load_history() if load_real_data else []
-        initial_price = self.candles[-1].close if self.candles else 3000.0
+        self.history_candles = RealMarketLoader.load_history() if load_real_data else []
+        self.sim_candles = []
+        
+        initial_price = self.history_candles[-1].close if self.history_candles else 3000.0
         
         # Initialize Core Engine
         self.engine = MatchingEngine(prev_close=initial_price)
@@ -778,6 +710,21 @@ class MarketDataManager:
         self.panic_level = 0.0 
         self.csad_history = []
         
+    @property
+    def candles(self) -> List[Candle]:
+        """Unified view of history + simulation"""
+        return self.history_candles + self.sim_candles
+
+    def clear_simulation(self):
+        """Reset simulation state"""
+        self.sim_candles = []
+        self.csad_history = []
+        self.panic_level = 0.0
+        # Reset engine state but keep price if continued? 
+        # Usually reset to last historical price
+        initial_price = self.history_candles[-1].close if self.history_candles else 3000.0
+        self.engine = MatchingEngine(prev_close=initial_price)
+
     def apply_policy(self, text: str):
         params = self.interpreter.interpret(text)
         self.policy.liquidity_injection = params.get("liquidity_injection", 0.0)
@@ -798,8 +745,31 @@ class MarketDataManager:
             self.panic_level = min(1.0, self.panic_level + 0.1)
         elif self.policy.liquidity_injection > 0.5:
             self.panic_level = max(0.0, self.panic_level - 0.05)
+    
+    def finalize_step(self, step_id: int, date_str: str) -> Candle:
+        """从匹配引擎生成并保存 K 线"""
+        trades = self.engine.flush_step_trades()
+        
+        if not trades:
+            # 无成交，延续上一收盘价
+            last_close = self.engine.last_price
+            c = Candle(
+                step=step_id, timestamp=date_str,
+                open=last_close, high=last_close, low=last_close, close=last_close,
+                volume=0, is_simulated=True
+            )
         else:
-            self.panic_level = max(0.0, self.panic_level - 0.01)
+            prices = [t.price for t in trades]
+            c = Candle(
+                step=step_id, timestamp=date_str,
+                open=prices[0], high=max(prices), low=min(prices), close=prices[-1],
+                volume=sum(t.quantity for t in trades),
+                is_simulated=True
+            )
+            
+        self.sim_candles.append(c)
+        return c
+
 
     def submit_agent_order(self, order: Order):
         """Pass agent orders to the matching engine."""

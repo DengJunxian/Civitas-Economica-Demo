@@ -70,6 +70,9 @@ class SimulationController:
             n_smart=50, n_vectorized=5000, api_key=deepseek_key
         )
         
+        # 量化群体管理器 (可选注入)
+        self.quant_manager = None
+        
         # 为所有Smart Agent设置模型路由器
         for agent in self.population.smart_agents:
             agent.brain.set_model_router(self.model_router)
@@ -308,7 +311,26 @@ class SimulationController:
                 )
                 self.matcher.submit_order(order)
 
-        # --- Phase 3: 撮合与结算 ---
+        # --- Phase 3: 量化群体决策 (如果存在) ---
+        if self.quant_manager:
+            # 获取所有量化群体的决策
+            quant_decisions = self.quant_manager.get_group_decisions(
+                market_ctx,  # 复用之前的 market_ctx
+                {agent.id: {"cash": 1000000} for group in self.quant_manager.groups.values() for agent in group.agents} # 简化账户
+            )
+            
+            for d in quant_decisions:
+                decision = d.get('decision', {})
+                if decision.get('action') in ['BUY', 'SELL']:
+                    qty = int(decision.get('qty', 0))
+                    price = float(decision.get('price', current_price))
+                    side = decision['action'].lower()
+                    agent_id = d.get('agent_id')
+                    
+                    if qty > 0:
+                        self.matcher.submit_order(Order(price, qty, agent_id, side, timestamp.timestamp()))
+
+        # --- Phase 4: 撮合与结算 ---
         trades = self.matcher.trades_history[-100:]
         
         # 更新 K 线

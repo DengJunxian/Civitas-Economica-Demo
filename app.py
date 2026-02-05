@@ -499,11 +499,13 @@ with st.sidebar:
                         
                         # 同步执行
                         try:
+                            import nest_asyncio
+                            nest_asyncio.apply()
                             content, _, model = loop.run_until_complete(_get_report())
-                        except RuntimeError:
-                             import nest_asyncio
-                             nest_asyncio.apply()
-                             content, _, model = loop.run_until_complete(_get_report())
+                        except Exception as e:
+                             st.error(f"API调用底层错误: {e}")
+                             content = "报告生成失败，请检查网络连接。"
+                             model = "Error"
                         
                         st.success(f"✅ 报告已生成 (使用模型: {model})")
                         st.markdown(f"""
@@ -619,33 +621,35 @@ else:
             prev_close = ctrl.market.engine.prev_close
             change_pct = (current_price - prev_close) / prev_close * 100 if prev_close else 0
             
-            if change_pct >= 0:
+            # 计算逻辑修正
+            change_val = current_price - prev_close
+            change_pct = (change_val / prev_close * 100) if prev_close else 0
+            
+            if change_val >= 0:
                 price_color = "#FF3B30"
                 arrow = "↑"
+                sign = "+"
             else:
                 price_color = "#34C759"
                 arrow = "↓"
+                sign = ""
             
             # 第一行：指数显示
             st.markdown(f"""
             <div class="metric-card">
                 <div style="color: #888; font-size: 14px;">上证指数</div>
                 <div style="color: {price_color}; font-size: 32px; font-weight: bold;">
-                    {current_price:.2f} {arrow} <span style="font-size: 18px;">{change_pct:+.2f}%</span>
+                    {current_price:.2f} {arrow} <span style="font-size: 18px;">{change_val:+.2f} ({sign}{change_pct:.2f}%)</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
             
-            # 第二行：两列指标 (移除耗时统计)
-            col_s1, col_s2, col_s3 = st.columns(3)
+            # 第二行：两列指标 (移除耗时统计和成交量)
+            col_s1, col_s2 = st.columns(2)
             with col_s1:
                 st.metric("恐慌指数", f"{ctrl.market.panic_level:.2f}")
             with col_s2:
                 st.metric("仿真天数", f"{ctrl.day_count}")
-            with col_s3:
-                # 显示总成交量
-                total_vol = sum(c.volume for c in ctrl.market.candles[-5:]) if ctrl.market.candles else 0
-                st.metric("5日累计成交", f"{total_vol:,}")
             
             st.markdown("---")
             

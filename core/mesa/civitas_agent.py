@@ -55,10 +55,9 @@ class CivitasAgent(Agent):
             use_local_reasoner=use_local_reasoner
         )
         
-        # 账户状态
-        self.cash = initial_cash
-        self.position = 0  # 持仓股数
-        self.avg_cost = 0.0  # 平均成本
+        # 账户状态 - 使用 Portfolio 管理 T+1 和 批次成本
+        from core.account import Portfolio
+        self.portfolio = Portfolio(initial_cash=initial_cash)
         
         # 待执行动作 (用于 advance 阶段)
         self.pending_action: Optional[Dict] = None
@@ -69,53 +68,90 @@ class CivitasAgent(Agent):
         self.sentiment = 0.0  # [-1, 1]
         self.confidence = 0.5
     
-    def step(self) -> None:
+    def prepare_decision(self, market_state: Dict) -> Optional[Any]:
         """
-        决策阶段 - 获取市场数据并做出决策
+        [阶段 1] 决策准备
         
-        在 SimultaneousActivation 模式下，所有 Agent 先执行 step()，
-        然后再统一执行 advance()。
+        计算账户状态，更新内部指标，并返回用于 LLM 的提示词信息 (或 None 如果是本地决策)
         """
-        # 获取市场状态
-        market_state = self.model.get_market_state()
-        
-        # 计算账户状态
+        # 1. 更新内部账户状态
         current_price = market_state.get("price", 0)
-        market_value = self.position * current_price
-        self.wealth = self.cash + market_value
+        ticker = "SH000001"
+        market_value = self.portfolio.get_market_value({ticker: current_price})
+        self.wealth = self.portfolio.available_cash + market_value
         
-        if self.avg_cost > 0 and self.position > 0:
-            self.pnl_pct = (current_price - self.avg_cost) / self.avg_cost
+        # 2. 计算平均成本和 PnL
+        total_qty = self.portfolio.get_total_holdings_qty(ticker)
+        avg_cost = 0.0
+        if total_qty > 0:
+            total_cost_basis = sum(b.quantity * b.cost_basis for b in self.portfolio.positions.get(ticker, []))
+            avg_cost = total_cost_basis / total_qty
+            self.pnl_pct = (current_price - avg_cost) / avg_cost if avg_cost > 0 else 0.0
         else:
             self.pnl_pct = 0.0
+            
+        # 3. 准备账户状态快照
+        # 使用仿真时间进行 T+1 检查
+        sim_time = self.model.current_dt if hasattr(self.model, "current_dt") else pd.Timestamp.now()
         
         account_state = {
-            "cash": self.cash,
+            "cash": self.portfolio.available_cash,
             "market_value": market_value,
             "pnl_pct": self.pnl_pct,
-            "avg_cost": self.avg_cost
+            "avg_cost": avg_cost,
+            "position": total_qty,
+            "sellable": self.portfolio.get_sellable_qty(ticker, sim_time)
         }
         
-        # 做出决策
-        decision = self.cognitive_agent.make_decision(market_state, account_state)
+        # 4. 调用 CognitiveAgent 生成 Prompt (或本地决策)
+        # 注意: 这里的 prepare_decision_prompt 可能返回 List[Dict] (LLM) 或 None (Local)
+        # 如果是 Local, 我们可能需要在这里直接做出决策?
+        # 为了统一流程，如果是 Local，我们在 astep 中 handle, 这里只返回 None.
+        # 但我们还需要返回 account_state 给 Model，以便 Model 知道传给 LocalReasoner 什么
         
-        # 更新情绪状态
-        self.sentiment = decision.greed_level - decision.fear_level
-        self.confidence = self.cognitive_agent.confidence_tracker.confidence
+        prompt = self.cognitive_agent.prepare_decision_prompt(market_state, account_state)
+        return prompt, account_state
+
+    def finalize_decision(self, result: Any, market_state: Dict, account_state: Dict) -> None:
+        """
+        [阶段 2] 决策应用
         
-        # 保存待执行动作
+        接收推理结果 (ReasoningResult or Decision)，更新状态并设置 pending_action
+        """
+        current_price = market_state.get("price", 0)
+        
+        # 1. 生成最终 CognitiveDecision 对象
+        # 如果 result 是 ReasoningResult (LLM)，调用 finalize_decision_from_result
+        # 如果 result 是 CognitiveDecision (Local?), 适配之
+        
+        # 统一: 假设传入的是 ReasoningResult (无论 Local 还是 LLM)
+        decision_obj = self.cognitive_agent.finalize_decision_from_result(result, market_state, account_state)
+        
+        # 2. 更新情绪状态
+        # 确保 decision_obj 有这些属性 (CognitiveDecision dataclass vs simple Decision dataclass)
+        # 注意: llm_brain.Decision 有 greed/fear_level. CognitiveDecision 也有.
+        # Check what finalize_decision_from_result returns (currently raw_decision which is llm_brain.Decision)
+        
+        self.sentiment = getattr(decision_obj, "greed_level", 0.0) - getattr(decision_obj, "fear_level", 0.0)
+        self.confidence = getattr(decision_obj, "confidence", 0.5) # simple Decision has confidence
+        
+        # 3. 设置待执行动作
         self.pending_action = {
-            "action": decision.final_action,
-            "quantity": decision.final_quantity,
-            "price": current_price
+            "action": getattr(decision_obj, "action", getattr(decision_obj, "final_action", "HOLD")),
+            "quantity": getattr(decision_obj, "quantity", getattr(decision_obj, "final_quantity", 0)),
+            "price": current_price # 市价单暂定为当前价，限价单逻辑后续细化
         }
-    
+        
+    def step(self) -> None:
+        """[Deprecated] 请使用 prepare_decision 和 finalize_decision"""
+        # 为了兼容旧的 Mesa 调用 (如果还在用)，保留同步逻辑
+        import warnings
+        warnings.warn("CivitasAgent.step() is deprecated. Use prepare/finalize flow.", DeprecationWarning)
+        pass
+
     def advance(self) -> None:
         """
-        执行阶段 - 应用决策结果
-        
-        在 SimultaneousActivation 模式下，所有 Agent 的 step() 执行完毕后，
-        统一执行 advance() 以更新状态。
+        执行阶段 - 生成订单并提交给撮合引擎
         """
         if self.pending_action is None:
             return
@@ -123,45 +159,136 @@ class CivitasAgent(Agent):
         action = self.pending_action["action"]
         quantity = self.pending_action["quantity"]
         price = self.pending_action["price"]
+        ticker = "SH000001"
         
-        if action == "BUY" and quantity > 0:
-            cost = quantity * price
-            if self.cash >= cost:
-                # 更新平均成本
-                total_cost = self.avg_cost * self.position + cost
-                self.position += quantity
-                self.avg_cost = total_cost / self.position if self.position > 0 else 0
-                self.cash -= cost
-                
-        elif action == "SELL" and quantity > 0:
-            sell_qty = min(quantity, self.position)
-            if sell_qty > 0:
-                revenue = sell_qty * price
-                self.position -= sell_qty
-                self.cash += revenue
-                
-                # 记录交易结果
-                pnl = (price - self.avg_cost) / self.avg_cost if self.avg_cost > 0 else 0
-                self.cognitive_agent.record_outcome(
-                    pnl=pnl,
-                    market_summary=f"卖出 {sell_qty} 股 @ {price:.2f}"
+        # 忽略无效动作
+        if quantity <= 0 or action not in ["BUY", "SELL"]:
+            self.pending_action = None
+            return
+
+        # T+1 和 资金 预检查 (虽然 Engine 也会查，但 Agent 应避免提交无效单)
+        if action == "SELL":
+            if self.portfolio.withdrawable_cash > 20000: # 某种保留逻辑?
+                 # 使用仿真时间
+                sim_time = self.model.current_dt if hasattr(self.model, "current_dt") else pd.Timestamp.now()
+                sellable = self.portfolio.get_sellable_qty(ticker, sim_time)
+                if quantity > sellable:
+                    quantity = sellable # 自动调整为最大可卖
+                    if quantity == 0:
+                        self.pending_action = None
+                        return
+        elif action == "BUY":
+            cost_per_share = price * (1 + GLOBAL_CONFIG.TAX_RATE_COMMISSION)
+            
+            # 防御性检查: 避免除以零
+            if cost_per_share <= 0:
+                 # 价格异常 (0 or negative)，放弃买入
+                 self.pending_action = None
+                 return
+                 
+            cost = cost_per_share * quantity
+            if cost > self.portfolio.available_cash:
+                # 简单调整数量
+                max_afford = self.portfolio.available_cash / cost_per_share
+                quantity = int(max_afford // 100 * 100) # 手数取整
+                if quantity == 0:
+                    self.pending_action = None
+                    return
+
+        # 1. 生成订单对象
+        from core.market_engine import Order
+        
+        side = 'buy' if action == 'BUY' else 'sell'
+        
+        order = Order.create(
+            agent_id=str(self.unique_id),
+            symbol=ticker,
+            side=side,
+            order_type="limit",
+            price=price,
+            quantity=int(quantity)
+        )
+        # Note: Order.create now handles ID generation
+        
+        # 2. 提交订单
+        if hasattr(self.model, "submit_order"):
+            trades = self.model.submit_order(order)
+        else:
+            trades = []
+
+        # 3. 更新账户
+        self._process_trades(trades)
+        
+        # 清空
+        self.pending_action = None
+
+    def _process_trades(self, trades: list) -> None:
+        """处理成交记录"""
+        import pandas as pd
+        ticker = "SH000001"
+        ts = pd.Timestamp.now()
+        
+        for trade in trades:
+            # Re-infer side from context or check Trade details if available
+            # Let's rely on self.pending_action['action'] because these trades come from THAT action.
+            # (Assuming submit_order is synchronous and exclusive to that order)
+             
+            # If pending_action is None (unexpected), try to guess
+            current_action = self.pending_action["action"] if self.pending_action else None
+            
+            if current_action == "BUY":
+                # I Bought
+                self.portfolio.buy(
+                    ticker=ticker,
+                    price=trade.price,
+                    qty=trade.quantity,
+                    time=ts,
+                    transaction_cost=trade.buyer_fee
+                )
+            elif current_action == "SELL":
+                # I Sold
+                self.portfolio.sell(
+                    ticker=ticker,
+                    price=trade.price,
+                    qty=trade.quantity,
+                    time=ts,
+                    transaction_cost=trade.seller_fee + trade.seller_tax
                 )
                 
-                if self.position == 0:
-                    self.avg_cost = 0.0
-        
-        # 清空待执行动作
-        self.pending_action = None
-    
+                # Record Outcome
+                # For PnL recording, we need a snapshot of avg_cost from BEFORE the sale?
+                # Actually Portfolio handles accounting, but doesn't track "Trade PnL" explicitly for memory.
+                # We can approximate or just use the agent's tracked avg_cost (which is updated via Portfolio now?)
+                # Wait, CivitasAgent.step() calculates PnL pct.
+                # For "Memory", we want realized PnL of *this specific trade*.
+                # Simplified: use (Price - AvgCost) / AvgCost
+                
+                # We need to access the portfolio's avg cost for this ticker
+                # But Portfolio doesn't expose a simple "Avg Cost" property easily without calculation
+                # Let's calculate it from the batches *before* the sell? Too late now.
+                # Use current step's self.avg_cost (calculated in step())
+                
+                if hasattr(self, 'avg_cost') and self.avg_cost > 0:
+                    pnl_val = (trade.price - self.avg_cost) * trade.quantity
+                    pnl_pct = (trade.price - self.avg_cost) / self.avg_cost
+                    
+                    if hasattr(self.cognitive_agent, "record_outcome"):
+                         self.cognitive_agent.record_outcome(
+                            pnl=pnl_pct,
+                            market_summary=f"卖出 {trade.quantity} 股 @ {trade.price:.2f}"
+                        )
+
     def get_state(self) -> Dict[str, Any]:
         """
         获取可序列化的状态 (用于 DataCollector)
         """
+        ticker = "SH000001"
+        pos = self.portfolio.get_total_holdings_qty(ticker)
         return {
             "unique_id": self.unique_id,
             "wealth": self.wealth,
-            "cash": self.cash,
-            "position": self.position,
+            "cash": self.portfolio.available_cash,
+            "position": pos,
             "pnl_pct": self.pnl_pct,
             "sentiment": self.sentiment,
             "confidence": self.confidence,

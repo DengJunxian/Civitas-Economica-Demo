@@ -138,6 +138,32 @@ class TieredRouter:
         # 其他使用 Tier 1
         return AgentTier.TIER_1
     
+    async def call_with_fallback(self, requests: List[InferenceRequest]) -> List[InferenceResult]:
+        """
+        [Async] 带自动降级的异步批量调用
+        由于 TieredRouter 内部逻辑主要是同步 (调用 APIBackend.generate)，
+        这里使用 run_in_executor 将其放入线程池执行，模拟异步 IO。
+        
+        Args:
+            requests: 推理请求列表
+            
+        Returns:
+            List[InferenceResult]
+        """
+        import asyncio
+        loop = asyncio.get_running_loop()
+        
+        # 简单实现：并发执行这一批请求
+        # 注意: 如果 request 数量很大，建议分批或控制 semaphore
+        tasks = []
+        for req in requests:
+            # 将每个 route 调用包装到线程池
+            # 注意: route() 内部调用 API 是同步阻塞的，所以需要线程池
+            tasks.append(loop.run_in_executor(None, self.route, req))
+            
+        results = await asyncio.gather(*tasks)
+        return list(results)
+    
     def route(self, request: InferenceRequest) -> InferenceResult:
         """
         路由并执行推理请求

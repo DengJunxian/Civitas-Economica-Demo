@@ -15,6 +15,11 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import time
+import nest_asyncio
+
+# 解决 Streamlit 与 Asyncio 的循环冲突
+nest_asyncio.apply()
+
 from datetime import datetime
 from typing import Optional
 
@@ -263,22 +268,23 @@ with st.sidebar:
     analyze_btn = st.button("🔍 分析政策影响", use_container_width=True)
     
     if analyze_btn and policy_text:
-        if st.session_state.controller:
-            with st.spinner("DeepSeek 正在分析政策影响..."):
-                try:
-                    analysis = st.session_state.controller.market.interpreter.interpret(policy_text)
-                    st.session_state.policy_analysis = {
-                        "text": policy_text,
-                        "result": analysis,
-                        "timestamp": datetime.now().strftime("%H:%M:%S")
-                    }
-                    # 应用政策到市场
-                    st.session_state.controller.market.apply_policy(policy_text)
-                    st.success("✅ 政策已注入市场！")
-                except Exception as e:
-                    st.error(f"分析失败: {e}")
+        if st.session_state.controller and st.session_state.is_running:
+            # 发送指令到队列，而不是直接调用
+            st.session_state.cmd_queue.put({
+                "type": "policy",
+                "content": policy_text
+            })
+            st.info("📨 政策分析请求已提交，系统将在后台异步处理...")
+            # 临时 placeholder
+            st.session_state.policy_analysis = {
+                "text": policy_text,
+                "result": {"market_impact": "分析中..."},
+                "timestamp": datetime.now().strftime("%H:%M:%S")
+            }
+        elif not st.session_state.is_running:
+             st.warning("请先启动仿真系统 (需要后台线程运行以处理智能分析)")
         else:
-            st.warning("请先启动仿真系统")
+            st.warning("Controller 未初始化")
     
     # 显示政策分析结果
     if st.session_state.policy_analysis:
@@ -668,18 +674,23 @@ else:
                 # 安全检查：确保 volume 列存在 (防止 KeyError)
                 if 'volume' not in raw_df.columns:
                     raw_df['volume'] = 0
-                
-                # 数据重采样逻辑
-                if kline_period == "周K":
-                    df = raw_df.resample('W-FRI', on='time').agg({
-                        'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'
-                    }).dropna().reset_index()
-                elif kline_period == "月K":
-                    df = raw_df.resample('ME', on='time').agg({
-                        'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'
-                    }).dropna().reset_index()
-                else: # 日K
-                    df = raw_df.copy()
+                if not raw_df.empty and 'time' in raw_df.columns:
+                    # 确保 time 列为 datetime 类型
+                    raw_df['time'] = pd.to_datetime(raw_df['time'])
+                    
+                    # 数据重采样逻辑
+                    if kline_period == "周K":
+                        df = raw_df.resample('W-FRI', on='time').agg({
+                            'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'
+                        }).dropna().reset_index()
+                    elif kline_period == "月K":
+                        df = raw_df.resample('ME', on='time').agg({
+                            'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'
+                        }).dropna().reset_index()
+                    else: # 日K
+                        df = raw_df.copy()
+                else:
+                    df = pd.DataFrame() # Handle empty or missing 'time' column case
                 
                 # 计算均线
                 if len(df) > 0:
@@ -781,19 +792,41 @@ else:
 import threading
 import queue
 
-# 全局线程安全队列 (用于跨线程传递 metric)
+# 全局线程安全队列 (用于跨线程传递 metric 和 command)
 if 'metrics_queue' not in st.session_state:
     st.session_state.metrics_queue = queue.Queue()
+if 'cmd_queue' not in st.session_state:
+    st.session_state.cmd_queue = queue.Queue()
 
-def simulation_worker(controller, metrics_queue, is_running_event):
+def simulation_worker(controller, metrics_queue, cmd_queue, is_running_event):
     """后台仿真线程工作函数"""
     # 为该线程创建独立的事件循环
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    except Exception as e:
+        print(f"[Thread] Event Loop creation failed: {e}")
+        return
+
     print("[Thread] 仿真线程启动")
     
     while is_running_event.is_set():
+        # 1. 处理控制指令 (Priority High)
+        try:
+            while not cmd_queue.empty():
+                cmd = cmd_queue.get_nowait()
+                if cmd['type'] == 'policy':
+                    print(f"[Thread] Processing Policy: {cmd['content'][:10]}...")
+                    # 异步执行政策分析
+                    loop.run_until_complete(controller.apply_policy_async(cmd['content']))
+                    # 推送完成状态 (可选)
+                    metrics_queue.put({"type": "policy_done", "result": "ok"})
+                elif cmd['type'] == 'stop':
+                    return
+        except Exception as e:
+            print(f"[Thread] Error processing commands: {e}")
+
+        # 2. 执行仿真步
         try:
             # 执行一步仿真
             metrics = loop.run_until_complete(controller.run_tick())
@@ -838,7 +871,12 @@ if st.session_state.is_running:
         st.session_state.stop_event.set()
         st.session_state.sim_thread = threading.Thread(
             target=simulation_worker,
-            args=(ctrl, st.session_state.metrics_queue, st.session_state.stop_event),
+            args=(
+                st.session_state.controller, 
+                st.session_state.metrics_queue,
+                st.session_state.cmd_queue,
+                st.session_state.stop_event
+            ),
             daemon=True
         )
         st.session_state.sim_thread.start()

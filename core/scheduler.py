@@ -137,7 +137,29 @@ class SimulationController:
         if self.market.candles:
             last_candle = self.market.candles[-1]
             self.matcher.update_prev_close(last_candle.close)
+
+    def ensure_market_engine(self):
+        """确保 Engine 引用正确"""
+        if self.matcher != self.market.engine:
+            self.matcher = self.market.engine
+
+    async def apply_policy_async(self, policy_text: str) -> Dict:
+        """异步应用政策 (在 Worker Loop 中调用)"""
+        print(f"[Scheduled] 正在分析政策: {policy_text[:10]}...")
+        self.ensure_market_engine()
         
+        # 1. 异步调用 Interpreter
+        result = await self.market.interpreter.interpret(policy_text)
+        
+        # 2. 更新 Policy 对象 (Thread-safe enough for simple attrs)
+        self.market.policy.update(result)
+        
+        # 3. 记录
+        self.market.current_news = result.get('initial_news', '政策发布')
+        self.logs.append(f"[Policy] {self.market.current_news}")
+        
+        return result
+
         # --- Phase 1: 智能Agent采样和混合调度 ---
         n_deep = self.get_deep_agent_count()
         

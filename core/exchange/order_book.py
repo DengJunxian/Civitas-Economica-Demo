@@ -90,7 +90,8 @@ class Order:
         side: str,
         order_type: str,
         price: float,
-        quantity: int
+        quantity: int,
+        order_id: Optional[str] = None
     ) -> "Order":
         """
         工厂方法: 创建新订单
@@ -102,12 +103,13 @@ class Order:
             order_type: 'limit' 或 'market'
             price: 委托价格
             quantity: 委托数量
+            order_id: 可选的指定订单 ID (如果不传则自动生成 UUID)
             
         Returns:
             新创建的 Order 对象
         """
         return Order(
-            order_id=str(uuid.uuid4()),
+            order_id=order_id if order_id else str(uuid.uuid4()),
             agent_id=agent_id,
             timestamp=time.time(),
             symbol=symbol,
@@ -245,11 +247,29 @@ class OrderBook:
     # 价格限制检查
     # ------------------------------------------
     
+    
+    def _get_dynamic_limit(self) -> float:
+        """根据证券代码获取动态涨跌幅限制"""
+        limit = GLOBAL_CONFIG.PRICE_LIMIT
+        sym = str(self.symbol)
+        
+        if sym.startswith("688") or sym.startswith("300"):
+            limit = 0.20
+        elif sym.startswith("8"):
+            limit = 0.30
+        elif "ST" in sym.upper():
+            limit = 0.05
+            
+        return limit
+    
     def _check_price_limit(self, price: float) -> bool:
         """
         检查价格是否在涨跌停范围内
         
-        A 股主板: ±10%
+        A 股主板: ±10% (默认)
+        科创板/创业板: ±20%
+        北交所: ±30%
+        ST: ±5%
         
         Args:
             price: 待检查价格
@@ -257,7 +277,7 @@ class OrderBook:
         Returns:
             是否在有效范围内
         """
-        limit = GLOBAL_CONFIG.PRICE_LIMIT
+        limit = self._get_dynamic_limit()
         upper = self.prev_close * (1 + limit)
         lower = self.prev_close * (1 - limit)
         return round(lower, 2) <= round(price, 2) <= round(upper, 2)
@@ -269,7 +289,7 @@ class OrderBook:
         Returns:
             (跌停价, 涨停价)
         """
-        limit = GLOBAL_CONFIG.PRICE_LIMIT
+        limit = self._get_dynamic_limit()
         lower = round(self.prev_close * (1 - limit), 2)
         upper = round(self.prev_close * (1 + limit), 2)
         return lower, upper

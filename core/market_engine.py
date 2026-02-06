@@ -215,8 +215,14 @@ class MatchingEngine:
         self.prev_close = close_price
 
     def _check_price_limit(self, price: float) -> bool:
-        """±10% Price Limit Check."""
-        limit = GLOBAL_CONFIG.PRICE_LIMIT
+        """
+        涨跌停检查 (Delegated to OrderBook)
+        """
+        if hasattr(self, 'lob'):
+            return self.lob._check_price_limit(price)
+            
+        # Fallback if no LOB (Unlikely)
+        limit = GLOBAL_CONFIG.PRICE_LIMIT 
         upper = self.prev_close * (1 + limit)
         lower = self.prev_close * (1 - limit)
         return round(lower, 2) <= round(price, 2) <= round(upper, 2)
@@ -279,11 +285,6 @@ class MatchingEngine:
         # agent_id, symbol, side, order_type, price, quantity
         
         lob_id = order.order_id
-        lob_ts = order.timestamp
-        
-        # 统一接口调用
-        # 对于 C++ 模块，可以直接构造或者通过 helper
-        # 对于 Python 模块，也是通过 Order.create
         
         if USE_CPP_LOB:
              lob_order = OrderModel.create(
@@ -292,10 +293,10 @@ class MatchingEngine:
                 side=order.side,
                 order_type="limit",
                 price=order.price,
-                quantity=order.quantity
+                quantity=order.quantity,
+                order_id=lob_id 
             )
-             lob_order.order_id = lob_id # Override ID if possible
-             lob_order.timestamp = lob_ts
+             lob_order.timestamp = order.timestamp
         else:
             from core.exchange.order_book import Order as PyOrder
             lob_order = PyOrder.create(
@@ -304,11 +305,11 @@ class MatchingEngine:
                 side=order.side,
                 order_type="limit",
                 price=order.price,
-                quantity=order.quantity
+                quantity=order.quantity,
+                order_id=lob_id
             )
             # Python implementation specific overrides
-            lob_order.order_id = lob_id
-            lob_order.timestamp = lob_ts
+            lob_order.timestamp = order.timestamp
             
         # Execute Matching via Polymorphic Interface
         # Both implementations should have .add_order(order) returning List[Trade]
@@ -539,7 +540,7 @@ class PolicyInterpreter:
             
         self.last_reasoning = None  # 保存最近一次的推理过程
 
-    def interpret(self, policy_text: str) -> Dict:
+    async def interpret(self, policy_text: str) -> Dict:
         """
         分析政策文本，返回量化参数。
         
@@ -582,71 +583,49 @@ class PolicyInterpreter:
 }}
 """
         try:
-            # 优先使用 Router (支持 GLM 和 降级)
+            # 使用 Router 或 AsyncClient (DeepSeek)
+            # 为了在 Loop Architecture 中高效运行，这里必须是异步调用
+            
+            content = ""
+            reasoning = ""
+            
             if self.router:
-                # 使用 FAST 模式优先级 (GLM 优先，确保速度) 或 SMART 模式
-                # 用户要求优化为 GLM 且 < 60s，建议优先 GLM
-                priority = ["glm-4-flashx", "deepseek-chat", "hunyuan-turbos-latest"] 
+                # 使用 GLM-4-FlashX 快速响应 或者 DeepSeek (Router 内部 handle 异步)
+                # 默认优先级
+                priority = ["deepseek-reasoner", "deepseek-chat", "glm-4-flashx"]
                 
-                # 尝试调用
-                import asyncio
-                # 注意：这里我们是在同步上下文中，需要处理异步调用的问题
-                # 简单起见，如果是在 Streamlit 中，可以直接 run
-                # 但最好 MarketEngine 本身支持异步。
-                # 鉴于 interpret 通常在 UI 线程调用，我们使用 asyncio.run 或 loop
+                response = await self.router.call_with_fallback(
+                    [{"role": "user", "content": prompt}],
+                    priority_models=priority,
+                    timeout_budget=60.0
+                )
                 
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-
-                if loop.is_running():
-                     # 如果已经在 loop 中 (例如 Streamlit 某些情况)，这会比较棘手
-                     # 但通常 Streamlit 按钮点击是在同步线程
-                     pass
-
-                # 定义异步任务
-                async def _run_router():
-                     return await self.router.call_with_fallback(
-                         [{"role": "user", "content": prompt}],
-                         priority_models=priority,
-                         timeout_budget=55.0 # 预留 5s buffer
-                     )
-                
-                # 执行 (兼容已有 event loop)
-                try:
-                    content, reasoning, model_used = loop.run_until_complete(_run_router())
-                except RuntimeError:
-                     # 已经在 loop 中，使用 nest_asyncio 或其它方案
-                     # 这里简单 fallback 到 requests 或 warning
-                     import nest_asyncio
-                     nest_asyncio.apply()
-                     content, reasoning, model_used = loop.run_until_complete(_run_router())
-
-                print(f"[PolicyInterpreter] 使用模型: {model_used}")
-                if "error" in content and "HOLD" in content:
-                     raise Exception(reasoning) # 这里 reasoning 是错误信息
-                
-                self.last_reasoning = reasoning or "使用了快速模型，未返回完整推理链"
+                # router 返回的是 content, reasoning, model
+                content = response[0]
+                reasoning = response[1]
                 
             else:
-                # 遗留逻辑：直接调用 OpenAI (DeepSeek)
-                client = OpenAI(
+                # 直接使用 AsyncOpenAI
+                from openai import AsyncOpenAI
+                
+                client = AsyncOpenAI(
                     api_key=self.api_key, 
                     base_url=GLOBAL_CONFIG.API_BASE_URL,
                     timeout=GLOBAL_CONFIG.API_TIMEOUT_REASONER
                 )
                 
-                resp = client.chat.completions.create(
+                print(f"[PolicyInterpreter] 异步调用 deepseek-reasoner...")
+                resp = await client.chat.completions.create(
                     model="deepseek-reasoner",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.3
                 )
                 message = resp.choices[0].message
                 content = message.content
-                self.last_reasoning = getattr(message, 'reasoning_content', '')
+                reasoning = getattr(message, 'reasoning_content', '')
 
+            self.last_reasoning = reasoning
+            
             # 解析 JSON
             import json
             import re
@@ -746,29 +725,8 @@ class MarketDataManager:
         elif self.policy.liquidity_injection > 0.5:
             self.panic_level = max(0.0, self.panic_level - 0.05)
     
-    def finalize_step(self, step_id: int, date_str: str) -> Candle:
-        """从匹配引擎生成并保存 K 线"""
-        trades = self.engine.flush_step_trades()
-        
-        if not trades:
-            # 无成交，延续上一收盘价
-            last_close = self.engine.last_price
-            c = Candle(
-                step=step_id, timestamp=date_str,
-                open=last_close, high=last_close, low=last_close, close=last_close,
-                volume=0, is_simulated=True
-            )
-        else:
-            prices = [t.price for t in trades]
-            c = Candle(
-                step=step_id, timestamp=date_str,
-                open=prices[0], high=max(prices), low=min(prices), close=prices[-1],
-                volume=sum(t.quantity for t in trades),
-                is_simulated=True
-            )
-            
-        self.sim_candles.append(c)
-        return c
+    # Old finalize_step removed to avoid duplication
+    # The active finalize_step is defined below.
 
 
     def submit_agent_order(self, order: Order):

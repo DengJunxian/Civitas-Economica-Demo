@@ -9,3 +9,8 @@ venv/
 .vscode/
 *.swp
 *.log
+*.pyd
+*.so
+dist/
+build/
+.DS_Store

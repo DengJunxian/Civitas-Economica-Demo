@@ -155,27 +155,70 @@ class CognitiveAgent:
         self.fear_threshold = -0.5    # 恐惧覆盖阈值
         self.greed_threshold = 0.3    # 贪婪覆盖阈值
     
+    def prepare_decision_prompt(self, market_state: Dict, account_state: Dict) -> Optional[List[Dict]]:
+        """
+        [并行化支持] 阶段1: 准备提示词 (不调用 LLM)
+        """
+        # 如果是本地推理，直接返回 None，表示不需要 LLM 调用
+        if isinstance(self.reasoner, LocalReasoner):
+            return None
+            
+        if hasattr(self.reasoner, "build_messages"):
+            return self.reasoner.build_messages(market_state, account_state)
+        return None
+
+    def finalize_decision_from_result(
+        self, 
+        result: ReasoningResult, 
+        market_state: Dict,
+        account_state: Dict
+    ) -> CognitiveDecision:
+        """
+        [并行化支持] 阶段2: 根据 LLM 结果生成最终决策
+        """
+        # 1. 获取 LLM 建议
+        # result 已经是 ReasoningResult 对象
+        raw_decision = result.decision
+        
+        # 2. 前景理论效用计算 (Cognitive Flow)
+        # Calculate utility of current state to adjust fear/greed?
+        # Or calculate utility of the PROPOSED action?
+        # Usually we evaluate the status quo pnl.
+        pnl = account_state.get("pnl_pct", 0)
+        utility = self.prospect.calculate_utility(pnl)
+        
+        # 3. 覆盖逻辑
+        final_action = raw_decision.action
+        final_qty = raw_decision.quantity
+        
+        # 简单覆盖示例: 极度恐惧时强制卖出
+        # (Simplified logic from original make_decision)
+        if utility < -150: # Pain threshold
+            # Panic Sell
+            if final_action != "SELL":
+                final_action = "SELL"
+                final_qty = account_state.get("position", 0)
+        
+        from agents.cognition.llm_brain import Decision as LLMDecision
+        # Convert back to internal CognitiveDecision or similar?
+        # For now, return a named tuple or object expected by CivitasAgent
+        # CivitasAgent expects an object with .final_action, .final_quantity, .greed_level...
+        
+        # Reuse Decision dataclass from llm_brain? 
+        # But step() code expects .final_action etc. 
+        # LLMDecision has these properties.
+        
+        # We need to ensure we return something compatible
+        return raw_decision
+
     def make_decision(
         self,
         market_state: Dict,
         account_state: Dict,
         symbol: str = "000001"
-    ) -> CognitiveDecision:
+    ) -> ReasoningResult:
         """
-        执行认知决策过程
-        
-        三阶段流程:
-        1. LLM 推理获取初始建议
-        2. 前景理论计算效用值
-        3. 效用值覆盖逻辑
-        
-        Args:
-            market_state: 市场状态
-            account_state: 账户状态
-            symbol: 交易标的
-            
-        Returns:
-            CognitiveDecision: 完整决策结果
+        执行认知决策过程 (同步模式 - 兼容旧代码)
         """
         start_time = time.time()
         

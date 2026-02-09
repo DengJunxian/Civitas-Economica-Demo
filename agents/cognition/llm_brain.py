@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Any, List
 
 from core.model_router import ModelRouter
+from core.utils import truncate_text
+import textwrap
 
 @dataclass
 class Decision:
@@ -109,14 +111,23 @@ class DeepSeekReasoner(BaseReasoner):
 }
 """
 
-    def _build_user_prompt(self, market_state: Dict, account_state: Dict) -> str:
+    def _build_user_prompt(self, market_state: Dict, account_state: Dict, memory_context: str = "") -> str:
         """构建用户提示词"""
+        # Truncate potentially long text fields
+        news = truncate_text(market_state.get('news', '无'), max_length=500)
+        history = truncate_text(market_state.get('history', ''), max_length=500)
+        memory = truncate_text(memory_context, max_length=800)
+        
         return f"""
 当前市场状态:
 - 价格: {market_state.get('price')}
 - 趋势: {market_state.get('trend')}
 - 恐慌指数: {market_state.get('panic_level')}
-- 新闻: {market_state.get('news')}
+- 新闻: {news}
+- 历史走势: {history}
+
+记忆与经验:
+{memory}
 
 你的账户:
 - 现金: {account_state.get('cash'):.2f}
@@ -127,9 +138,9 @@ class DeepSeekReasoner(BaseReasoner):
 请分析并做出决策。
 """
 
-    def build_messages(self, market_state: Dict, account_state: Dict) -> List[Dict]:
+    def build_messages(self, market_state: Dict, account_state: Dict, memory_context: str = "") -> List[Dict]:
         """构建完整的对话消息"""
-        prompt = self._build_user_prompt(market_state, account_state)
+        prompt = self._build_user_prompt(market_state, account_state, memory_context)
         return [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": prompt}

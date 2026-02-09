@@ -12,6 +12,10 @@ from typing import Dict, List, Optional, Any
 
 from core.mesa.civitas_agent import CivitasAgent
 from agents.cognition.utility import InvestorType
+import time
+from core.market_engine import Order
+from core.time_manager import SimulationClock
+from core.utils import truncate_text
 
 
 class CivitasModel(Model):
@@ -32,6 +36,7 @@ class CivitasModel(Model):
         n_agents: Agent 数量
         current_price: 当前市场价格
         datacollector: Mesa 数据收集器
+        clock: 仿真时钟
     """
     
     def __init__(
@@ -40,7 +45,8 @@ class CivitasModel(Model):
         panic_ratio: float = 0.3,
         quant_ratio: float = 0.1,
         initial_price: float = 3000.0,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
+        model_router: Optional[Any] = None
     ):
         """
         初始化模型
@@ -51,15 +57,20 @@ class CivitasModel(Model):
             quant_ratio: 量化投资者比例
             initial_price: 初始价格
             seed: 随机种子
+            model_router: 模型路由器 (用于 Policy 和 LLM)
         """
         super().__init__(seed=seed)
         
         self.n_agents = n_agents
+        self.shared_router = model_router
+        
+        # 0. 初始化仿真时钟
+        self.clock = SimulationClock()
         
         # 1. 初始化市场引擎 (单一真实之源)
         from core.market_engine import MarketDataManager
         # 注意: 我们不需要在这里传 api_key，MarketDataManager 会自己从 Config 或 Env 获取
-        self.market_manager = MarketDataManager(api_key_or_router=None, load_real_data=True)
+        self.market_manager = MarketDataManager(api_key_or_router=model_router, load_real_data=True, clock=self.clock)
         
         # 覆写初始价格 (如果有指定)
         if hasattr(self.market_manager.engine, 'last_price'):
@@ -81,8 +92,21 @@ class CivitasModel(Model):
         self.volatility = 0.02 # 依然保留作为参考，或者从 Engine 计算历史波动率
         self.csad = 0.0
         
-        # 创建异质性 Agent 群体
+        # 步骤指标
+        self.last_step_trades_count = 0
+        self.last_smart_sentiment = 0.0
+        
+        # 创建异质性 Agent 群体 (Tier 1)
         self._create_agents(panic_ratio, quant_ratio)
+        
+        # 初始化 Tier 2 (Vectorized Population)
+        from agents.population import StratifiedPopulation
+        # 传入 Tier 1 Agent 列表供 Tier 2 关注
+        self.population = StratifiedPopulation(
+            n_smart=0,  # Tier 1 由 Mesa 管理
+            n_vectorized=5000, # 默认 5000 散户
+            smart_agents=list(self.agents)
+        )
         
         # 初始化数据收集器
         self.datacollector = DataCollector(
@@ -146,7 +170,7 @@ class CivitasModel(Model):
             "panic_level": self.panic_level,
             "volatility": self.volatility,
             "csad": self.csad,
-            "news": self.market_manager.current_news,
+            "news": truncate_text(self.market_manager.current_news, 500),
             "dates": self.market_manager.history_candles[-1].timestamp if self.market_manager.history_candles else "2024-01-01"
         }
     
@@ -181,37 +205,22 @@ class CivitasModel(Model):
 
     def step(self) -> None:
         """
-        执行一个模拟步骤 (同步包装器)
-        """
-        import asyncio
-        try:
-            # Check for running loop
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-        if loop.is_running():
-            # If loop is running (e.g. Streamlit), we can't block it with run_until_complete
-            # Option 1: nest_asyncio (applied in app.py) -> allows run_until_complete
-            # Option 2: ThreadPool (safest)
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, self.astep())
-                future.result()
-        else:
-            loop.run_until_complete(self.astep())
+        [已废弃] 同步 Step 方法
         
-    async def astep(self) -> None:
+        请使用 async_step() 代替。
         """
-        执行一个模拟步骤 (异步并行版)
+        raise NotImplementedError("CivitasModel.step() is deprecated. Please use await model.async_step() instead.")
+
+    async def async_step(self) -> None:
+        """
+        执行一个模拟步骤 (异步版)
         
         1. 收集 Agent 提示词
         2. 并行调用 LLM
         3. 分发结果并执行交易
         4. 市场结算
         """
-        from agents.cognition.llm_brain import LocalReasoner, ReasoningResult, Decision
+        from agents.cognition.llm_brain import ReasoningResult, Decision
         
         # 阶段 1: 收集 Prompt & 识别 Local Agents
         llm_agents = []
@@ -247,29 +256,10 @@ class CivitasModel(Model):
                     zhipu_key=GLOBAL_CONFIG.ZHIPU_API_KEY
                 )
 
-            # 调用 Router (Batch Async w/ Fallback)
-            # 使用 call_with_fallback 的新异步接口 (注意: tiered_router 和 model_router 混用了? 
-            # 用户反馈的是 tiered_router.py, 但代码之前用的是 model_router.py.
-            # 这里必须保持一致. 之前 Context 显示是 core.model_router.py.
-            # 让我们假设 ModelRouter 也有类似接口，或者我们将 tiered_router 逻辑整合进了 ModelRouter?
-            # 之前的检查显示 ModelRouter 其实是 "core/model_router.py".
-            # 用户反馈提到了 "tiered_router.py".
-            # 如果我们用 tiered_router.py, 应该 import TieredRouter.
-            # 让我们检查 implementation plan: "Use AsyncOpenAI client (or reuse ModelRouter)".
-            # 无论如何, 这里我们先用 ModelRouter (现有的), 或者切换到 TieredRouter.
-            # 简单起见, 保持 ModelRouter 但确保它是 Async 的.
-            # 如果用户一定要用 TieredRouter, 需要 switch.
-            # 考虑到用户反馈提到 tiered_router.py, 我应该 switch 到 TieredRouter 吗?
-            # 之前的 view_file model_router.py 显示它有 async calls.
-            # 让我们保持 ModelRouter, 但确认 call_with_fallback 签名匹配.
-            # ModelRouter.call_with_fallback 接受 messages list (single request)
-            # 这里我们需要 batch.
-            
-            # 修正: 我们还是 loop over prompts for now using gather, as planned previously.
-            
             # 获取 Priority
             priority = self.shared_router.get_model_priority("SMART")
             
+            import asyncio
             # 创建 Tasks
             tasks = [
                 self.shared_router.call_with_fallback(msgs, priority)
@@ -298,17 +288,101 @@ class CivitasModel(Model):
             # 使用新 API: finalize_decision
             agent.finalize_decision(result, market_state, acc_state)
 
-        # 阶段 5: 执行交易 (Advance)
+        # 阶段 4.5: 收集 Smart Agent 动作 (用于 Tier 2 影响)
+        smart_actions = []
+        for agent in self.agents:
+            if isinstance(agent, CivitasAgent) and agent.pending_action:
+                act = agent.pending_action.get("action", "HOLD")
+                if act == "BUY":
+                    smart_actions.append(1)
+                elif act == "SELL":
+                    smart_actions.append(-1)
+                else:
+                    smart_actions.append(0)
+            else:
+                smart_actions.append(0)
+        
+        # 更新 Smart Sentiment 指标
+        self.last_smart_sentiment = np.mean(smart_actions) if smart_actions else 0.0
+
+        # 阶段 5: 执行交易 (Tier 1 Advance)
         self.agents.do("advance")
         
+        # 阶段 5.5: Tier 2 (Vectorized) 决策与执行
+        # A. 更新情绪
+        trend_signal = 1.0 if self.trend == "上涨" else -1.0
+        if self.trend == "下跌": trend_signal = -1.0
+        elif self.trend == "震荡": trend_signal = 0.0
+        
+        self.population.update_tier2_sentiment(smart_actions, trend_signal)
+        
+        
+        v_actions, v_qtys, v_prices = self.population.generate_tier2_decisions(self.current_price)
+        
+        # C. 批量下单 (采样部分以减轻撮合压力)
+        active_indices = np.where(v_actions != 0)[0]
+        if len(active_indices) > 0:
+            # 限制最大单号量，防止阻塞
+            sample_size = min(len(active_indices), 500)
+            chosen_idx = np.random.choice(active_indices, sample_size, replace=False)
+            
+            ts = self.clock.timestamp
+            for idx in chosen_idx:
+                side = 'buy' if v_actions[idx] == 1 else 'sell'
+                order = Order(
+                    price=float(v_prices[idx]),
+                    quantity=int(v_qtys[idx]),
+                    agent_id=f"Vec_{idx}",
+                    side=side,
+                    timestamp=ts
+                )
+                self.market_manager.submit_agent_order(order)
+                
         # 阶段 6: 市场结算
+        # 获取本 Step 所有成交 (Tier 1 + Tier 2)
+        step_trades = self.market_manager.engine.flush_step_trades()
+        
+        # 更新成交量指标
+        self.last_step_trades_count = len(step_trades)
+        
+        # 同步 Tier 2 成交状态
+        vec_indices = []
+        vec_prices = []
+        vec_qtys = []
+        vec_dirs = []
+        
+        for t in step_trades:
+            # 检查买方
+            if t.buy_agent_id.startswith("Vec_"):
+                idx = int(t.buy_agent_id.split("_")[1])
+                vec_indices.append(idx)
+                vec_prices.append(t.price)
+                vec_qtys.append(t.quantity)
+                vec_dirs.append(1) # Buy
+            # 检查卖方
+            if t.sell_agent_id.startswith("Vec_"):
+                idx = int(t.sell_agent_id.split("_")[1])
+                vec_indices.append(idx)
+                vec_prices.append(t.price)
+                vec_qtys.append(t.quantity)
+                vec_dirs.append(-1) # Sell
+                
+        if vec_indices:
+            self.population.sync_tier2_execution(
+                np.array(vec_indices),
+                np.array(vec_prices),
+                np.array(vec_qtys),
+                np.array(vec_dirs)
+            )
+
         last_date = "2024-01-01"
         if self.market_manager.sim_candles:
             last_date = self.market_manager.sim_candles[-1].timestamp
         elif self.market_manager.history_candles:
             last_date = self.market_manager.history_candles[-1].timestamp
             
-        current_candle = self.market_manager.finalize_step(self.steps, last_date)
+        # 传入 Trades 生成 K 线
+        current_candle = self.market_manager.finalize_step(self.steps, last_date, trades=step_trades)
         
         # 更新 Model 状态
         self.current_price = current_candle.close
@@ -318,7 +392,10 @@ class CivitasModel(Model):
         
         # 收集数据
         self.datacollector.collect(self)
-
+        
+        # 推进仿真时钟
+        self.clock.tick()
+        
     def _update_trend(self):
         """简单趋势判断"""
         if len(self.price_history) >= 5:
@@ -346,10 +423,10 @@ class CivitasModel(Model):
         # 也可以把 Agent returns 传给 Manager
         pass
         
-    def run_simulation(self, n_steps: int = 100) -> None:
-        """运行完整模拟"""
+    async def run_simulation(self, n_steps: int = 100) -> None:
+        """运行完整模拟 (异步)"""
         for _ in range(n_steps):
-            self.step()
+            await self.async_step()
     
     def get_results(self) -> Dict[str, Any]:
         """获取模拟结果"""
@@ -374,24 +451,28 @@ if __name__ == "__main__":
     print("Mesa Model 测试")
     print("=" * 60)
     
-    # 创建模型
-    model = CivitasModel(n_agents=50, seed=42)
-    print(f"创建 {model.n_agents} 个 Agent")
+    async def main():
+        # 创建模型
+        model = CivitasModel(n_agents=50, seed=42)
+        print(f"创建 {model.n_agents} 个 Agent")
+        
+        # 运行 20 步
+        print("\n[运行模拟 - 20 步]")
+        for i in range(20):
+            await model.async_step()
+            if i % 5 == 0:
+                print(f"  Step {model.steps}: Price={model.current_price:.2f}, "
+                      f"CSAD={model.csad:.4f}, Panic={model.panic_level:.2f}")
+        
+        # 获取结果
+        results = model.get_results()
+        print(f"\n[结果]")
+        print(f"  最终价格: {results['final_price']:.2f}")
+        print(f"  Model DataFrame shape: {results['model_data'].shape}")
+        print(f"  Agent DataFrame shape: {results['agent_data'].shape}")
     
-    # 运行 20 步
-    print("\n[运行模拟 - 20 步]")
-    for i in range(20):
-        model.step()
-        if i % 5 == 0:
-            print(f"  Step {model.steps}: Price={model.current_price:.2f}, "
-                  f"CSAD={model.csad:.4f}, Panic={model.panic_level:.2f}")
-    
-    # 获取结果
-    results = model.get_results()
-    print(f"\n[结果]")
-    print(f"  最终价格: {results['final_price']:.2f}")
-    print(f"  Model DataFrame shape: {results['model_data'].shape}")
-    print(f"  Agent DataFrame shape: {results['agent_data'].shape}")
+    import asyncio
+    asyncio.run(main())
     
     print("\n" + "=" * 60)
     print("测试完成")

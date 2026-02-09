@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any
 
 from agents.cognition.cognitive_agent import CognitiveAgent
 from agents.cognition.utility import InvestorType
+from config import GLOBAL_CONFIG
 
 
 class CivitasAgent(Agent):
@@ -67,25 +68,36 @@ class CivitasAgent(Agent):
         self.pnl_pct = 0.0
         self.sentiment = 0.0  # [-1, 1]
         self.confidence = 0.5
+
+    @property
+    def position(self) -> int:
+        """From Portfolio"""
+        return self.portfolio.get_total_holdings_qty("SH000001")
+        
+    @property
+    def id(self) -> str:
+        """Compatibility with StratifiedPopulation"""
+        return str(self.unique_id)
     
-    def prepare_decision(self, market_state: Dict) -> Optional[Any]:
+    async def prepare_decision(self, market_state: Dict) -> Tuple[Optional[List[Dict]], Dict]:
         """
-        [阶段 1] 决策准备
+        [阶段 1] 只有准备 Prompt 的过程
         
-        计算账户状态，更新内部指标，并返回用于 LLM 的提示词信息 (或 None 如果是本地决策)
+        返回: (Messages for LLM, Account State Snapshot)
         """
-        # 1. 更新内部账户状态
+        # 1. 获取当前持仓和现金
+        ticker = self.model.symbol
+        # position = self.portfolio.positions.get(ticker, 0) # This returns Position object
+        pos_obj = self.portfolio.positions.get(ticker)
+        total_qty = pos_obj.quantity if pos_obj else 0
+        
+        # 2. 计算当前浮盈
+        # market_state should contain current price
         current_price = market_state.get("price", 0)
-        ticker = "SH000001"
-        market_value = self.portfolio.get_market_value({ticker: current_price})
-        self.wealth = self.portfolio.available_cash + market_value
+        avg_cost = pos_obj.average_cost if pos_obj else 0
+        market_value = total_qty * current_price
         
-        # 2. 计算平均成本和 PnL
-        total_qty = self.portfolio.get_total_holdings_qty(ticker)
-        avg_cost = 0.0
-        if total_qty > 0:
-            total_cost_basis = sum(b.quantity * b.cost_basis for b in self.portfolio.positions.get(ticker, []))
-            avg_cost = total_cost_basis / total_qty
+        if total_qty > 0 and avg_cost > 0:
             self.pnl_pct = (current_price - avg_cost) / avg_cost if avg_cost > 0 else 0.0
         else:
             self.pnl_pct = 0.0
@@ -104,12 +116,8 @@ class CivitasAgent(Agent):
         }
         
         # 4. 调用 CognitiveAgent 生成 Prompt (或本地决策)
-        # 注意: 这里的 prepare_decision_prompt 可能返回 List[Dict] (LLM) 或 None (Local)
-        # 如果是 Local, 我们可能需要在这里直接做出决策?
-        # 为了统一流程，如果是 Local，我们在 astep 中 handle, 这里只返回 None.
-        # 但我们还需要返回 account_state 给 Model，以便 Model 知道传给 LocalReasoner 什么
-        
-        prompt = self.cognitive_agent.prepare_decision_prompt(market_state, account_state)
+        # Use async version for memory retrieval
+        prompt = await self.cognitive_agent.prepare_decision_prompt_async(market_state, account_state)
         return prompt, account_state
 
     def finalize_decision(self, result: Any, market_state: Dict, account_state: Dict) -> None:
@@ -200,13 +208,13 @@ class CivitasAgent(Agent):
         
         side = 'buy' if action == 'BUY' else 'sell'
         
-        order = Order.create(
+
+        order = Order(
             agent_id=str(self.unique_id),
-            symbol=ticker,
             side=side,
-            order_type="limit",
             price=price,
-            quantity=int(quantity)
+            quantity=int(quantity),
+            timestamp=self.model.clock.timestamp
         )
         # Note: Order.create now handles ID generation
         

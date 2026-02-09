@@ -52,14 +52,19 @@ class StratifiedPopulation:
     IDX_COGNITIVE_TYPE = 4  # 认知类型: 0=技术派, 1=消息派, 2=跟风派
     IDX_CONFIDENCE = 5  # 信心指数: 0-100
     
-    def __init__(self, n_smart: int = 50, n_vectorized: int = 9950, api_key: str = None):
+    def __init__(self, n_smart: int = 50, n_vectorized: int = 9950, api_key: str = None, smart_agents: List[Any] = None):
         self.n_smart = n_smart
         self.n_vectorized = n_vectorized
         self._api_key = api_key
         
         # 1. 初始化 Tier 1 (Smart Agents)
-        self.smart_agents: List[SmartAgent] = []
-        self._init_smart_agents()
+        if smart_agents is not None:
+             self.smart_agents = smart_agents
+             self.n_smart = len(smart_agents)
+             print(f"[*] 使用外部传入的 {self.n_smart} 个 Smart Agents")
+        else:
+            self.smart_agents: List[SmartAgent] = []
+            self._init_smart_agents()
         
         # 2. 初始化 Tier 2 (Vectorized Matrix)
         # Shape: (N, 6) -> [Cash, Holdings, Cost, Sentiment, CognitiveType, Confidence]

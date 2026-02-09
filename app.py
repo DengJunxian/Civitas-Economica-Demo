@@ -17,6 +17,10 @@ import plotly.graph_objects as go
 import time
 import nest_asyncio
 
+# --- 1. 页面配置 (必须是第一个 Streamlit 命令) ---
+# --- 1. 页面配置 ---
+# st.set_page_config 已移至文件顶部
+
 # 解决 Streamlit 与 Asyncio 的循环冲突
 nest_asyncio.apply()
 
@@ -569,7 +573,7 @@ if st.session_state.backtest_mode:
                         status_text.text(msg)
                     
                     result = st.session_state.backtester.run_backtest(
-                        ctrl.population,
+                        ctrl.model.population,
                         ctrl.market,
                         bt_progress
                     )
@@ -971,7 +975,7 @@ else:
             with col_list:
                 st.markdown("### 智能体列表")
                 
-                for agent in ctrl.population.smart_agents[:20]:  # 显示前20个
+                for agent in ctrl.model.population.smart_agents[:20]:  # 显示前20个
                     agent_id = agent.id
                     
                     # 获取该 Agent 的情绪

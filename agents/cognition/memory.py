@@ -349,6 +349,19 @@ class TraumaMemory:
         
         return "\n".join([f"- {m}" for m in memories[:top_k]])
     
+    async def get_context_for_decision_async(
+        self,
+        market_state: Dict,
+        top_k: int = 3
+    ) -> str:
+        """
+        [异步] 获取用于决策的记忆上下文
+        """
+        # 目前 memory 操作主要是本地向量计算，非 IO 密集
+        # 但为了未来扩展(如远程向量库)，预留 async 接口
+        # 简单 wrap sync method
+        return self.get_context_for_decision(market_state, top_k)
+
     def __len__(self) -> int:
         return len(self.fragments)
 

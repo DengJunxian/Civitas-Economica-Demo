@@ -13,177 +13,14 @@
 """
 
 import uuid
-import time
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
-from enum import Enum
 
 from sortedcontainers import SortedList
 
 from config import GLOBAL_CONFIG
-
-
-# ==========================================
-# 枚举类型定义
-# ==========================================
-
-class OrderSide(str, Enum):
-    """订单方向"""
-    BUY = "buy"
-    SELL = "sell"
-
-
-class OrderType(str, Enum):
-    """订单类型"""
-    LIMIT = "limit"      # 限价单
-    MARKET = "market"    # 市价单
-
-
-class OrderStatus(str, Enum):
-    """订单状态"""
-    PENDING = "pending"      # 待撮合
-    PARTIAL = "partial"      # 部分成交
-    FILLED = "filled"        # 完全成交
-    CANCELLED = "cancelled"  # 已撤销
-    REJECTED = "rejected"    # 被拒绝
-
-
-# ==========================================
-# 核心数据结构
-# ==========================================
-
-@dataclass
-class Order:
-    """
-    高保真订单对象
-    
-    包含完整的订单生命周期追踪属性。
-    支持限价单和市价单两种类型。
-    
-    Attributes:
-        order_id: 唯一标识符 (UUID)
-        agent_id: 下单代理的 ID
-        timestamp: 订单创建时间戳 (用于时间优先级)
-        symbol: 交易标的代码
-        side: 买/卖方向
-        order_type: 订单类型 (限价/市价)
-        price: 委托价格 (市价单为 None 或 0)
-        quantity: 委托数量
-        status: 当前订单状态
-        filled_qty: 已成交数量
-    """
-    order_id: str
-    agent_id: str
-    timestamp: float
-    symbol: str
-    side: OrderSide
-    order_type: OrderType
-    price: float
-    quantity: int
-    status: OrderStatus = OrderStatus.PENDING
-    filled_qty: int = 0
-    
-    @staticmethod
-    def create(
-        agent_id: str,
-        symbol: str,
-        side: str,
-        order_type: str,
-        price: float,
-        quantity: int,
-        order_id: Optional[str] = None
-    ) -> "Order":
-        """
-        工厂方法: 创建新订单
-        
-        Args:
-            agent_id: 代理 ID
-            symbol: 交易标的
-            side: 'buy' 或 'sell'
-            order_type: 'limit' 或 'market'
-            price: 委托价格
-            quantity: 委托数量
-            order_id: 可选的指定订单 ID (如果不传则自动生成 UUID)
-            
-        Returns:
-            新创建的 Order 对象
-        """
-        return Order(
-            order_id=order_id if order_id else str(uuid.uuid4()),
-            agent_id=agent_id,
-            timestamp=time.time(),
-            symbol=symbol,
-            side=OrderSide(side),
-            order_type=OrderType(order_type),
-            price=price,
-            quantity=quantity
-        )
-    
-    @property
-    def remaining_qty(self) -> int:
-        """剩余未成交数量"""
-        return self.quantity - self.filled_qty
-    
-    @property
-    def is_filled(self) -> bool:
-        """是否完全成交"""
-        return self.filled_qty >= self.quantity
-    
-    def __hash__(self):
-        return hash(self.order_id)
-    
-    def __eq__(self, other):
-        if isinstance(other, Order):
-            return self.order_id == other.order_id
-        return False
-
-
-@dataclass
-class Trade:
-    """
-    成交记录 (执行回报)
-    
-    包含完整的成交信息和费用计算。
-    
-    Attributes:
-        trade_id: 成交唯一标识
-        price: 成交价格 (由 Maker 决定)
-        quantity: 成交数量
-        maker_id: 被动方订单 ID
-        taker_id: 主动方订单 ID
-        maker_agent_id: 被动方代理 ID
-        taker_agent_id: 主动方代理 ID
-        timestamp: 成交时间戳
-        buyer_fee: 买方佣金
-        seller_fee: 卖方佣金
-        seller_tax: 卖方印花税
-    """
-    trade_id: str
-    price: float
-    quantity: int
-    maker_id: str
-    taker_id: str
-    maker_agent_id: str
-    taker_agent_id: str
-    timestamp: float
-    buyer_fee: float = 0.0
-    seller_fee: float = 0.0
-    seller_tax: float = 0.0
-    
-    @property
-    def notional(self) -> float:
-        """成交金额 (名义价值)"""
-        return self.price * self.quantity
-    
-    @property
-    def buyer_total_cost(self) -> float:
-        """买方总支出 = 成交金额 + 佣金"""
-        return self.notional + self.buyer_fee
-    
-    @property
-    def seller_net_proceeds(self) -> float:
-        """卖方净收入 = 成交金额 - 佣金 - 印花税"""
-        return self.notional - self.seller_fee - self.seller_tax
+from core.types import Order, Trade, OrderSide, OrderType, OrderStatus
+from core.utils import PriceQuantizer
 
 
 # ==========================================
@@ -278,21 +115,19 @@ class OrderBook:
             是否在有效范围内
         """
         limit = self._get_dynamic_limit()
-        upper = self.prev_close * (1 + limit)
-        lower = self.prev_close * (1 - limit)
-        return round(lower, 2) <= round(price, 2) <= round(upper, 2)
+        lower, upper = PriceQuantizer.get_limit_prices(self.prev_close, limit)
+        return lower <= round(price, 2) <= upper
     
     def get_limit_prices(self) -> Tuple[float, float]:
         """
-        获取当日涨跌停价格
+        动态获取涨跌停限制.价格
         
         Returns:
             (跌停价, 涨停价)
         """
+
         limit = self._get_dynamic_limit()
-        lower = round(self.prev_close * (1 - limit), 2)
-        upper = round(self.prev_close * (1 + limit), 2)
-        return lower, upper
+        return PriceQuantizer.get_limit_prices(self.prev_close, limit)
     
     # ------------------------------------------
     # 订单提交与撮合
@@ -338,7 +173,7 @@ class OrderBook:
         订单撮合核心逻辑
         
         严格遵循价格-时间优先级 (Price-Time Priority):
-        1. 价格优先: 买方出价高者先成交，卖方报价低者先成交
+        1. 价格优先: 买方出价高者先成交, 卖方报价低者先成交
         2. 时间优先: 同价位先提交者先成交
         
         Args:
@@ -439,7 +274,7 @@ class OrderBook:
         """
         执行成交
         
-        成交价由 Maker (被动方) 决定。
+        成交价由 Maker (被动方) 决定.
         
         Args:
             buy_order: 买方订单
@@ -484,7 +319,7 @@ class OrderBook:
             taker_id=taker.order_id,
             maker_agent_id=maker.agent_id,
             taker_agent_id=taker.agent_id,
-            timestamp=time.time(),
+            timestamp=taker.timestamp,
             buyer_fee=buyer_fee,
             seller_fee=seller_fee,
             seller_tax=seller_tax
@@ -517,7 +352,7 @@ class OrderBook:
         """
         取消订单
         
-        模拟高频交易中的撤单行为，用于分析高频交易风险（如幌骗/Spoofing）。
+        模拟高频交易中的撤单行为, 用于分析高频交易风险(如幌骗/Spoofing).
         
         Args:
             order_id: 待取消的订单 ID
@@ -570,7 +405,7 @@ class OrderBook:
         获取买卖价差 (Bid-Ask Spread)
         
         Returns:
-            价差，或 None 如果无法计算
+            价差, 或 None 如果无法计算
         """
         best_bid = self.get_best_bid()
         best_ask = self.get_best_ask()
@@ -643,7 +478,7 @@ class OrderBook:
         """
         更新前收盘价
         
-        在每日收盘后调用，用于下一日的涨跌停计算。
+        在每日收盘后调用, 用于下一日的涨跌停计算.
         
         Args:
             close_price: 收盘价
@@ -652,9 +487,9 @@ class OrderBook:
     
     def clear(self) -> None:
         """
-        清空订单簿
+        清空订单簿.
         
-        保留前收盘价和统计信息。
+        保留前收盘价和统计信息.
         """
         self.bids.clear()
         self.asks.clear()
@@ -674,11 +509,13 @@ if __name__ == "__main__":
     ob = OrderBook(symbol="SH000001", prev_close=3000.0)
     
     # 1. 提交限价卖单
-    sell_order = Order.create(
+    sell_order = Order(
+        order_id=str(uuid.uuid4()),
         agent_id="seller_alice",
+        timestamp=time.time(),
         symbol="SH000001",
-        side="sell",
-        order_type="limit",
+        side=OrderSide.SELL,
+        order_type=OrderType.LIMIT,
         price=3005.0,
         quantity=100
     )
@@ -688,11 +525,13 @@ if __name__ == "__main__":
     print(f"  - 当前盘口: {ob.get_depth(1)}")
     
     # 2. 提交限价买单 (会与卖单交叉)
-    buy_order = Order.create(
+    buy_order = Order(
+        order_id=str(uuid.uuid4()),
         agent_id="buyer_bob",
+        timestamp=time.time(),
         symbol="SH000001",
-        side="buy",
-        order_type="limit",
+        side=OrderSide.BUY,
+        order_type=OrderType.LIMIT,
         price=3010.0,
         quantity=60
     )

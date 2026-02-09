@@ -155,16 +155,34 @@ class CognitiveAgent:
         self.fear_threshold = -0.5    # 恐惧覆盖阈值
         self.greed_threshold = 0.3    # 贪婪覆盖阈值
     
-    def prepare_decision_prompt(self, market_state: Dict, account_state: Dict) -> Optional[List[Dict]]:
+    async def prepare_decision_prompt_async(self, market_state: Dict, account_state: Dict) -> Optional[List[Dict]]:
         """
-        [并行化支持] 阶段1: 准备提示词 (不调用 LLM)
+        [并行化支持] 阶段1: 异步准备提示词 (包含异步记忆检索)
         """
-        # 如果是本地推理，直接返回 None，表示不需要 LLM 调用
+        # 如果是本地推理，直接返回 None
         if isinstance(self.reasoner, LocalReasoner):
             return None
             
         if hasattr(self.reasoner, "build_messages"):
-            return self.reasoner.build_messages(market_state, account_state)
+            # 异步检索记忆上下文
+            memory_context = await self.memory.get_context_for_decision_async(market_state)
+            # 构建 Prompt
+            return self.reasoner.build_messages(market_state, account_state, memory_context)
+            
+        return None
+
+    def prepare_decision_prompt(self, market_state: Dict, account_state: Dict) -> Optional[List[Dict]]:
+        """
+        [并行化支持] 阶段1: 准备提示词 (同步 - 兼容旧接口)
+        """
+        # 如果是本地推理，直接返回 None
+        if isinstance(self.reasoner, LocalReasoner):
+            return None
+            
+        if hasattr(self.reasoner, "build_messages"):
+            # 同步检索
+            memory_context = self.memory.get_context_for_decision(market_state)
+            return self.reasoner.build_messages(market_state, account_state, memory_context)
         return None
 
     def finalize_decision_from_result(

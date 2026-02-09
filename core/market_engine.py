@@ -15,6 +15,19 @@ import akshare as ak
 from openai import OpenAI
 import httpx
 import uuid
+import os
+from dataclasses import dataclass, field
+from typing import List, Tuple, Optional, Dict, Any
+from datetime import datetime, timedelta
+
+import pandas as pd
+import numpy as np
+import akshare as ak 
+from openai import OpenAI
+import httpx
+
+from core.types import Order, Trade, Candle, OrderSide, OrderType, OrderStatus
+from core.time_manager import SimulationClock
 
 # Import C++ Optimized OrderBook
 try:
@@ -27,18 +40,7 @@ except ImportError as e:
     print(f"[!] Falling back to Python: {e}")
 
 # Assumes a config.py exists with these constants. 
-# If not, please create one or uncomment the mock config below.
 from config import GLOBAL_CONFIG
-
-# --- MOCK CONFIG (Uncomment if config.py is missing) ---
-# class GlobalConfigMock:
-#     PRICE_LIMIT = 0.10  # 10% limit
-#     TAX_RATE_COMMISSION = 0.0003 # 0.03%
-#     TAX_RATE_STAMP = 0.001 # 0.1%
-#     API_BASE_URL = "https://api.deepseek.com"
-#     API_TIMEOUT = 30
-# GLOBAL_CONFIG = GlobalConfigMock()
-# -----------------------------------------------------
 
 # ==========================================
 # PART 1: Infrastructure & Calendar
@@ -100,74 +102,12 @@ class ChinaTradingCalendar:
 # (Merged from coremarket_engine.py & market_engine.py)
 # ==========================================
 
-@dataclass(order=True)
-class Order:
-    """
-    High-fidelity order object.
-    Includes comparison logic exclusion for business fields to support Heapq.
-    """
-    price: float = field(compare=False)
-    quantity: int = field(compare=False)
-    agent_id: str = field(compare=False)
-    side: str = field(compare=False) # 'buy' or 'sell'
-    timestamp: float = field(compare=False)
-    
-    # State tracking
-    filled_qty: int = field(default=0, compare=False)
-    order_id: str = field(default_factory=lambda: str(uuid.uuid4()), compare=False)
-
-    @property
-    def remaining_qty(self) -> int:
-        return self.quantity - self.filled_qty
-
-    @property
-    def is_filled(self) -> bool:
-        return self.filled_qty >= self.quantity
-
-@dataclass
-class Trade:
-    """
-    Execution Record (Tick).
-    Includes precise fee calculation.
-    """
-    price: float
-    quantity: int
-    buy_agent_id: str
-    sell_agent_id: str
-    timestamp: float
-    
-    # Fees & Taxes
-    buyer_fee: float = 0.0
-    seller_fee: float = 0.0
-    seller_tax: float = 0.0 # Stamp Duty
-
-    @property
-    def buyer_pay_amount(self) -> float:
-        """Total Buyer Outflow = Market Value + Commission"""
-        return (self.price * self.quantity) + self.buyer_fee
-
-    @property
-    def seller_receive_amount(self) -> float:
-        """Total Seller Inflow = Market Value - Commission - Stamp Duty"""
-        return (self.price * self.quantity) - self.seller_fee - self.seller_tax
-
 @dataclass
 class PolicyState:
     tax_rate: float = GLOBAL_CONFIG.TAX_RATE_STAMP       
     risk_free_rate: float = 0.02  
     liquidity_injection: float = 0.0 
-    description: str = "Initial State"
-
-@dataclass
-class Candle:
-    step: int 
-    timestamp: str 
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: int
-    is_simulated: bool = False 
+    description: str = "Initial State" 
 
 # ==========================================
 # PART 3: Matching Engine
@@ -186,9 +126,10 @@ class MatchingEngine:
     5. National Team Intervention
     """
 
-    def __init__(self, symbol: str = "A_SHARE_IDX", prev_close: float = 3000.0):
+    def __init__(self, symbol: str = "A_SHARE_IDX", prev_close: float = 3000.0, clock: Optional[SimulationClock] = None):
         self.symbol = symbol
         self.prev_close = prev_close
+        self.clock = clock
         
         # Order Books or LOB
         # Unified Interface: self.lob will always be an object with .add_order(), .get_depth(), etc.
@@ -252,24 +193,33 @@ class MatchingEngine:
                     price=order.price, 
                     quantity=order.quantity, 
                     agent_id="NATIONAL_TEAM", 
-                    side='buy', 
-                    timestamp=time.time()
+                    side=OrderSide.BUY, 
+                    timestamp=self.clock.timestamp if self.clock else time.time(),
+                    order_type=OrderType.LIMIT,
+                    symbol=self.symbol
                 )
                 # Inject directly
                 if USE_CPP_LOB:
-                    lob_team_order = OrderModel.create(
+                    lob_team_order = OrderModel(
                         agent_id=team_order.agent_id,
                         symbol=self.symbol,
                         side=team_order.side,
-                        order_type="limit",
+                        order_type=OrderType.LIMIT,
                         price=team_order.price,
-                        quantity=team_order.quantity
+                        quantity=team_order.quantity,
+                        order_id=team_order.order_id,
+                        timestamp=team_order.timestamp
                     )
-                    lob_team_order.order_id = team_order.order_id
-                    lob_team_order.timestamp = team_order.timestamp
                     self.lob.add_order(lob_team_order)
                 else:
-                    heapq.heappush(self.bids, (-team_order.price, team_order.timestamp, team_order))
+                    # For Python implementation, we might need adjustments if using heapq directly
+                    # But if using unified interface self.lob, we should use that.
+                    # The original code used heapq.heappush directly for Python fallback?
+                    # "else: heapq.heappush..."
+                    # Let's stick to using self.lob.add_order for consistency if possible.
+                    # But self.lob is OrderBook instance.
+                    
+                    self.lob.add_order(team_order)
 
         # 3. Matching Logic
         generated_trades = []
@@ -277,39 +227,39 @@ class MatchingEngine:
         # 3. Matching Logic
         generated_trades = []
 
-        # Adapter: Convert local Order to LOB Order (Python or C++)
-        # Both implementations expect similar fields
-        lob_order_cls = OrderModel.create if USE_CPP_LOB else OrderModel.create
-        
-        # Note: core.exchange.order_book.Order.create signature:
-        # agent_id, symbol, side, order_type, price, quantity
+
         
         lob_id = order.order_id
         
         if USE_CPP_LOB:
-             lob_order = OrderModel.create(
+             # C++ implementation might need a different dictionary or specific fields
+             # But here we are creating a specific Order object for the LOB
+             # Check if OrderBookCPP expects core.types.Order or its own thing
+             # Assuming it expects the same fields.
+             
+             lob_order = OrderModel(
                 agent_id=order.agent_id,
                 symbol=self.symbol,
                 side=order.side,
-                order_type="limit",
+                order_type=OrderType.LIMIT,
                 price=order.price,
                 quantity=order.quantity,
-                order_id=lob_id 
+                order_id=lob_id,
+                timestamp=order.timestamp
             )
-             lob_order.timestamp = order.timestamp
         else:
-            from core.exchange.order_book import Order as PyOrder
-            lob_order = PyOrder.create(
+            # Python implementation
+            from core.types import Order as PyOrder
+            lob_order = PyOrder(
                 agent_id=order.agent_id,
                 symbol=self.symbol,
                 side=order.side,
-                order_type="limit",
+                order_type=OrderType.LIMIT,
                 price=order.price,
                 quantity=order.quantity,
-                order_id=lob_id
+                order_id=lob_id,
+                timestamp=order.timestamp
             )
-            # Python implementation specific overrides
-            lob_order.timestamp = order.timestamp
             
         # Execute Matching via Polymorphic Interface
         # Both implementations should have .add_order(order) returning List[Trade]
@@ -451,7 +401,7 @@ class MatchingEngine:
                     quantity=match_qty,
                     buy_agent_id=buy_order.agent_id,
                     sell_agent_id=sell_order.agent_id,
-                    timestamp=time.time(),
+                    timestamp=self.clock.timestamp if self.clock else time.time(),
                     buyer_fee=market_val * comm_rate,
                     seller_fee=market_val * comm_rate,
                     seller_tax=market_val * stamp_rate
@@ -494,10 +444,34 @@ class RealMarketLoader:
             period: 加载天数，默认365天
         """
         try:
-            print(f"[*] 正在加载 {period} 天的 {symbol} 历史数据...")
-            df = ak.stock_zh_index_daily(symbol=symbol)
+            cache_dir = "data/cache"
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_file = os.path.join(cache_dir, f"{symbol}_{period}.csv")
+            
+            if os.path.exists(cache_file):
+                print(f"[*] Loading {symbol} from cache: {cache_file}")
+                df = pd.read_csv(cache_file)
+            else:
+                print(f"[*] Loading {period} days of {symbol} from akshare...")
+                try:
+                     df = ak.stock_zh_index_daily(symbol=symbol)
+                     if df is not None and not df.empty:
+                         df.to_csv(cache_file, index=False)
+                except Exception as e:
+                    print(f"[!] Akshare failed: {e}")
+                    df = None
+
+            # Fallback to default data if everything else fails
+            if df is None or df.empty:
+                default_file = "data/sh000001_default.csv"
+                if os.path.exists(default_file):
+                    print(f"[!] Using default fallback data: {default_file}")
+                    df = pd.read_csv(default_file)
+                else:
+                    print(f"[!] No default data found at {default_file}")
+            
             if df is None or df.empty: 
-                raise ValueError("未获取到数据")
+                raise ValueError(f"未获取到数据且无缓存或默认文件。请检查网络或确保 {default_file} 存在。")
             
             df = df.tail(int(period)).reset_index(drop=True)
             candles = []
@@ -511,6 +485,7 @@ class RealMarketLoader:
                 d = str(row.get('date', row.get('Date', '2024-01-01')))
                 
                 candles.append(Candle(
+                    symbol=symbol,
                     step=-(cnt - i), 
                     timestamp=d, 
                     open=o, high=h, low=l, close=c, 
@@ -521,7 +496,7 @@ class RealMarketLoader:
             return candles
         except Exception as e:
             print(f"[!] 数据加载失败: {e}")
-            return [Candle(-1, "2024-01-01", 3000, 3000, 3000, 3000, 100000, False)]
+            return [Candle(symbol, -1, "2024-01-01", 3000, 3000, 3000, 3000, 100000, 0.0, False)]
 
 class PolicyInterpreter:
     """
@@ -671,9 +646,10 @@ class PolicyInterpreter:
 # ==========================================
 
 class MarketDataManager:
-    def __init__(self, api_key_or_router, load_real_data=True):
+    def __init__(self, api_key_or_router, load_real_data=True, clock: Optional[SimulationClock] = None):
         self.policy = PolicyState()
         self.interpreter = PolicyInterpreter(api_key_or_router)
+        self.clock = clock
         
         # Load Data
         self.history_candles = RealMarketLoader.load_history() if load_real_data else []
@@ -682,7 +658,7 @@ class MarketDataManager:
         initial_price = self.history_candles[-1].close if self.history_candles else 3000.0
         
         # Initialize Core Engine
-        self.engine = MatchingEngine(prev_close=initial_price)
+        self.engine = MatchingEngine(prev_close=initial_price, clock=self.clock)
         
         # State
         self.current_news = "Waiting for market open"
@@ -702,7 +678,7 @@ class MarketDataManager:
         # Reset engine state but keep price if continued? 
         # Usually reset to last historical price
         initial_price = self.history_candles[-1].close if self.history_candles else 3000.0
-        self.engine = MatchingEngine(prev_close=initial_price)
+        self.engine = MatchingEngine(prev_close=initial_price, clock=self.clock)
 
     def apply_policy(self, text: str):
         params = self.interpreter.interpret(text)
@@ -733,7 +709,7 @@ class MarketDataManager:
         """Pass agent orders to the matching engine."""
         return self.engine.submit_order(order, self.policy.liquidity_injection)
 
-    def finalize_step(self, step_idx, last_date_str) -> Candle:
+    def finalize_step(self, step_idx, last_date_str, trades: List[Trade] = None) -> Candle:
         """
         Close the current simulation step, generate a Candle, 
         and prepare the engine for the next step.
@@ -744,7 +720,10 @@ class MarketDataManager:
         new_date_str = ChinaTradingCalendar.get_next_trading_day(last_date_str)
         
         # 2. Get executed trades for this step
-        step_trades = self.engine.flush_step_trades()
+        if trades is None:
+            step_trades = self.engine.flush_step_trades()
+        else:
+            step_trades = trades
         
         # 3. Calculate Limits (Visual/Logic consistency)
         limit_rate = GLOBAL_CONFIG.PRICE_LIMIT
@@ -761,6 +740,7 @@ class MarketDataManager:
             new_c = max(limit_down, min(limit_up, new_c))
             
             c = Candle(
+                symbol=self.engine.symbol,
                 step=step_idx, 
                 timestamp=new_date_str, 
                 open=open_p, 
@@ -781,6 +761,7 @@ class MarketDataManager:
             close_p = prices[-1] # Close is the last trade price
             
             c = Candle(
+                symbol=self.engine.symbol,
                 step=step_idx, 
                 timestamp=new_date_str, 
                 open=prices[0],  # Open is first trade price of the step

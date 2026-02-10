@@ -1013,7 +1013,13 @@ else:
                             <div style="margin-top: 10px;">
                                 <span style="color: #888;">情绪分数:</span>
                                 <span style="color: {get_emotion_color(latest.emotion_score)}; font-size: 20px; font-weight: bold;">
-                                    {latest.emotion_score:+.2f}
+                                {latest.emotion_score:+.2f}
+                                </span>
+                            </div>
+                            <div style="margin-top: 5px; color: #b0b0bb;">
+                                状态: {latest.market_context.get('emotional_state', 'Unknown')}
+                                <span style="font-size: 12px; color: #666; margin-left: 10px;">
+                                    (社交信号: {latest.market_context.get('social_signal', 'N/A')})
                                 </span>
                             </div>
                             <div style="margin-top: 5px; color: #888;">
@@ -1218,6 +1224,92 @@ else:
                     st.markdown(f"""
                     - **Agent {v['agent_id']}**: {v['type']} - {v['detail']}
                     """)
+        
+        # ====== [NEW] PolicyManager 策略风洞控制台 ======
+        st.markdown("---")
+        st.markdown("### 🎛️ 策略风洞控制台")
+        st.caption("实时调整监管策略参数，观察对市场微观结构的影响")
+        
+        if ctrl:
+            # 获取当前策略状态
+            policy_status = ctrl.model.get_policy_status()
+            
+            col_p1, col_p2 = st.columns(2)
+            
+            with col_p1:
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
+                            padding: 15px; border-radius: 10px; margin-bottom: 10px;">
+                    <h4 style="margin: 0; color: #ff6b6b;">⚡ 动态熔断机制</h4>
+                    <p style="color: #888; font-size: 12px; margin: 5px 0;">
+                        当价格偏离基准超过阈值时，自动暂停交易
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                cb_active = st.toggle(
+                    "启用熔断",
+                    value=policy_status["circuit_breaker"]["active"],
+                    key="policy_cb_active"
+                )
+                
+                cb_threshold = st.slider(
+                    "熔断阈值 (%)",
+                    min_value=1, max_value=20,
+                    value=int(policy_status["circuit_breaker"]["threshold"] * 100),
+                    step=1,
+                    key="policy_cb_threshold",
+                    help="价格偏离前收盘价的百分比阈值"
+                )
+                
+                # Apply changes
+                ctrl.model.set_policy("circuit_breaker", "active", cb_active)
+                ctrl.model.set_policy("circuit_breaker", "threshold_pct", cb_threshold / 100.0)
+                
+                # Status indicator
+                if policy_status["circuit_breaker"]["is_halted"]:
+                    st.error("🔴 市场已熔断 — 订单将被拒绝")
+                else:
+                    st.success(f"🟢 市场正常 — 阈值 ±{cb_threshold}%")
+            
+            with col_p2:
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, #1a2e1a 0%, #16213e 100%); 
+                            padding: 15px; border-radius: 10px; margin-bottom: 10px;">
+                    <h4 style="margin: 0; color: #4DA6FF;">💰 交易税 (印花税)</h4>
+                    <p style="color: #888; font-size: 12px; margin: 5px 0;">
+                        每笔成交按成交额收取印花税，影响交易成本与流动性
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                tax_active = st.toggle(
+                    "启用交易税",
+                    value=policy_status["transaction_tax"]["active"],
+                    key="policy_tax_active"
+                )
+                
+                tax_rate = st.slider(
+                    "税率 (‰)",
+                    min_value=0.0, max_value=10.0,
+                    value=float(policy_status["transaction_tax"]["rate"] * 1000),
+                    step=0.1,
+                    key="policy_tax_rate",
+                    help="每笔成交额的千分比税率 (当前A股印花税为 1‰)"
+                )
+                
+                # Apply changes
+                ctrl.model.set_policy("tax", "active", tax_active)
+                ctrl.model.set_policy("tax", "rate", tax_rate / 1000.0)
+                
+                # Display
+                st.metric("当前税率", f"{tax_rate:.1f}‰")
+                if tax_rate > 1.0:
+                    st.warning(f"⚠️ 税率高于基准 (1‰)，可能抑制流动性")
+                elif tax_rate < 1.0 and tax_active:
+                    st.info(f"💡 税率低于基准 (1‰)，可能刺激交易")
+        else:
+            st.info("💡 请先启动仿真系统，策略控制台将在仿真运行时可用")
     
     # --- 行为金融标签页 ---
     with tab_behavior:

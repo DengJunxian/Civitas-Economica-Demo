@@ -571,24 +571,30 @@ class DeepSeekBrain:
         market_state: Dict, 
         account_state: Dict,
         model_priority: List[str] = None,
-        timeout_budget: float = 15.0
+        timeout_budget: float = 15.0,
+        emotional_state: str = "Neutral",
+        social_signal: str = "Neutral"
     ) -> Dict:
         """
-        异步执行思考过程 - 支持多模型优先级调用
+        异步执行思考过程 - 支持多模型优先级调用及认知增强
         
         Args:
             market_state: 市场状态
             account_state: 账户状态
-            model_priority: 模型优先级列表，如 ["deepseek-reasoner", "deepseek-chat"]
-            timeout_budget: 总超时预算（秒）
+            model_priority: 模型优先级列表
+            timeout_budget: 总超时预算
+            emotional_state: Agent 当前情绪状态 (如 "Anxious", "Greedy")
+            social_signal: 社交信号 (如 "Peers are panic selling")
             
         Returns:
-            Dict: 包含 'decision' (JSON)、'reasoning' (Str)、'emotion_score' (Float)、'model_used' (Str)
+            Dict: 决策结果与思维链
         """
         # 构建消息
         messages = [
             {"role": "system", "content": self._build_system_prompt()},
-            {"role": "user", "content": self._build_user_prompt(market_state, account_state)}
+            {"role": "user", "content": self._build_user_prompt(
+                market_state, account_state, emotional_state, social_signal
+            )}
         ]
         
         # 使用模型路由器调用
@@ -600,7 +606,7 @@ class DeepSeekBrain:
                 timeout_budget=timeout_budget
             )
         else:
-            # 降级：使用同步客户端
+            # 降级：使用同步客户端 (暂不支持新参数，仅作为兜底)
             return self.think(market_state, account_state)
         
         # 解析决策
@@ -610,7 +616,7 @@ class DeepSeekBrain:
         if not reasoning:
             reasoning = "（使用对话模型，无推理过程）"
         
-        # 情绪分析
+        # 情绪分析 (结合自身情绪状态)
         emotion_score = self._analyze_emotion(reasoning, decision_json)
         
         # 记录思维链历史
@@ -634,8 +640,14 @@ class DeepSeekBrain:
             "model_used": model_used
         }
     
-    def _build_user_prompt(self, market_state: Dict, account_state: Dict) -> str:
-        """构建用户提示词"""
+    def _build_user_prompt(
+        self, 
+        market_state: Dict, 
+        account_state: Dict,
+        emotional_state: str = "Neutral",
+        social_signal: str = "Neutral"
+    ) -> str:
+        """构建用户提示词 (增强版)"""
         # 检索记忆 (RAG)
         context_query = f"当前行情:{market_state.get('trend', '未知')}, 盈亏:{account_state.get('pnl_pct', 0):.2%}"
         past_lessons = self.memory.retrieve(context_query)
@@ -658,15 +670,17 @@ class DeepSeekBrain:
         - 政策描述: {policy_desc}
         - 分析摘要: {policy_summary if policy_summary else '暂无政策分析'}
         
-        【账户状态】
+        【个人状态】
+        - 情绪状态: {emotional_state} (这会显著影响你的风险偏好!)
+        - 社交信号: {social_signal} (你的朋友圈正在做什么?)
         - 可用资金: {account_state.get('cash', 0):.2f}
         - 持仓市值: {account_state.get('market_value', 0):.2f}
-        - 当前浮动盈亏: {account_state.get('pnl_pct', 0):.2%} (注意：你对这个数字非常敏感！)
+        - 当前浮动盈亏: {account_state.get('pnl_pct', 0):.2%}
         
         【闪回记忆】
         {lessons_text}
         
-        请基于你的人设和当前政策环境做出交易决策。
+        请作为一名真实的投资者，基于你的人设、当前情绪和社交压力，做出交易决策。
         """
     
     # --- 新增：快速思考方法（本地规则引擎） ---

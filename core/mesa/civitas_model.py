@@ -8,15 +8,17 @@ Mesa Model 编排器
 from mesa import Model
 from mesa.datacollection import DataCollector
 import numpy as np
+import asyncio
 from typing import Dict, List, Optional, Any
 
+from core.society.network import SocialGraph, InformationDiffusion # [NEW]
+from agents.persona import Persona, PersonaGenerator, RiskAppetite # [NEW]
 from core.mesa.civitas_agent import CivitasAgent
 from agents.cognition.utility import InvestorType
 import time
-from core.market_engine import Order
+from core.market_engine import Order, OrderType
 from core.time_manager import SimulationClock
 from core.utils import truncate_text
-
 
 class CivitasModel(Model):
     """
@@ -67,6 +69,14 @@ class CivitasModel(Model):
         # 0. 初始化仿真时钟
         self.clock = SimulationClock()
         
+        # [NEW] 初始化社会网络与传播引擎
+        # k must be <= n and even for Watts-Strogatz
+        graph_k = min(10, n_agents - 1)
+        if graph_k % 2 != 0:
+            graph_k = max(2, graph_k - 1)
+        self.social_graph = SocialGraph(n_agents=n_agents, k=graph_k, p=0.1, seed=seed)
+        self.diffusion = InformationDiffusion(self.social_graph)
+        
         # 1. 初始化市场引擎 (单一真实之源)
         from core.market_engine import MarketDataManager
         # 注意: 我们不需要在这里传 api_key，MarketDataManager 会自己从 Config 或 Env 获取
@@ -74,11 +84,6 @@ class CivitasModel(Model):
         
         # 覆写初始价格 (如果有指定)
         if hasattr(self.market_manager.engine, 'last_price'):
-            # 如果加载了历史数据，引擎价格可能已经不同。
-            # 如果强制指定 initial_price，我们需要 reset engine?
-            # 简单起见，我们信任 MarketLoader 加载的最后价格作为起点，
-            # 除非 initial_price 显式传入且不同于默认。
-            # 这里我们让 engine 决定价格。
             pass
             
         self.current_price = self.market_manager.engine.last_price
@@ -116,7 +121,8 @@ class CivitasModel(Model):
                 "Panic_Level": "panic_level",
                 "Avg_Wealth": lambda m: np.mean([a.wealth for a in m.agents]),
                 "Avg_Sentiment": lambda m: np.mean([a.sentiment for a in m.agents]),
-                "Volume": lambda m: m.market_manager.sim_candles[-1].volume if m.market_manager.sim_candles else 0
+                "Volume": lambda m: m.market_manager.sim_candles[-1].volume if m.market_manager.sim_candles else 0,
+                "Infected_Count": lambda m: m.diffusion.history[-1]['infected'] if m.diffusion.history else 0 # [NEW]
             },
             agent_reporters={
                 "Wealth": "wealth",
@@ -128,37 +134,60 @@ class CivitasModel(Model):
         )
     
     def _create_agents(self, panic_ratio: float, quant_ratio: float) -> None:
-        """创建异质性 Agent 群体"""
+        """创建异质性 Agent 群体 (集成 Persona 和 Social Network)"""
         n_panic = int(self.n_agents * panic_ratio)
         n_quant = int(self.n_agents * quant_ratio)
         n_normal = self.n_agents - n_panic - n_quant
         
-        # 恐慌型散户
+        # Generate generic personas first
+        personas = PersonaGenerator.generate_distribution(self.n_agents)
+        
+        # Assign Agents
+        idx = 0
+        
+        # 1. Panic Retail (High Conformity, Low Patience)
         for _ in range(n_panic):
-            CivitasAgent(
-                model=self,
-                investor_type=InvestorType.PANIC_RETAIL,
-                initial_cash=np.random.uniform(50000, 200000),
-                use_local_reasoner=True
-            )
-        
-        # 量化投资者
+            p = personas[idx]
+            p.risk_appetite = RiskAppetite.GAMBLER
+            p.conformity = 0.9
+            p.patience = 0.1
+            p.loss_aversion = 3.0
+            
+            self._create_single_agent(idx, InvestorType.PANIC_RETAIL, p)
+            idx += 1
+            
+        # 2. Quants (Low Conformity, Disciplined)
         for _ in range(n_quant):
-            CivitasAgent(
-                model=self,
-                investor_type=InvestorType.DISCIPLINED_QUANT,
-                initial_cash=np.random.uniform(500000, 2000000),
-                use_local_reasoner=True
-            )
-        
-        # 普通投资者
+            p = personas[idx]
+            p.risk_appetite = RiskAppetite.BALANCED
+            p.conformity = 0.05
+            p.influence = 0.8 # Quants might lead trend
+            p.loss_aversion = 1.0 # Neutral to loss
+            
+            self._create_single_agent(idx, InvestorType.DISCIPLINED_QUANT, p, cash=1_000_000)
+            idx += 1
+            
+        # 3. Normal Agents
         for _ in range(n_normal):
-            CivitasAgent(
-                model=self,
-                investor_type=InvestorType.NORMAL,
-                initial_cash=np.random.uniform(100000, 500000),
-                use_local_reasoner=True
-            )
+            p = personas[idx]
+            self._create_single_agent(idx, InvestorType.NORMAL, p)
+            idx += 1
+            
+    def _create_single_agent(self, idx: int, inv_type: InvestorType, persona: Persona, cash: float = None) -> CivitasAgent:
+        if cash is None:
+            cash = np.random.uniform(50000, 500000)
+            
+        agent = CivitasAgent(
+            model=self,
+            investor_type=inv_type,
+            initial_cash=cash,
+            use_local_reasoner=True,
+            persona=persona
+        )
+        
+        # Bind to Social Network
+        agent.core.bind_social_node(idx, self.social_graph)
+        return agent
     
     def get_market_state(self) -> Dict[str, Any]:
         """获取当前市场状态 (供 Agent 决策使用)"""
@@ -171,14 +200,13 @@ class CivitasModel(Model):
             "volatility": self.volatility,
             "csad": self.csad,
             "news": truncate_text(self.market_manager.current_news, 500),
-            "dates": self.market_manager.history_candles[-1].timestamp if self.market_manager.history_candles else "2024-01-01"
+            "dates": self.market_manager.history_candles[-1].timestamp if self.market_manager.history_candles else "2024-01-01",
+            "infected_ratio": self.diffusion.history[-1]['infected'] / self.n_agents if self.diffusion.history else 0 # [NEW]
         }
     
     @property
     def current_dt(self) -> Any:
         # 返回当前仿真时间 (pd.Timestamp)
-        # 优先使用 sim_candles 的最后一根 K 线时间，或者 history_candles
-        # 如果都没有，返回一个默认起始时间
         if self.market_manager.sim_candles:
             ts = self.market_manager.sim_candles[-1].timestamp
         elif self.market_manager.history_candles:
@@ -189,24 +217,37 @@ class CivitasModel(Model):
         import pandas as pd
         return pd.Timestamp(ts)
 
-    def submit_order(self, order) -> List[Any]:
+    def set_policy(self, name: str, param: str, value) -> None:
         """
-        Agent 提交的一级入口
+        动态设置监管策略参数
         
         Args:
-           order: core.market_engine.Order 对象
-           
-        Returns:
-           List[Trade]: 该订单产生的成交记录 (作为 Taker)
+            name: 策略名称 ("circuit_breaker" | "tax")
+            param: 参数名 (e.g. "threshold_pct", "rate", "active")
+            value: 参数值
         """
-        # 转发给 MarketManager
-        trades = self.market_manager.submit_agent_order(order)
-        return trades
+        self.market_manager.policy_manager.set_policy_param(name, param, value)
+    
+    def get_policy_status(self) -> Dict[str, Any]:
+        """获取当前策略状态"""
+        pm = self.market_manager.policy_manager
+        cb = pm.policies.get("circuit_breaker")
+        tax = pm.policies.get("tax")
+        return {
+            "circuit_breaker": {
+                "active": cb.active if cb else False,
+                "threshold": cb.threshold_pct if cb else 0,
+                "is_halted": cb.is_halted if cb else False,
+            },
+            "transaction_tax": {
+                "active": tax.active if tax else False,
+                "rate": tax.rate if tax else 0,
+            }
+        }
 
     def step(self) -> None:
         """
         [已废弃] 同步 Step 方法
-        
         请使用 async_step() 代替。
         """
         raise NotImplementedError("CivitasModel.step() is deprecated. Please use await model.async_step() instead.")
@@ -216,96 +257,65 @@ class CivitasModel(Model):
         执行一个模拟步骤 (异步版)
         
         1. 收集 Agent 提示词
-        2. 并行调用 LLM
+        2. 并行调用 LLM (Brain)
         3. 分发结果并执行交易
         4. 市场结算
         """
-        from agents.cognition.llm_brain import ReasoningResult, Decision
+        # [NEW] Update Circuit Breaker reference price at start of each step
+        cb = self.market_manager.policy_manager.policies.get("circuit_breaker")
+        if cb:
+            cb.update_reference_price(self.current_price)
         
-        # 阶段 1: 收集 Prompt & 识别 Local Agents
-        llm_agents = []
-        prompts = []
-        local_agents = []
+        # [NEW] Update Social Network Dynamics
+        if self.diffusion:
+            self.diffusion.update_sentiment_propagation()
         
-        # 准备市场状态缓存 (避免重复计算)
+        # 阶段 1: 市场感知
         market_state = self.get_market_state()
+        snapshot = self.market_manager.get_market_snapshot() # Get snapshot object
+        # Ensure snapshot has required fields for Agent
+        
+        news = [market_state["news"]] if market_state["news"] else []
+        
+        # 阶段 2: Agent 并行决策 (Tier 1)
+        # Gather all agent.async_act coroutines
+        agent_tasks = []
+        active_agents = []
         
         for agent in self.agents:
-            if not isinstance(agent, CivitasAgent):
+            if isinstance(agent, CivitasAgent):
+                agent_tasks.append(agent.async_act(snapshot, news))
+                active_agents.append(agent)
+        
+        # Concurrent execution
+        orders = await asyncio.gather(*agent_tasks, return_exceptions=True)
+        
+        # 阶段 3: 订单提交
+        smart_actions = []
+        for agent, order_or_err in zip(active_agents, orders):
+            if isinstance(order_or_err, Exception):
+                print(f"[Model Error] Agent {agent.unique_id} act failed: {order_or_err}")
+                smart_actions.append(0)
                 continue
                 
-            # 使用新拆分的 API: prepare_decision
-            prompt, acc_state = agent.prepare_decision(market_state)
-            
-            if prompt:
-                llm_agents.append((agent, acc_state))
-                prompts.append(prompt)
-            else:
-                local_agents.append((agent, acc_state))
-        
-        # 阶段 2: 并行推理 (LLM)
-        results = []
-        if prompts:
-            # 懒加载 Router
-            if not hasattr(self, 'shared_router'):
-                from core.model_router import ModelRouter
-                from config import GLOBAL_CONFIG
-                self.shared_router = ModelRouter(
-                    deepseek_key=GLOBAL_CONFIG.DEEPSEEK_API_KEY,
-                    hunyuan_key=GLOBAL_CONFIG.HUNYUAN_API_KEY,
-                    zhipu_key=GLOBAL_CONFIG.ZHIPU_API_KEY
-                )
-
-            # 获取 Priority
-            priority = self.shared_router.get_model_priority("SMART")
-            
-            import asyncio
-            # 创建 Tasks
-            tasks = [
-                self.shared_router.call_with_fallback(msgs, priority)
-                for msgs in prompts
-            ]
-            
-            # 并发执行
-            raw_results = await asyncio.gather(*tasks)
-            
-            # Parse results
-            for (content, reasoning, model_name), (agent, acc_state) in zip(raw_results, llm_agents):
-                # Reuse agent's reasoner to parse
-                decision = agent.cognitive_agent.reasoner._parse_response(content)
-                res = ReasoningResult(decision, content, reasoning, model_name)
-                
-                results.append((agent, res, acc_state))
-
-        # 阶段 3: 处理 Local Agent
-        for agent, acc_state in local_agents:
-            # Local Reasoner call (Sync & Fast)
-            res = agent.cognitive_agent.reasoner.derive_decision(market_state, acc_state)
-            results.append((agent, res, acc_state))
-            
-        # 阶段 4: 分发决策 & 记录状态
-        for agent, result, acc_state in results:
-            # 使用新 API: finalize_decision
-            agent.finalize_decision(result, market_state, acc_state)
-
-        # 阶段 4.5: 收集 Smart Agent 动作 (用于 Tier 2 影响)
-        smart_actions = []
-        for agent in self.agents:
-            if isinstance(agent, CivitasAgent) and agent.pending_action:
-                act = agent.pending_action.get("action", "HOLD")
-                if act == "BUY":
-                    smart_actions.append(1)
-                elif act == "SELL":
-                    smart_actions.append(-1)
-                else:
-                    smart_actions.append(0)
+            order = order_or_err
+            if order:
+                self.market_manager.submit_agent_order(order)
+                # Record action for Tier 2 sentiment
+                # Order side can be string or Enum
+                side_str = str(order.side).lower()
+                if "buy" in side_str: smart_actions.append(1)
+                elif "sell" in side_str: smart_actions.append(-1)
+                else: smart_actions.append(0)
             else:
                 smart_actions.append(0)
-        
+
         # 更新 Smart Sentiment 指标
         self.last_smart_sentiment = np.mean(smart_actions) if smart_actions else 0.0
 
         # 阶段 5: 执行交易 (Tier 1 Advance)
+        # Mesa's step/advance structure is less relevant here as we handled actions explicitly
+        # But we call it to maintain compatibility if any other logic exists in agents
         self.agents.do("advance")
         
         # 阶段 5.5: Tier 2 (Vectorized) 决策与执行
@@ -316,7 +326,7 @@ class CivitasModel(Model):
         
         self.population.update_tier2_sentiment(smart_actions, trend_signal)
         
-        
+        # B. 生成决策
         v_actions, v_qtys, v_prices = self.population.generate_tier2_decisions(self.current_price)
         
         # C. 批量下单 (采样部分以减轻撮合压力)
@@ -330,10 +340,12 @@ class CivitasModel(Model):
             for idx in chosen_idx:
                 side = 'buy' if v_actions[idx] == 1 else 'sell'
                 order = Order(
+                    symbol=self.market_manager.engine.symbol,
                     price=float(v_prices[idx]),
                     quantity=int(v_qtys[idx]),
-                    agent_id=f"Vec_{idx}",
                     side=side,
+                    order_type=OrderType.LIMIT, 
+                    agent_id=f"Vec_{idx}",
                     timestamp=ts
                 )
                 self.market_manager.submit_agent_order(order)
@@ -352,16 +364,20 @@ class CivitasModel(Model):
         vec_dirs = []
         
         for t in step_trades:
+            # Check buyer (Standardized to buyer_agent_id)
+            buyer_id = getattr(t, 'buyer_agent_id', getattr(t, 'buy_agent_id', None))
+            seller_id = getattr(t, 'seller_agent_id', getattr(t, 'sell_agent_id', None))
+            
             # 检查买方
-            if t.buy_agent_id.startswith("Vec_"):
-                idx = int(t.buy_agent_id.split("_")[1])
+            if buyer_id and buyer_id.startswith("Vec_"):
+                idx = int(buyer_id.split("_")[1])
                 vec_indices.append(idx)
                 vec_prices.append(t.price)
                 vec_qtys.append(t.quantity)
                 vec_dirs.append(1) # Buy
             # 检查卖方
-            if t.sell_agent_id.startswith("Vec_"):
-                idx = int(t.sell_agent_id.split("_")[1])
+            if seller_id and seller_id.startswith("Vec_"):
+                idx = int(seller_id.split("_")[1])
                 vec_indices.append(idx)
                 vec_prices.append(t.price)
                 vec_qtys.append(t.quantity)
@@ -395,6 +411,7 @@ class CivitasModel(Model):
         
         # 推进仿真时钟
         self.clock.tick()
+        self.steps += 1
         
     def _update_trend(self):
         """简单趋势判断"""
@@ -417,11 +434,6 @@ class CivitasModel(Model):
         
         avg_sentiment = np.mean(sentiments)
         self.csad = np.mean(np.abs(np.array(sentiments) - avg_sentiment))
-        
-        # 同步给 MarketManager 以影响恐慌因子
-        # MarketManager 内部也有 calculate_csad 逻辑，我们这里做轻量级计算即可
-        # 也可以把 Agent returns 传给 Manager
-        pass
         
     async def run_simulation(self, n_steps: int = 100) -> None:
         """运行完整模拟 (异步)"""

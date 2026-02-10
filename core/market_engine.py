@@ -274,11 +274,25 @@ class MatchingEngine:
             # Map fields from LOB Trade to MarketEngine Trade
             # Check attribute names carefully. Python Trade has: trade_id, price, quantity, maker_id...
             
+            # LOB Trade structure:
+            # price, quantity, maker_agent_id, taker_agent_id, maker_order_id, taker_order_id, etc.
+            # We need to map them correctly.
+            # Assuming 't' matches what lob.add_order returns.
+            # If using Python OrderBook, it returns a list of Trade objects defined in ITSELF or types.py?
+            # It seems core/exchange/order_book.py might generate dicts or its own Trade tuples.
+            # Based on current code structure, let's assume 't' has attributes.
+            
+            # Direct mapping to core.types.Trade
             local_trade = Trade(
+                trade_id=str(uuid.uuid4()), # Generate new ID
                 price=t.price,
                 quantity=int(t.quantity),
-                buy_agent_id=t.taker_agent_id if order.side=='buy' else t.maker_agent_id,
-                sell_agent_id=t.maker_agent_id if order.side=='buy' else t.taker_agent_id,
+                maker_id=getattr(t, 'maker_order_id', getattr(t, 'maker_id', 'unknown')), 
+                taker_id=getattr(t, 'taker_order_id', getattr(t, 'taker_id', order.order_id)),
+                maker_agent_id=t.maker_agent_id,
+                taker_agent_id=t.taker_agent_id,
+                buyer_agent_id=t.taker_agent_id if order.side=='buy' else t.maker_agent_id,
+                seller_agent_id=t.maker_agent_id if order.side=='buy' else t.taker_agent_id,
                 timestamp=t.timestamp,
                 buyer_fee=t.buyer_fee,
                 seller_fee=t.seller_fee,
@@ -397,6 +411,7 @@ class MatchingEngine:
                 stamp_rate = GLOBAL_CONFIG.TAX_RATE_STAMP
                 
                 trade = Trade(
+                    trade_id=str(uuid.uuid4()), # Generate new ID to ensure uniqueness for aggregates
                     price=opening_price,
                     quantity=match_qty,
                     buy_agent_id=buy_order.agent_id,
@@ -404,8 +419,24 @@ class MatchingEngine:
                     timestamp=self.clock.timestamp if self.clock else time.time(),
                     buyer_fee=market_val * comm_rate,
                     seller_fee=market_val * comm_rate,
-                    seller_tax=market_val * stamp_rate
+                    seller_tax=0.0 # Will be updated by PolicyManager
                 )
+                
+                # [NEW] Apply Policy Effects (Tax)
+                # Note: RunCallAuction is internal to MatchingEngine but we need policy here.
+                # Ideally MatchingEngine should know about Policy, but for now we apply it here or outside?
+                # Actually, RunCallAuction is in MatchingEngine which doesn't know PolicyManager.
+                # So we should apply tax in MarketDataManager.finalize_step or wrapper.
+                # BUT, wait, this code block is INSIDE MatchingEngine.run_call_auction in the original file?
+                # Ah, I am editing core/market_engine.py. 
+                # run_call_auction is a method of MatchingEngine.
+                # MatchingEngine doesn't have reference to PolicyManager.
+                # Let's simple apply default tax here, OR pass PolicyManager to MatchingEngine.
+                # EASIER: Leave it as default in MatchingEngine, and overwrite it in MarketDataManager if needed.
+                # Or better, let MarketDataManager handle the loop.
+                
+                trade.seller_tax = market_val * stamp_rate # Default
+                
                 trades.append(trade)
                 
                 # 更新订单状态
@@ -645,11 +676,16 @@ class PolicyInterpreter:
 # (Integrated Logic)
 # ==========================================
 
+from core.policy import PolicyManager  # [NEW]
+
 class MarketDataManager:
     def __init__(self, api_key_or_router, load_real_data=True, clock: Optional[SimulationClock] = None):
         self.policy = PolicyState()
         self.interpreter = PolicyInterpreter(api_key_or_router)
         self.clock = clock
+        
+        # [NEW] Policy Manager
+        self.policy_manager = PolicyManager()
         
         # Load Data
         self.history_candles = RealMarketLoader.load_history() if load_real_data else []
@@ -687,6 +723,11 @@ class MarketDataManager:
         self.policy.description = text
         self.current_news = params.get("initial_news", "Policy Implemented")
         self.panic_level = params.get("fear_factor", 0.0)
+        
+        # [NEW] Sync with PolicyManager
+        self.policy_manager.set_policy_param("tax", "rate", self.policy.tax_rate)
+        # Note: Circuit breaker threshold might be set via explicit API, 
+        # but here we interpret general policy text.
 
     def calculate_csad(self, agent_returns):
         """Calculate Cross-Sectional Absolute Deviation to detect herd behavior."""
@@ -707,7 +748,67 @@ class MarketDataManager:
 
     def submit_agent_order(self, order: Order):
         """Pass agent orders to the matching engine."""
+        # [NEW] Check Policy (Circuit Breaker, etc.)
+        market_state = {"last_price": self.engine.last_price}
+        policy_res = self.policy_manager.check_order(order, market_state)
+        
+        if not policy_res.is_allowed:
+            # Order Rejected by Policy
+            # In real system, we might return a Rejected Order status
+            # For now, return empty list (no trades) and maybe log or callback
+            # Ideally we mark order as rejected.
+            return []
+            
         return self.engine.submit_order(order, self.policy.liquidity_injection)
+
+    def get_market_snapshot(self) -> "MarketSnapshot":
+        """Generate a MarketSnapshot for agents."""
+        from agents.base_agent import MarketSnapshot
+        
+        # Get L5 Depth
+        depth = self.engine.get_order_book_depth(5)
+        
+        # Calculate volatility (simple std dev)
+        vol = 0.0
+        if len(self.candles) > 20:
+             closes = [c.close for c in self.candles[-20:]]
+             vol = float(np.std(closes))
+             
+        # Trend (5-day return)
+        trend = 0.0
+        if len(self.candles) > 5:
+            start_p = self.candles[-5].close
+            if start_p > 0:
+                trend = (self.candles[-1].close - start_p) / start_p
+
+        # Derive Best Bid/Ask
+        best_bid = depth['bids'][0]['price'] if depth['bids'] else None
+        best_ask = depth['asks'][0]['price'] if depth['asks'] else None
+        
+        mid = self.engine.last_price
+        spread = 0.0
+        if best_bid and best_ask:
+            mid = (best_bid + best_ask) / 2
+            spread = best_ask - best_bid
+            
+        return MarketSnapshot(
+            symbol=self.engine.symbol,
+            last_price=self.engine.last_price,
+            best_bid=best_bid,
+            best_ask=best_ask,
+            mid_price=mid,
+            bid_ask_spread=spread,
+            depth=depth,
+            total_volume=self.engine.total_volume,
+            volatility=vol,
+            market_trend=trend,
+            panic_level=self.panic_level,
+            timestamp=self.clock.timestamp if self.clock else time.time()
+        )
+
+    def get_order_book_depth(self, level=5) -> Dict:
+        """Get L5 Market Depth."""
+        return self.engine.get_order_book_depth(level)
 
     def finalize_step(self, step_idx, last_date_str, trades: List[Trade] = None) -> Candle:
         """
@@ -731,34 +832,41 @@ class MarketDataManager:
         limit_down = self.engine.prev_close * (1.0 - limit_rate)
 
         # 4. Generate Candle
+        # 4. Generate Candle
         if not step_trades:
             # No trades: Simulate random drift based on panic
             drift = random.normalvariate(0, 0.005)
             if self.panic_level > 0.5: drift -= 0.01
             
-            new_c = open_p * (1 + drift)
-            new_c = max(limit_down, min(limit_up, new_c))
+            # Simple drift
+            close_p = open_p * (1 + drift)
+            high_p = max(open_p, close_p)
+            low_p = min(open_p, close_p)
+            vol = 0
             
             c = Candle(
                 symbol=self.engine.symbol,
                 step=step_idx, 
                 timestamp=new_date_str, 
                 open=open_p, 
-                high=max(open_p, new_c), 
-                low=min(open_p, new_c), 
-                close=new_c, 
+                high=high_p, 
+                low=low_p, 
+                close=close_p, 
                 volume=0, 
                 is_simulated=True
             )
-            # Update engine price for consistency
-            self.engine.last_price = new_c
+            self.engine.last_price = close_p
         else:
-            prices = [t.price for t in step_trades]
-            vol = sum(t.quantity for t in step_trades)
+            # Policy Effect: Update Taxes on Trades
+            for t in step_trades:
+                t.seller_tax = self.policy_manager.calculate_total_tax(t)
             
+            # Standard Candle Logic
+            prices = [t.price for t in step_trades]
             high_p = max(prices)
             low_p = min(prices)
             close_p = prices[-1] # Close is the last trade price
+            vol = sum(t.quantity for t in step_trades)
             
             c = Candle(
                 symbol=self.engine.symbol,
@@ -773,7 +881,7 @@ class MarketDataManager:
             )
 
         # 5. Store Candle & Prepare next day
-        self.candles.append(c)
+        self.sim_candles.append(c) # Fix: Append to sim_candles, not self.candles (which is a property)
         self.engine.update_prev_close(c.close) # Set Prev Close for next step's limit check
         
         return c

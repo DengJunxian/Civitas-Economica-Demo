@@ -85,6 +85,8 @@ class OrderBookCPP(OrderBook):
                 taker_id=tid2,
                 maker_agent_id=maid,
                 taker_agent_id=taid,
+                buyer_agent_id=taid if order.side == OrderSide.BUY else maid,
+                seller_agent_id=maid if order.side == OrderSide.BUY else taid,
                 timestamp=ts,
                 buyer_fee=bfee,
                 seller_fee=sfee,
@@ -117,11 +119,11 @@ class OrderBookCPP(OrderBook):
         depth = self._cpp_lob.get_depth(levels)
         
         bids_formatted = []
-        for price, qty in depth["bids"]:
+        for price, qty in depth.get("bids", []):
             bids_formatted.append({"price": price, "qty": qty})
             
         asks_formatted = []
-        for price, qty in depth["asks"]:
+        for price, qty in depth.get("asks", []):
             asks_formatted.append({"price": price, "qty": qty})
             
         return {"bids": bids_formatted, "asks": asks_formatted}

@@ -64,6 +64,8 @@ class Trade:
     taker_id: str
     maker_agent_id: str
     taker_agent_id: str
+    buyer_agent_id: str # 明确的买方 ID
+    seller_agent_id: str # 明确的卖方 ID
     timestamp: float # 仿真逻辑时间
     buyer_fee: float = 0.0
     seller_fee: float = 0.0

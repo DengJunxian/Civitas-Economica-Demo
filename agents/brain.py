@@ -659,12 +659,24 @@ class DeepSeekBrain:
         if policy_reasoning_raw:
             policy_summary = policy_reasoning_raw[:500] + "..." if len(policy_reasoning_raw) > 500 else policy_reasoning_raw
         
+        # [NEW] Regulatory Feedback
+        rejection_reason = market_state.get('last_rejection_reason')
+        regulatory_block = ""
+        if rejection_reason:
+            regulatory_block = f"""
+        【监管警告】
+        你的上一个订单被风控系统拦截了！
+        原因: {rejection_reason}
+        请反思你的行为。如果是"高频(OTR High)"，请降低下单频率；如果是"价格异常"，请检查你的挂单价格是否合理。
+        """
+
         return f"""
         【市场环境】
         - 价格: {market_state.get('price', 0):.2f}
         - 趋势: {market_state.get('trend', '未知')}
         - 恐慌指数: {market_state.get('panic_level', 0):.2f}
         - 最新消息: {market_state.get('news', '无')}
+        {regulatory_block}
         
         【当前政策】
         - 政策描述: {policy_desc}

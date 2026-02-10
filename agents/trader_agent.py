@@ -65,6 +65,10 @@ class TraderAgent(BaseAgent):
             },
             model_router=model_router
         )
+        
+        # [NEW] Compliance Feedback Memory
+        self.compliance_feedback: List[str] = []
+        
         # Sync initial confidence
         self.brain.state.confidence = self.profile.get("confidence_level", 0.5) * 100
 
@@ -145,7 +149,8 @@ class TraderAgent(BaseAgent):
             "price": snapshot.last_price,
             "trend": getattr(snapshot, "market_trend", "震荡"), 
             "panic_level": getattr(snapshot, "panic_level", 0.5), 
-            "news": "; ".join(news) if news else "无重大新闻"
+            "news": "; ".join(news) if news else "无重大新闻",
+            "last_rejection_reason": self.compliance_feedback[-1] if self.compliance_feedback else None
         }
         
         # Map numeric trend to string for Brain
@@ -316,6 +321,22 @@ class TraderAgent(BaseAgent):
              content = f"Decision: {decision}. Outcome: {outcome}"
              score = 1.0 if pnl > 0 else -1.0
              self.brain.memory.add_memory(content, score)
+             
+        # [NEW] 3. Handle REJECTED status (Regulatory Awareness)
+        status = outcome.get("status")
+        if status == "REJECTED" or status == OrderStatus.REJECTED:
+             reason = outcome.get("reason", "Unknown regulatory rejection")
+             self.compliance_feedback.append(reason)
+             if len(self.compliance_feedback) > 5:
+                 self.compliance_feedback.pop(0)
+                 
+             # Add to brain memory with negative penalty
+             content = f"REGULATORY REJECTION! Order was rejected by Risk Control. Reason: {reason}. Action was: {decision.get('action')}"
+             # Higher penalty than normal loss to ensure "respect" for regulation
+             self.brain.memory.add_memory(content, -2.0)
+             
+             # Also slightly decrease confidence
+             self.brain.state.confidence *= 0.95
 
     # ------------------------------------------
     # 额外方法 (针对 TraderAgent 特定请求)

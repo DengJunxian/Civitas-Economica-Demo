@@ -3,7 +3,7 @@
 import numpy as np
 import networkx as nx
 import pandas as pd
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 from dataclasses import dataclass, field
 import random
 

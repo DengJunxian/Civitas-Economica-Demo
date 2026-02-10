@@ -538,7 +538,8 @@ class RiskEngine:
     def check_order_compliance(
         self,
         agent_id: str,
-        order: Order
+        order: Order,
+        market_data: Optional[Dict] = None
     ) -> Tuple[bool, float, Optional[str]]:
         """
         检查订单合规性

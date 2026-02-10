@@ -676,7 +676,8 @@ class PolicyInterpreter:
 # (Integrated Logic)
 # ==========================================
 
-from core.policy import PolicyManager  # [NEW]
+from core.policy import PolicyManager  
+from core.regulation.risk_control import RiskEngine  # [NEW]
 
 class MarketDataManager:
     def __init__(self, api_key_or_router, load_real_data=True, clock: Optional[SimulationClock] = None):
@@ -686,6 +687,12 @@ class MarketDataManager:
         
         # [NEW] Policy Manager
         self.policy_manager = PolicyManager()
+        
+        # [NEW] Risk Engine (Centralized Gateway)
+        self.risk_engine = RiskEngine(
+            stamp_duty_rate=GLOBAL_CONFIG.TAX_RATE_STAMP,
+            commission_rate=GLOBAL_CONFIG.TAX_RATE_COMMISSION
+        )
         
         # Load Data
         self.history_candles = RealMarketLoader.load_history() if load_real_data else []
@@ -747,19 +754,46 @@ class MarketDataManager:
 
 
     def submit_agent_order(self, order: Order):
-        """Pass agent orders to the matching engine."""
-        # [NEW] Check Policy (Circuit Breaker, etc.)
+        """Pass agent orders to the matching engine with centralized risk check."""
+        # 1. [NEW] Pre-Matching Risk Gateway (Extreme Speed Check)
+        market_data = {
+            "last_price": self.engine.last_price,
+            "best_bid": None, # Could be improved with actual LOB depth
+            "best_ask": None
+        }
+        
+        allowed, penalty, reason = self.risk_engine.check_order_compliance(
+            order.agent_id, order, market_data
+        )
+        
+        if not allowed:
+            # Order Blocked by Risk Gateway
+            print(f"[Risk Control] Order REJECTED for Agent {order.agent_id}: {reason}")
+            order.status = OrderStatus.REJECTED
+            order.reason = reason
+            return []
+            
+        # 2. [NEW] Register order in HFT monitor (for OTR calculation)
+        self.risk_engine.hft_monitor.register_order(order.agent_id)
+
+        # 3. [NEW] Check Policy (Circuit Breaker, etc.)
         market_state = {"last_price": self.engine.last_price}
         policy_res = self.policy_manager.check_order(order, market_state)
         
         if not policy_res.is_allowed:
             # Order Rejected by Policy
-            # In real system, we might return a Rejected Order status
-            # For now, return empty list (no trades) and maybe log or callback
-            # Ideally we mark order as rejected.
+            order.status = OrderStatus.REJECTED
+            order.reason = policy_res.reason
             return []
             
-        return self.engine.submit_order(order, self.policy.liquidity_injection)
+        # 4. Proceed to Matching
+        trades = self.engine.submit_order(order, self.policy.liquidity_injection)
+        
+        # 5. [NEW] Register trades in HFT monitor (for OTR calculation)
+        if trades:
+            self.risk_engine.hft_monitor.register_trade(order.agent_id)
+            
+        return trades
 
     def get_market_snapshot(self) -> "MarketSnapshot":
         """Generate a MarketSnapshot for agents."""

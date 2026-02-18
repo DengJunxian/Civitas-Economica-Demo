@@ -150,7 +150,11 @@ class TraderAgent(BaseAgent):
             "trend": getattr(snapshot, "market_trend", "震荡"), 
             "panic_level": getattr(snapshot, "panic_level", 0.5), 
             "news": "; ".join(news) if news else "无重大新闻",
-            "last_rejection_reason": self.compliance_feedback[-1] if self.compliance_feedback else None
+            "last_rejection_reason": self.compliance_feedback[-1] if self.compliance_feedback else None,
+            # [NEW] Policy Perception
+            "policy_description": getattr(snapshot, "policy_description", ""),
+            "policy_tax_rate": getattr(snapshot, "policy_tax_rate", 0.0),
+            "policy_news": getattr(snapshot, "policy_news", "")
         }
         
         # Map numeric trend to string for Brain

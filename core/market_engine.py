@@ -840,7 +840,11 @@ class MarketDataManager:
             volatility=vol,
             market_trend=trend,
             panic_level=self.panic_level,
-            timestamp=self.clock.timestamp if self.clock else time.time()
+            timestamp=self.clock.timestamp if self.clock else time.time(),
+            # [NEW] Policy Fields
+            policy_description=self.policy.description,
+            policy_tax_rate=self.policy.tax_rate,
+            policy_news=self.current_news
         )
 
     def get_order_book_depth(self, level=5) -> Dict:

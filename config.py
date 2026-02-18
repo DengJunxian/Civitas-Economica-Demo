@@ -43,7 +43,7 @@ class SimConfig:
     # DeepSeek API
     API_BASE_URL: str = "https://api.deepseek.com"
     DEEPSEEK_API_KEY: Optional[str] = field(
-        default_factory=lambda: os.environ.get("DEEPSEEK_API_KEY", "")
+        default_factory=lambda: os.environ.get("DEEPSEEK_API_KEY", "sk-ef4fd5a8ac9c4861aa812af3875652f7")
     )
     
     # 混元 API (可选)

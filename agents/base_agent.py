@@ -57,7 +57,13 @@ class MarketSnapshot:
     volatility: float = 0.0
     market_trend: float = 0.0
     panic_level: float = 0.0
+    panic_level: float = 0.0
     timestamp: float = 0.0
+    
+    # [NEW] Policy Perception
+    policy_description: str = ""
+    policy_tax_rate: float = 0.0
+    policy_news: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         """序列化为字典，用于 Prompt 构建"""
@@ -72,7 +78,11 @@ class MarketSnapshot:
             "volume": self.total_volume,
             "volatility": self.volatility,
             "trend": self.market_trend,
+            "trend": self.market_trend,
             "panic_level": self.panic_level,
+            "policy_description": self.policy_description,
+            "policy_tax_rate": self.policy_tax_rate,
+            "policy_news": self.policy_news,
         }
 
 

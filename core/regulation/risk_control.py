@@ -521,7 +521,11 @@ class RiskEngine:
         commission = max(5.0, value * self.commission_rate)
         
         # 印花税 (仅卖出)
-        stamp_duty = value * self.stamp_duty_rate if side == OrderSide.SELL else 0.0
+        # 兼容处理: side 可能是枚举或字符串
+        side_str = str(side).upper()
+        is_sell = "SELL" in side_str
+        
+        stamp_duty = value * self.stamp_duty_rate if is_sell else 0.0
         
         return commission + stamp_duty
     
@@ -546,16 +550,24 @@ class RiskEngine:
             return False, 0.0, reject_reason
         
         # 2. 保证金检查 (如适用)
+        # 兼容处理: OrderSide 可能是枚举或字符串
+        side_str = str(order.side).upper()
+        is_buy = "BUY" in side_str
+        
         if agent_id in self.margin_accounts:
             account = self.margin_accounts[agent_id]
             
-            if order.side == OrderSide.BUY:
+            if is_buy:
+                # 检查购买力
                 if order.value > account.get_buying_power():
-                    return False, 0.0, "超出购买力限制"
+                    return False, 0.0, f"超出购买力限制 (需: {order.value:.2f}, 有: {account.get_buying_power():.2f})"
         
         # 3. 计算总费用
+        # 确保传入正确的 OrderSide 枚举
+        calc_side = OrderSide.BUY if is_buy else OrderSide.SELL
+        
         tx_cost = self.calculate_transaction_cost(
-            order.side, order.price, order.quantity
+            calc_side, order.price, order.quantity
         )
         total_cost = tx_cost + hft_penalty
         

@@ -463,14 +463,13 @@ class StratifiedPopulation:
         cost_val = executed_prices * executed_qtys
         
         # 更新资金 (买入减，卖出加)
-        # 注意: 这里是简化 T+0 资金，实际 Portfolio 类更复杂。
-        # 对于 Tier 2 大规模群体，通常简化处理，或者牺牲一部分精度。
         delta_cash = -1 * directions * cost_val
-        self.state[executed_indices, self.IDX_CASH] += delta_cash
+        # FIX: 使用 add.at 处理重复索引 (同一Agent多笔成交)
+        np.add.at(self.state[:, self.IDX_CASH], executed_indices, delta_cash)
         
         # 更新持仓
         delta_stock = directions * executed_qtys
-        self.state[executed_indices, self.IDX_HOLDINGS] += delta_stock
+        np.add.at(self.state[:, self.IDX_HOLDINGS], executed_indices, delta_stock)
         
         # 更新成本价 (仅买入时更新加权平均)
         buy_indices_local = (directions == 1)

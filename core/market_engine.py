@@ -324,7 +324,7 @@ class MatchingEngine:
         self.step_trades_buffer = []
         return trades
 
-    def run_call_auction(self, orders: List[Order]) -> Tuple[float, List[Trade]]:
+    def run_call_auction(self, orders: List[Order], market_time: float = None) -> Tuple[float, List[Trade]]:
         """
         集合竞价（Call Auction）
         
@@ -338,6 +338,7 @@ class MatchingEngine:
         
         Args:
             orders: 集合竞价阶段的所有订单
+            market_time: 当前市场时间 (可选)
             
         Returns:
             (开盘价, 成交列表)

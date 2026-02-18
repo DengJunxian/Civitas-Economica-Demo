@@ -52,6 +52,11 @@ class Order:
     def is_filled(self) -> bool:
         return self.filled_qty >= self.quantity
 
+    @property
+    def value(self) -> float:
+        """订单总价值"""
+        return self.price * self.quantity
+
 @dataclass
 class Trade:
     """

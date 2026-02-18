@@ -469,74 +469,130 @@ with st.sidebar:
     st.markdown("---")
     if st.button("📑 生成报告", use_container_width=True):
         if st.session_state.controller:
-            with st.spinner("正在生成每日市场复盘报告 (GLM-4-FlashX)..."):
+            with st.spinner("正在生成仿真结果评估报告..."):
                 try:
-                    # 获取市场数据摘要
-                    history = st.session_state.market_history[-10:] # 最近10天
-                    last_candle = history[-1] if history else None
-                    if not last_candle:
-                        st.warning("暂无仿真数据")
+                    import concurrent.futures
+
+                    # --- 收集仿真上下文数据 ---
+                    history = st.session_state.market_history
+                    sim_history = [h for h in history if not h.get('is_historical', True)]
+
+                    if not sim_history:
+                        st.warning("暂无仿真数据，请先运行仿真。")
                     else:
-                        summary_prompt = f"""
-                        请作为金融分析师，根据以下最近10日的市场数据生成一份简短的市场复盘报告。
-                        
-                        【最新数据】
-                        日期: {last_candle['time']}
-                        收盘: {last_candle['close']:.2f}
-                        成交量: {last_candle.get('volume',0)}
-                        
-                        【近期趋势】
-                        {history}
-                        
-                        【要求】
-                        1. 简述近期走势
-                        2. 分析市场情绪
-                        3. 给出投资建议
-                        4. 字数控制在200字以内
-                        """
-                        
-                        # 使用 ModelRouter 调用 GLM (Fast Mode)
-                        router = st.session_state.controller.model_router
-                        # 优先使用 GLM
+                        ctrl_ref = st.session_state.controller
+                        first_sim = sim_history[0]
+                        last_sim = sim_history[-1]
+                        sim_days = len(sim_history)
+
+                        start_price = first_sim['close']
+                        end_price = last_sim['close']
+                        total_return = (end_price - start_price) / start_price * 100
+
+                        # 波动率
+                        if len(sim_history) > 1:
+                            import numpy as np
+                            closes = [h['close'] for h in sim_history]
+                            returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
+                            volatility = float(np.std(returns) * 100)
+                            max_price = max(closes)
+                            min_price = min(closes)
+                        else:
+                            volatility = 0.0
+                            max_price = end_price
+                            min_price = end_price
+
+                        # 政策信息
+                        policy_info = st.session_state.policy_analysis
+                        policy_text = policy_info.get('text', '无') if policy_info else '无'
+
+                        # 政策参数
+                        try:
+                            policy_status = ctrl_ref.model.get_policy_status()
+                            cb_info = policy_status.get('circuit_breaker', {})
+                            tax_info = policy_status.get('transaction_tax', {})
+                        except Exception:
+                            cb_info = {}
+                            tax_info = {}
+
+                        # CSAD 均值
+                        csad_data = st.session_state.csad_history
+                        avg_csad = sum(csad_data) / len(csad_data) if csad_data else 0
+
+                        # 恐慌指数
+                        panic = ctrl_ref.market.panic_level if hasattr(ctrl_ref.market, 'panic_level') else 0
+
+                        # --- 构建评估报告 Prompt ---
+                        summary_prompt = f"""你是一位资深的金融政策分析师。请根据以下仿真实验数据，生成一份「政策效果评估报告」。
+
+【仿真概况】
+- 仿真天数: {sim_days} 天
+- 起始日期: {first_sim['time']}
+- 结束日期: {last_sim['time']}
+- 起始价格: {start_price:.2f}
+- 结束价格: {end_price:.2f}
+- 累计涨跌幅: {total_return:+.2f}%
+- 日波动率: {volatility:.3f}%
+- 价格区间: {min_price:.2f} ~ {max_price:.2f}
+- 当前恐慌指数: {panic:.2f}
+- 平均 CSAD(羊群效应): {avg_csad:.4f}
+
+【注入的政策】
+{policy_text}
+
+【当前监管参数】
+- 熔断机制: {'启用' if cb_info.get('active') else '未启用'}, 阈值: {cb_info.get('threshold', 0):.0%}
+- 交易印花税: {'启用' if tax_info.get('active') else '未启用'}, 税率: {tax_info.get('rate', 0.001) * 1000:.1f}‰
+
+【要求】
+请从以下角度进行分析，字数控制在500字左右：
+1. **政策效果评估**: 分析注入政策对市场价格、波动率、流动性和投资者行为的影响
+2. **市场稳定性分析**: 基于恐慌指数和CSAD评估市场稳定程度
+3. **风险提示**: 指出仿真中暴露出的潜在风险
+4. **政策建议**: 针对当前市场状态给出政策调整建议"""
+
+                        # --- 使用独立线程执行异步 API 调用 ---
+                        router = ctrl_ref.model_router
                         priority = ["glm-4-flashx", "glm-4-flashx-250414", "deepseek-chat"]
-                        
-                        import asyncio
-                        # Streamlit 运行在 loop 中，需处理
-                        try:
-                            loop = asyncio.get_event_loop()
-                        except RuntimeError:
+
+                        def _sync_get_report():
+                            """在独立线程的独立事件循环中执行异步 API 调用"""
                             loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-                            
-                        async def _get_report():
-                            return await router.call_with_fallback(
-                                [{"role": "user", "content": summary_prompt}],
-                                priority_models=priority,
-                                timeout_budget=10.0,
-                                fallback_response="报告生成服务暂时不可用 (API TimeOut/Error)，请稍后重试。"
-                            )
-                        
-                        # 同步执行
-                        try:
-                            import nest_asyncio
-                            nest_asyncio.apply()
-                            content, _, model = loop.run_until_complete(_get_report())
-                        except Exception as e:
-                             st.error(f"API调用底层错误: {e}")
-                             content = "报告生成失败，请检查网络连接。"
-                             model = "Error"
-                        
+                            try:
+                                return loop.run_until_complete(
+                                    router.call_with_fallback(
+                                        [{"role": "user", "content": summary_prompt}],
+                                        priority_models=priority,
+                                        timeout_budget=30.0,
+                                        fallback_response="报告生成服务暂时不可用，请稍后重试。"
+                                    )
+                                )
+                            finally:
+                                loop.close()
+
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                            future = executor.submit(_sync_get_report)
+                            content, _, model = future.result(timeout=35)
+
                         st.success(f"✅ 报告已生成 (使用模型: {model})")
                         st.markdown(f"""
-                        <div style="background: #161b22; padding: 15px; border-radius: 8px; border: 1px solid #30363d;">
-                            <h4>📅 市场复盘报告 ({last_candle['time']})</h4>
-                            <div style="font-size: 14px; line-height: 1.6; color: #c9d1d9;">
-                                {content}
+                        <div style="background: #161b22; padding: 20px; border-radius: 10px; border: 1px solid #30363d;">
+                            <h4 style="color: #58a6ff;">📊 仿真结果评估报告</h4>
+                            <div style="font-size: 13px; color: #888; margin-bottom: 12px;">
+                                仿真周期: {first_sim['time']} ~ {last_sim['time']} ({sim_days}天)
+                                | 累计涨跌: <span style="color: {'#FF3B30' if total_return >= 0 else '#34C759'}">{total_return:+.2f}%</span>
+                            </div>
+                            <div style="font-size: 14px; line-height: 1.8; color: #c9d1d9; white-space: pre-wrap;">
+{content}
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
+                except concurrent.futures.TimeoutError:
+                    st.error("⏰ 报告生成超时（35秒），请稍后重试。")
                 except Exception as e:
                     st.error(f"报告生成失败: {e}")
+                    import traceback
+                    st.code(traceback.format_exc(), language="text")
         else:
             st.warning("请先启动仿真系统")
 
@@ -545,6 +601,7 @@ with st.sidebar:
 # 创建标签页
 if st.session_state.backtest_mode:
     tab1, tab2 = st.tabs(["📊 回测结果", "🧠 Agent fMRI"])
+    tab_debate = tab_reg = tab_behavior = tab_quant = None
 else:
     tab1, tab2, tab_debate, tab_reg, tab_behavior, tab_quant = st.tabs([
         "📈 市场走势", 
@@ -1029,9 +1086,9 @@ else:
 
 
             
-    else:
-        # 欢迎页 - 当不在运行状态且没有初始化完成时显示
-        if not st.session_state.controller:
+    # 欢迎页 - 当不在运行状态且没有初始化完成时显示
+    if not st.session_state.controller:
+        with tab1:
             st.markdown("""
             ## 🏛️ 欢迎使用 Civitas A股政策仿真平台
             
@@ -1057,108 +1114,112 @@ else:
             > 💡 **提示:** 系统将自动加载近3年的上证指数历史数据作为仿真起点。
             """)
 
-    # --- Agent fMRI 标签页 ---
-    with tab2:
-        st.subheader("🧠 Agent 心理核磁共振 (fMRI)")
-        st.caption("点击任意 Agent 查看其完整思维链")
-        
-        if ctrl:
-            # Agent 列表
-            col_list, col_detail = st.columns([1, 2])
-            
-            with col_list:
-                st.markdown("### 智能体列表")
-                
-                for agent in ctrl.model.population.smart_agents[:20]:  # 显示前20个
-                    agent_id = agent.id
-                    
-                    # 获取该 Agent 的情绪
-                    emotion = 0.0
-                    if agent_id in DeepSeekBrain.thought_history:
-                        history = DeepSeekBrain.thought_history[agent_id]
-                        if history:
-                            emotion = history[-1].emotion_score
-                    
-                    # 创建可点击的按钮
-                    if st.button(
-                        f"{get_emotion_icon(emotion)} {agent_id}",
-                        key=f"agent_{agent_id}",
-                        use_container_width=True
-                    ):
-                        st.session_state.selected_agent = agent_id
-            
-            with col_detail:
-                st.markdown("### 思维链详情")
-                
-                selected = st.session_state.selected_agent
-                
-                if selected and selected in DeepSeekBrain.thought_history:
-                    history = DeepSeekBrain.thought_history[selected]
-                    
+
+# --- Agent fMRI 标签页 ---
+with tab2:
+    st.subheader("🧠 Agent 心理核磁共振 (fMRI)")
+    st.caption("点击任意 Agent 查看其完整思维链")
+
+    if ctrl:
+        # Agent 列表
+        col_list, col_detail = st.columns([1, 2])
+
+        with col_list:
+            st.markdown("### 智能体列表")
+
+            for agent in ctrl.model.population.smart_agents[:20]:  # 显示前20个
+                agent_id = agent.id
+
+                # 获取该 Agent 的情绪
+                emotion = 0.0
+                if agent_id in DeepSeekBrain.thought_history:
+                    history = DeepSeekBrain.thought_history[agent_id]
                     if history:
-                        latest = history[-1]
-                        
-                        # 情绪仪表盘
-                        st.markdown(f"""
-                        <div style="background: #161b22; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                            <div style="font-size: 18px; font-weight: bold;">
-                                {get_emotion_icon(latest.emotion_score)} {selected}
-                            </div>
-                            <div style="margin-top: 10px;">
-                                <span style="color: #888;">情绪分数:</span>
-                                <span style="color: {get_emotion_color(latest.emotion_score)}; font-size: 20px; font-weight: bold;">
-                                {latest.emotion_score:+.2f}
-                                </span>
-                            </div>
-                            <div style="margin-top: 5px; color: #b0b0bb;">
-                                状态: {latest.market_context.get('emotional_state', 'Unknown')}
-                                <span style="font-size: 12px; color: #666; margin-left: 10px;">
-                                    (社交信号: {latest.market_context.get('social_signal', 'N/A')})
-                                </span>
-                            </div>
-                            <div style="margin-top: 5px; color: #888;">
-                                最后更新: {datetime.fromtimestamp(latest.timestamp).strftime('%H:%M:%S')}
-                            </div>
+                        emotion = history[-1].emotion_score
+
+                # 创建可点击的按钮
+                if st.button(
+                    f"{get_emotion_icon(emotion)} {agent_id}",
+                    key=f"agent_{agent_id}",
+                    use_container_width=True
+                ):
+                    st.session_state.selected_agent = agent_id
+
+        with col_detail:
+            st.markdown("### 思维链详情")
+
+            selected = st.session_state.selected_agent
+
+            if selected and selected in DeepSeekBrain.thought_history:
+                history = DeepSeekBrain.thought_history[selected]
+
+                if history:
+                    latest = history[-1]
+
+                    # 情绪仪表盘
+                    st.markdown(f"""
+                    <div style="background: #161b22; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                        <div style="font-size: 18px; font-weight: bold;">
+                            {get_emotion_icon(latest.emotion_score)} {selected}
                         </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # 决策显示
-                        st.markdown("**最终决策:**")
-                        st.json(latest.decision)
-                        
-                        # 完整思维链
-                        st.markdown("**完整思维链 (CoT):**")
-                        st.markdown(f"""
-                        <div class="reasoning-box" style="height: 400px;">
-                            {latest.reasoning_content.replace(chr(10), '<br>')}
+                        <div style="margin-top: 10px;">
+                            <span style="color: #888;">情绪分数:</span>
+                            <span style="color: {get_emotion_color(latest.emotion_score)}; font-size: 20px; font-weight: bold;">
+                            {latest.emotion_score:+.2f}
+                            </span>
                         </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # 历史记录
-                        if len(history) > 1:
-                            st.markdown("**历史思维记录:**")
-                            for i, record in enumerate(reversed(history[:-1])):
-                                with st.expander(f"记录 {len(history) - i - 1}: {get_emotion_icon(record.emotion_score)} {record.decision.get('action', 'HOLD')}"):
-                                    st.text(record.reasoning_content[:500] + "..." if len(record.reasoning_content) > 500 else record.reasoning_content)
-                    else:
-                        st.info("该 Agent 尚未产生思维记录")
+                        <div style="margin-top: 5px; color: #b0b0bb;">
+                            状态: {latest.market_context.get('emotional_state', 'Unknown')}
+                            <span style="font-size: 12px; color: #666; margin-left: 10px;">
+                                (社交信号: {latest.market_context.get('social_signal', 'N/A')})
+                            </span>
+                        </div>
+                        <div style="margin-top: 5px; color: #888;">
+                            最后更新: {datetime.fromtimestamp(latest.timestamp).strftime('%H:%M:%S')}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    # 决策显示
+                    st.markdown("**最终决策:**")
+                    st.json(latest.decision)
+
+                    # 完整思维链
+                    st.markdown("**完整思维链 (CoT):**")
+                    st.markdown(f"""
+                    <div class="reasoning-box" style="height: 400px;">
+                        {latest.reasoning_content.replace(chr(10), '<br>')}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    # 历史记录
+                    if len(history) > 1:
+                        st.markdown("**历史思维记录:**")
+                        for i, record in enumerate(reversed(history[:-1])):
+                            with st.expander(f"记录 {len(history) - i - 1}: {get_emotion_icon(record.emotion_score)} {record.decision.get('action', 'HOLD')}"):
+                                st.text(record.reasoning_content[:500] + "..." if len(record.reasoning_content) > 500 else record.reasoning_content)
                 else:
-                    st.info("👈 请从左侧选择一个 Agent 查看详情")
-        else:
-            st.warning("请先启动仿真系统")
+                    st.info("该 Agent 尚未产生思维记录")
+            else:
+                st.info("👈 请从左侧选择一个 Agent 查看详情")
+    else:
+        st.warning("请先启动仿真系统")
+
+# --- 以下标签页仅在非回测模式下显示 ---
+if not st.session_state.backtest_mode:
 
     # --- 辩论室标签页 ---
     with tab_debate:
         st.subheader("⚔️ Agent 内心辩论室")
         st.markdown("*观察 Agent 的 Bull vs Bear 内心对抗过程*")
-        
+
         if ctrl:
             # 获取所有有辩论记录的 Agent
             debate_agents = list(DebateBrain.debate_history.keys())
-            
+
             if debate_agents:
                 col_d1, col_d2 = st.columns([1, 3])
-                
+
                 with col_d1:
                     st.markdown("### 🎭 Agent 列表")
                     selected_debate_agent = st.selectbox(
@@ -1166,14 +1227,14 @@ else:
                         debate_agents,
                         key="debate_agent_select"
                     )
-                
+
                 with col_d2:
                     if selected_debate_agent:
                         debates = DebateBrain.debate_history.get(selected_debate_agent, [])
-                        
+
                         if debates:
                             latest_debate = debates[-1]
-                            
+
                             # 辩论头信息
                             st.markdown(f"""
                             <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
@@ -1185,7 +1246,7 @@ else:
                                 </p>
                             </div>
                             """, unsafe_allow_html=True)
-                            
+
                             # 辩论内容
                             for msg in latest_debate.debate_rounds:
                                 if msg.role == DebateRole.BULL:
@@ -1203,7 +1264,7 @@ else:
                                     border_color = "#4a4a6a"
                                     icon = "🛡️"
                                     role_name = "风控经理"
-                                
+
                                 st.markdown(f"""
                                 <div style="background: {bg_color}; border-left: 3px solid {border_color}; 
                                             padding: 12px; margin: 8px 0; border-radius: 5px;">
@@ -1218,11 +1279,11 @@ else:
                                     </div>
                                 </div>
                                 """, unsafe_allow_html=True)
-                            
+
                             # 最终决策
                             st.markdown("### 📝 最终决策")
                             st.json(latest_debate.final_decision)
-                            
+
                             # 历史辩论
                             if len(debates) > 1:
                                 with st.expander(f"📜 历史辩论记录 ({len(debates) - 1} 条)"):
@@ -1236,28 +1297,28 @@ else:
                 st.info("💡 使用 DebateBrain 的 Agent 运行后，辩论记录将显示在此处")
         else:
             st.warning("请先启动仿真系统")
-    
+
     # --- 监管沙盒标签页 ---
     with tab_reg:
         st.subheader("🏛️ 监管沙盒")
         st.markdown("*模拟中国 A 股特色监管机制*")
-        
+
         # 初始化监管模块（如果尚未初始化）
         if 'regulatory_module' not in st.session_state:
             st.session_state.regulatory_module = RegulatoryModule()
-        
+
         reg = st.session_state.regulatory_module
-        
+
         col_r1, col_r2 = st.columns(2)
-        
+
         with col_r1:
             st.markdown("### 🛡️ 国家稳定基金")
             fund_status = reg.stability_fund.get_status_report()
-            
+
             st.metric("可用资金", fund_status["可用资金"])
             st.metric("已投入资金", fund_status["已投入资金"])
             st.metric("干预次数", fund_status["干预次数"])
-            
+
             # 干预历史
             if reg.stability_fund.intervention_history:
                 st.markdown("**近期干预:**")
@@ -1276,32 +1337,32 @@ else:
                     """, unsafe_allow_html=True)
             else:
                 st.info("国家队尚未出手")
-        
+
         with col_r2:
             st.markdown("### ⚡ 熔断机制")
             breaker = reg.circuit_breaker
-            
+
             if breaker.is_halted:
                 st.error(f"🔴 熔断中 (等级 {breaker.halt_level})")
             else:
                 st.success("🟢 交易正常")
-            
+
             st.metric("历史熔断次数", len(breaker.halt_history))
-            
+
             # 熔断历史
             if breaker.halt_history:
                 st.markdown("**熔断记录:**")
                 for h in breaker.halt_history[-3:]:
                     level_text = "一级" if h['level'] == 1 else "二级"
                     st.markdown(f"- Tick {h['tick']}: {level_text}熔断 ({h['price_change']:+.2%})")
-        
+
         st.markdown("---")
         st.markdown("### 📊 程序化交易监控")
-        
+
         # 违规统计
         violations = reg.trading_regulator.violations
         col_v1, col_v2, col_v3 = st.columns(3)
-        
+
         with col_v1:
             st.metric("监控 Agent 数", len(reg.trading_regulator.agent_stats))
         with col_v2:
@@ -1310,7 +1371,7 @@ else:
             suspended_count = sum(1 for s in reg.trading_regulator.agent_stats.values() 
                                   if s.current_restriction.value == 'suspended')
             st.metric("已停止交易", suspended_count)
-        
+
         # 最近违规记录
         if violations:
             with st.expander("⚠️ 最近违规记录"):
@@ -1318,18 +1379,18 @@ else:
                     st.markdown(f"""
                     - **Agent {v['agent_id']}**: {v['type']} - {v['detail']}
                     """)
-        
+
         # ====== [NEW] PolicyManager 策略风洞控制台 ======
         st.markdown("---")
         st.markdown("### 🎛️ 策略风洞控制台")
         st.caption("实时调整监管策略参数，观察对市场微观结构的影响")
-        
+
         if ctrl:
             # 获取当前策略状态
             policy_status = ctrl.model.get_policy_status()
-            
+
             col_p1, col_p2 = st.columns(2)
-            
+
             with col_p1:
                 st.markdown("""
                 <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
@@ -1340,13 +1401,13 @@ else:
                     </p>
                 </div>
                 """, unsafe_allow_html=True)
-                
+
                 cb_active = st.toggle(
                     "启用熔断",
                     value=policy_status["circuit_breaker"]["active"],
                     key="policy_cb_active"
                 )
-                
+
                 cb_threshold = st.slider(
                     "熔断阈值 (%)",
                     min_value=1, max_value=20,
@@ -1355,17 +1416,17 @@ else:
                     key="policy_cb_threshold",
                     help="价格偏离前收盘价的百分比阈值"
                 )
-                
+
                 # Apply changes
                 ctrl.model.set_policy("circuit_breaker", "active", cb_active)
                 ctrl.model.set_policy("circuit_breaker", "threshold_pct", cb_threshold / 100.0)
-                
+
                 # Status indicator
                 if policy_status["circuit_breaker"]["is_halted"]:
                     st.error("🔴 市场已熔断 — 订单将被拒绝")
                 else:
                     st.success(f"🟢 市场正常 — 阈值 ±{cb_threshold}%")
-            
+
             with col_p2:
                 st.markdown("""
                 <div style="background: linear-gradient(135deg, #1a2e1a 0%, #16213e 100%); 
@@ -1376,13 +1437,13 @@ else:
                     </p>
                 </div>
                 """, unsafe_allow_html=True)
-                
+
                 tax_active = st.toggle(
                     "启用交易税",
                     value=policy_status["transaction_tax"]["active"],
                     key="policy_tax_active"
                 )
-                
+
                 tax_rate = st.slider(
                     "税率 (‰)",
                     min_value=0.0, max_value=10.0,
@@ -1391,11 +1452,11 @@ else:
                     key="policy_tax_rate",
                     help="每笔成交额的千分比税率 (当前A股印花税为 1‰)"
                 )
-                
+
                 # Apply changes
                 ctrl.model.set_policy("tax", "active", tax_active)
                 ctrl.model.set_policy("tax", "rate", tax_rate / 1000.0)
-                
+
                 # Display
                 st.metric("当前税率", f"{tax_rate:.1f}‰")
                 if tax_rate > 1.0:
@@ -1404,22 +1465,22 @@ else:
                     st.info(f"💡 税率低于基准 (1‰)，可能刺激交易")
         else:
             st.info("💡 请先启动仿真系统，策略控制台将在仿真运行时可用")
-    
+
     # --- 行为金融标签页 ---
     with tab_behavior:
         st.subheader("📊 行为金融量化面板")
         st.markdown("*用数学量化人性偏差*")
-        
+
         col_b1, col_b2 = st.columns(2)
-        
+
         with col_b1:
             st.markdown("### 📈 前景理论计算器")
-            
+
             gain = st.slider("盈亏百分比", -50, 50, 0, 1, key="prospect_gain")
             loss_aversion = st.slider("损失厌恶系数 (λ)", 1.0, 4.0, 2.25, 0.1, key="prospect_lambda")
-            
+
             utility = prospect_utility(gain / 100, loss_aversion=loss_aversion)
-            
+
             # 可视化
             utility_color = "#00ff88" if utility >= 0 else "#ff4444"
             st.markdown(f"""
@@ -1433,21 +1494,21 @@ else:
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            
+
             # 说明
             st.markdown("""
             > **前景理论** (Kahneman & Tversky):
             > - 人们对损失的痛苦是收益快乐的 2.25 倍
             > - 这解释了为什么投资者常常"死扛亏损"
             """)
-        
+
         with col_b2:
             st.markdown("### 🐑 羊群效应检测")
-            
+
             # 获取实时 CSAD 数据
             if 'csad_history' in st.session_state and st.session_state.csad_history:
                 csad_data = st.session_state.csad_history[-20:]
-                
+
                 # 绘制 CSAD 趋势图
                 fig_csad = go.Figure()
                 fig_csad.add_trace(go.Scatter(
@@ -1463,13 +1524,13 @@ else:
                     margin=dict(l=40, r=40, t=40, b=40)
                 )
                 st.plotly_chart(fig_csad, use_container_width=True)
-                
+
                 # 羊群强度
                 latest_csad = csad_data[-1] if csad_data else 0.02
                 market_return = st.session_state.market_history[-1].get('change_pct', 0) if st.session_state.market_history else 0
-                
+
                 herd_intensity = herding_intensity(latest_csad, market_return)
-                
+
                 herd_color = "#ff4444" if herd_intensity > 0.5 else "#ffaa00" if herd_intensity > 0.2 else "#00ff88"
                 st.markdown(f"""
                 <div style="text-align: center; padding: 15px; background: #1a1a2e; border-radius: 10px;">
@@ -1481,7 +1542,7 @@ else:
                 """, unsafe_allow_html=True)
             else:
                 st.info("启动仿真后将显示 CSAD 走势图")
-            
+
             st.markdown("""
             > **羊群效应检测**:
             > - CSAD 下降 + 市场大涨/大跌 = 羊群行为
@@ -1491,19 +1552,19 @@ else:
     # --- 量化群体标签页 ---
     with tab_quant:
         st.subheader("🤖 量化群体监控")
-        
+
         if st.session_state.quant_manager and st.session_state.quant_manager.groups:
             # 系统风险检测
             risk = st.session_state.quant_manager.detect_systemic_risk()
-            
+
             if risk['warning']:
                 st.warning(risk['warning'])
-            
+
             # 显示各群体状态
             for group_id, group in st.session_state.quant_manager.groups.items():
                 with st.expander(f"📊 {group.strategy_name} ({len(group.agents)} Agents)", expanded=True):
                     col_g1, col_g2, col_g3 = st.columns(3)
-                    
+
                     with col_g1:
                         st.metric("一致性", f"{group.action_consensus:.2%}")
                     with col_g2:
@@ -1516,7 +1577,7 @@ else:
                             'MIXED': '⚪ 分歧'
                         }.get(group.collective_action, '⚪ 待激活')
                         st.metric("群体行为", action_label)
-                    
+
                     # 情绪分布
                     emotion_dist = group.get_emotion_distribution()
                     st.markdown(f"""

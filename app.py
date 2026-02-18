@@ -272,23 +272,21 @@ with st.sidebar:
     analyze_btn = st.button("🔍 分析政策影响", use_container_width=True)
     
     if analyze_btn and policy_text:
-        if st.session_state.controller and st.session_state.is_running:
-            # 发送指令到队列，而不是直接调用
+        if st.session_state.controller:
+            # 发送指令到队列
             st.session_state.cmd_queue.put({
                 "type": "policy",
                 "content": policy_text
             })
-            st.info("📨 政策分析请求已提交，系统将在后台异步处理...")
+            st.info("📨 政策分析请求已提交，系统正在后台异步处理...")
             # 临时 placeholder
             st.session_state.policy_analysis = {
                 "text": policy_text,
                 "result": {"market_impact": "分析中..."},
                 "timestamp": datetime.now().strftime("%H:%M:%S")
             }
-        elif not st.session_state.is_running:
-             st.warning("请先启动仿真系统 (需要后台线程运行以处理智能分析)")
         else:
-            st.warning("Controller 未初始化")
+            st.warning("请先点击 '启动' 初始化仿真系统 (无需开始运行即可注入政策)")
     
     # 显示政策分析结果
     if st.session_state.policy_analysis:
@@ -821,6 +819,7 @@ else:
 # --- 异步仿真与线程管理 ---
 import threading
 import queue
+import traceback
 
 # 全局线程安全队列 (用于跨线程传递 metric 和 command)
 if 'metrics_queue' not in st.session_state:
@@ -828,8 +827,17 @@ if 'metrics_queue' not in st.session_state:
 if 'cmd_queue' not in st.session_state:
     st.session_state.cmd_queue = queue.Queue()
 
-def simulation_worker(controller, metrics_queue, cmd_queue, is_running_event):
-    """后台仿真线程工作函数"""
+def simulation_worker(controller, metrics_queue, cmd_queue, stop_event, pause_event):
+    """
+    后台仿真线程工作函数
+    
+    Args:
+        controller: 仿真控制器实例
+        metrics_queue: 用于发送指标给 UI 的队列
+        cmd_queue: 接收 UI 命令的队列
+        stop_event: 线程停止信号 (Set = Stop Thread)
+        pause_event: 仿真暂停信号 (Set = Running, Clear = Paused)
+    """
     # 为该线程创建独立的事件循环
     try:
         loop = asyncio.new_event_loop()
@@ -838,47 +846,70 @@ def simulation_worker(controller, metrics_queue, cmd_queue, is_running_event):
         print(f"[Thread] Event Loop creation failed: {e}")
         return
 
-    print("[Thread] 仿真线程启动")
+    print("[Thread] 仿真线程启动 (State: Idle/Running)")
     
-    while is_running_event.is_set():
-        # 1. 处理控制指令 (Priority High)
+    while not stop_event.is_set():
+        # 1. 优先处理控制指令 (无论暂停与否都处理)
         try:
             while not cmd_queue.empty():
                 cmd = cmd_queue.get_nowait()
+                
                 if cmd['type'] == 'policy':
-                    print(f"[Thread] Processing Policy: {cmd['content'][:10]}...")
+                    print(f"[Thread] Processing Policy: {cmd['content'][:20]}...")
                     # 异步执行政策分析
-                    policy_result = loop.run_until_complete(controller.apply_policy_async(cmd['content']))
-                    # 推送完成状态
-                    metrics_queue.put({"type": "policy_done", "result": policy_result, "timestamp": datetime.now().strftime("%H:%M:%S")})
+                    try:
+                        policy_result = loop.run_until_complete(controller.apply_policy_async(cmd['content']))
+                        # 推送完成状态
+                        metrics_queue.put({
+                            "type": "policy_done", 
+                            "result": policy_result, 
+                            "timestamp": datetime.now().strftime("%H:%M:%S")
+                        })
+                    except Exception as e:
+                        print(f"[Thread Policy Error] {e}")
+                        metrics_queue.put({"error": f"政策注入失败: {e}"})
+                        
                 elif cmd['type'] == 'stop':
-                    return
+                    print("[Thread] Received Stop Command")
+                    stop_event.set()
+                    break
         except Exception as e:
             print(f"[Thread] Error processing commands: {e}")
+            metrics_queue.put({"error": f"指令处理错误: {e}"})
 
-        # 2. 执行仿真步
-        try:
-            # 执行一步仿真
-            metrics = loop.run_until_complete(controller.run_tick())
-            
-            # 将结果放入队列 (非阻塞)
-            metrics_queue.put(metrics)
-            
-            # 这里的 sleep 控制仿真速度，避免 CPU 100%
-            # 根据模式调整
-            mode = controller.mode.value
-            if mode == "FAST":
-                time.sleep(0.1)
-            elif mode == "SMART":
-                time.sleep(0.5)
-            else:
-                time.sleep(1.0)
-                
-        except Exception as e:
-            print(f"[Thread Error] {e}")
-            metrics_queue.put({"error": str(e)})
-            is_running_event.clear()
+        # 2. 如果停止信号由于指令处理被设置，退出大循环
+        if stop_event.is_set():
             break
+
+        # 3. 执行仿真步 (仅当未暂停时)
+        if pause_event.is_set():
+            try:
+                # 执行一步仿真
+                metrics = loop.run_until_complete(controller.run_tick())
+                
+                # 将结果放入队列 (非阻塞)
+                metrics_queue.put(metrics)
+                
+                # 速度控制
+                mode = controller.mode.value
+                if mode == "FAST":
+                    time.sleep(0.1)
+                elif mode == "SMART":
+                    time.sleep(0.5)
+                else:
+                    time.sleep(1.0)
+                    
+            except Exception as e:
+                # 捕获异常但不退出线程，而是自动暂停
+                err_msg = f"仿真步执行异常: {str(e)}\n{traceback.format_exc()}"
+                print(f"[Thread Error] {err_msg}")
+                metrics_queue.put({"error": err_msg})
+                
+                # 自动暂停以保护现场
+                pause_event.clear()
+        else:
+            # 暂停状态下的空转等待，避免 CPU 100%
+            time.sleep(0.1)
             
     loop.close()
     print("[Thread] 仿真线程停止")
@@ -889,30 +920,52 @@ if 'sim_thread' not in st.session_state:
     st.session_state.sim_thread = None
 if 'stop_event' not in st.session_state:
     st.session_state.stop_event = threading.Event()
+if 'pause_event' not in st.session_state:
+    st.session_state.pause_event = threading.Event()
 
 # 启动逻辑 (修改 start_btn 的处理)
 # (这部分代码在 app.py 较上方，这里只能替换 loop 部分)
 
 # --- 接收并更新 UI ---
-if st.session_state.is_running:
+
+# 只要 Controller 存在，就应该尝试保持后台线程运行，以便处理 Policy
+if st.session_state.controller:
     # 1. 检查线程是否存活，如果没有则启动
     if st.session_state.sim_thread is None or not st.session_state.sim_thread.is_alive():
-        # 设置停止信号为 False (即 set 为 True 表示运行)
-        st.session_state.stop_event.set()
+        # 重置信号
+        st.session_state.stop_event.clear()
+        
+        # 根据 is_running 状态设置 pause_event
+        # 如果 is_running 为 True，则 pause_event set (运行)
+        # 如果 is_running 为 False，则 pause_event clear (暂停)
+        if st.session_state.get('is_running', False):
+            st.session_state.pause_event.set()
+        else:
+            st.session_state.pause_event.clear()
+
         st.session_state.sim_thread = threading.Thread(
             target=simulation_worker,
             args=(
                 st.session_state.controller, 
                 st.session_state.metrics_queue,
                 st.session_state.cmd_queue,
-                st.session_state.stop_event
+                st.session_state.stop_event,
+                st.session_state.pause_event
             ),
             daemon=True
         )
         st.session_state.sim_thread.start()
-        st.toast("🚀 仿真后台线程已启动")
+        print("🚀 仿真后台线程已自动启动 (Ready)")
 
-    # 2. 消费队列中的数据 (非阻塞，取出所有积压的数据，只渲染最新的)
+    # 2. 同步 UI 状态到控制信号
+    if st.session_state.is_running:
+        if not st.session_state.pause_event.is_set():
+            st.session_state.pause_event.set()
+    else:
+        if st.session_state.pause_event.is_set():
+            st.session_state.pause_event.clear()
+
+    # 3. 消费队列中的数据 (非阻塞，取出所有积压的数据，只渲染最新的)
     latest_metrics = None
     while not st.session_state.metrics_queue.empty():
         latest_metrics = st.session_state.metrics_queue.get()
@@ -920,8 +973,11 @@ if st.session_state.is_running:
     if latest_metrics:
         if "error" in latest_metrics:
             st.error(f"仿真异常: {latest_metrics['error']}")
-            st.session_state.is_running = False
-            st.session_state.stop_event.clear()
+            #如果是严重错误，暂停仿真
+            if "仿真步执行异常" in latest_metrics['error']:
+                st.session_state.is_running = False
+                st.session_state.pause_event.clear()
+                
         elif latest_metrics.get("type") == "policy_done":
             # 处理政策分析完成
             result = latest_metrics.get("result")
@@ -948,7 +1004,9 @@ if st.session_state.is_running:
                     "volume": candle.volume,
                     "is_historical": False
                 })
-                st.session_state.csad_history.append(latest_metrics['csad'])
+                # Check if CSAD is present
+                if 'csad' in latest_metrics:
+                    st.session_state.csad_history.append(latest_metrics['csad'])
                 
             # 检查是否有降级事件
             if hasattr(ctrl.model_router, 'fallback_events') and ctrl.model_router.fallback_events:
@@ -956,18 +1014,18 @@ if st.session_state.is_running:
                      st.toast(f"⚠️ {event.get('message', '模型已降级')}", icon="⚠️")
                  ctrl.model_router.fallback_events.clear()
 
-    # 3. 自动刷新 UI
-    # 使用 sleep 控制前端刷新率，减轻浏览器压力
-    time.sleep(0.5) 
-    st.rerun()
+    # 4. 自动刷新 UI (仅当正在仿真时，或者有 Policy 结果时可能需要刷新)
+    if st.session_state.is_running or (latest_metrics and latest_metrics.get("type") == "policy_done"):
+        time.sleep(0.5) 
+        st.rerun()
     
 else:
-    # 如果处于停止状态，确保线程也停止
+    # 如果不处于 Controller 初始化状态，确保线程清理 (一般不会走到这里，除非手动 Stop)
     if st.session_state.sim_thread and st.session_state.sim_thread.is_alive():
-        st.session_state.stop_event.clear()
-        st.session_state.sim_thread.join(timeout=1.0)
-        st.session_state.sim_thread = None
-        st.toast("⏸️ 仿真线程已停止")
+        if not st.session_state.controller:
+            st.session_state.stop_event.set()
+            st.session_state.sim_thread.join(timeout=1.0)
+            st.session_state.sim_thread = None
 
 
             

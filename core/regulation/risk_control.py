@@ -25,6 +25,7 @@ import numpy as np
 
 from core.account import Portfolio, PositionBatch
 from config import GLOBAL_CONFIG
+from core.types import Order, OrderSide, OrderType
 
 
 # ==========================================
@@ -65,21 +66,8 @@ class MarginCallEvent:
     timestamp: float = field(default_factory=time.time)
 
 
-@dataclass
-class Order:
-    """交易订单"""
-    symbol: str
-    action: str        # "BUY" | "SELL"
-    quantity: int
-    price: float
-    order_type: str = "LIMIT"    # "LIMIT" | "MARKET"
-    status: str = "pending"
-    reason: str = ""             # 订单原因 (如 MARGIN_CALL)
-    agent_id: str = ""
-    
-    @property
-    def value(self) -> float:
-        return self.quantity * self.price
+
+
 
 
 # ==========================================
@@ -446,14 +434,16 @@ class MarginAccount(Portfolio):
         self.margin_call_history.append(event)
         
         # 生成强制平仓订单
+        # 生成强制平仓订单
         return Order(
             symbol=ticker,
-            action="SELL",
+            side=OrderSide.SELL,
             quantity=qty,
             price=current_price,
-            order_type="MARKET",
+            order_type=OrderType.MARKET,
             reason="MARGIN_CALL",
-            agent_id=agent_id
+            agent_id=agent_id,
+            timestamp=time.time() # 使用当前系统时间作为回退，理想情况下应传入 simulation clock
         )
     
     def get_account_summary(self, current_prices: Dict[str, float]) -> Dict:
@@ -514,7 +504,7 @@ class RiskEngine:
     
     def calculate_transaction_cost(
         self,
-        action: str,
+        side: OrderSide,
         price: float,
         quantity: int
     ) -> float:
@@ -531,7 +521,7 @@ class RiskEngine:
         commission = max(5.0, value * self.commission_rate)
         
         # 印花税 (仅卖出)
-        stamp_duty = value * self.stamp_duty_rate if action == "SELL" else 0.0
+        stamp_duty = value * self.stamp_duty_rate if side == OrderSide.SELL else 0.0
         
         return commission + stamp_duty
     
@@ -559,13 +549,13 @@ class RiskEngine:
         if agent_id in self.margin_accounts:
             account = self.margin_accounts[agent_id]
             
-            if order.action == "BUY":
+            if order.side == OrderSide.BUY:
                 if order.value > account.get_buying_power():
                     return False, 0.0, "超出购买力限制"
         
         # 3. 计算总费用
         tx_cost = self.calculate_transaction_cost(
-            order.action, order.price, order.quantity
+            order.side, order.price, order.quantity
         )
         total_cost = tx_cost + hft_penalty
         
@@ -661,7 +651,7 @@ if __name__ == "__main__":
             print(f"  触发保证金追缴!")
             order = margin_account.force_liquidate("000001", drop_price, "trader_001")
             if order:
-                print(f"  强制平仓订单: {order.action} {order.quantity} @ {order.price}")
+                print(f"  强制平仓订单: {order.side} {order.quantity} @ {order.price}")
             break
     
     # 高频监控测试

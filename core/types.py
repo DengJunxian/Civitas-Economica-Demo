@@ -42,6 +42,7 @@ class Order:
     timestamp: float # 仿真逻辑时间 (SimulationClock time)
     order_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     status: OrderStatus = OrderStatus.PENDING
+    reason: str = "" # 订单原因 (如 MARGIN_CALL) 或 拒绝原因
     filled_qty: int = 0
     
     @property

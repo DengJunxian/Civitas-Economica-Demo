@@ -349,6 +349,17 @@ with st.sidebar:
     
     st.divider()
     
+    # --- 状态指示器 ---
+    status_color = "#34C759" if st.session_state.is_running else ("#FFD60A" if st.session_state.get('day_cycle_paused') else "#8E8E93")
+    status_text = "🟢 仿真运行中" if st.session_state.is_running else ("🟡 仿真已暂停" if st.session_state.get('day_cycle_paused') else "⚪ 待启动")
+    
+    st.markdown(f"""
+    <div style="background-color: #1c1c1e; padding: 10px; border-radius: 8px; border-left: 5px solid {status_color}; margin-bottom: 10px;">
+        <span style="font-weight: bold; font-size: 16px; color: {status_color};">{status_text}</span>
+        <span style="float: right; color: #888; font-size: 12px;">{st.session_state.simulation_mode} MODE</span>
+    </div>
+    """, unsafe_allow_html=True)
+
     # --- 控制按钮 ---
     col1, col2 = st.columns(2)
     with col1:
@@ -626,12 +637,27 @@ else:
             # --- 可视化渲染 ---
             
             # 统计面板（K线图上方）
+            # 统计面板（K线图上方）
             st.markdown("### 📊 统计面板")
-            current_price = ctrl.market.engine.last_price
-            prev_close = ctrl.market.engine.prev_close
-            change_pct = (current_price - prev_close) / prev_close * 100 if prev_close else 0
             
-            # 计算逻辑修正
+            # [Fix] 优先从 market_history 获取最新仿真数据 (包含已完成的 step)
+            if st.session_state.market_history:
+                latest_data = st.session_state.market_history[-1]
+                current_price = latest_data['close']
+                # 获取前一天的收盘价作为对比基准
+                if len(st.session_state.market_history) >= 2:
+                    prev_close = st.session_state.market_history[-2]['close']
+                elif latest_data.get('is_historical'):
+                    #如果是第一天或者历史数据，尝试用 open 
+                    prev_close = latest_data['open']
+                else:
+                    # Fallback
+                    prev_close = ctrl.market.engine.prev_close
+            else:
+                current_price = ctrl.market.engine.last_price
+                prev_close = ctrl.market.engine.prev_close
+            
+            # 计算涨跌
             change_val = current_price - prev_close
             change_pct = (change_val / prev_close * 100) if prev_close else 0
             
@@ -822,9 +848,9 @@ def simulation_worker(controller, metrics_queue, cmd_queue, is_running_event):
                 if cmd['type'] == 'policy':
                     print(f"[Thread] Processing Policy: {cmd['content'][:10]}...")
                     # 异步执行政策分析
-                    loop.run_until_complete(controller.apply_policy_async(cmd['content']))
-                    # 推送完成状态 (可选)
-                    metrics_queue.put({"type": "policy_done", "result": "ok"})
+                    policy_result = loop.run_until_complete(controller.apply_policy_async(cmd['content']))
+                    # 推送完成状态
+                    metrics_queue.put({"type": "policy_done", "result": policy_result, "timestamp": datetime.now().strftime("%H:%M:%S")})
                 elif cmd['type'] == 'stop':
                     return
         except Exception as e:
@@ -896,8 +922,18 @@ if st.session_state.is_running:
             st.error(f"仿真异常: {latest_metrics['error']}")
             st.session_state.is_running = False
             st.session_state.stop_event.clear()
+        elif latest_metrics.get("type") == "policy_done":
+            # 处理政策分析完成
+            result = latest_metrics.get("result")
+            timestamp = latest_metrics.get("timestamp")
+            st.session_state.policy_analysis = {
+                "text": "政策已注入", 
+                "result": result,
+                "timestamp": timestamp
+            }
+            st.toast("✅ 政策分析已完成并生效！")
         else:
-            # 更新 Session State 数据
+            # 更新 Session State 数据 (常规仿真步)
             candle = latest_metrics['candle']
             
             # 检查是否重复添加 (通过 timestamp)

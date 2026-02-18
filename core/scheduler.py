@@ -127,6 +127,43 @@ class SimulationController:
         """获取当前模式的模型优先级"""
         return self.model_router.get_model_priority(self.mode.value)
 
+    async def apply_policy_async(self, policy_text: str) -> Dict[str, Any]:
+        """
+        异步执行政策分析并应用到仿真系统
+        
+        通过 PolicyInterpreter 调用 LLM 分析政策文本，
+        将量化结果应用到 MarketDataManager 的各项参数。
+        
+        Args:
+            policy_text: 政策描述文本
+            
+        Returns:
+            Dict: 政策分析结果, 包含 tax_rate, fear_factor, initial_news 等
+        """
+        from config import GLOBAL_CONFIG
+        
+        # 1. 调用 PolicyInterpreter 异步分析
+        result = await self.market.interpreter.interpret(policy_text)
+        
+        # 2. 应用到 MarketDataManager 的 PolicyState
+        self.market.policy.tax_rate = result.get("tax_rate", GLOBAL_CONFIG.TAX_RATE_STAMP)
+        self.market.policy.liquidity_injection = result.get("liquidity_injection", 0.0)
+        self.market.policy.description = policy_text
+        
+        # 3. 更新恐慌因子和新闻
+        self.market.panic_level = result.get("fear_factor", 0.0)
+        self.market.current_news = result.get("initial_news", "政策已发布")
+        
+        # 4. 同步 PolicyManager (熔断、税率等)
+        self.market.policy_manager.set_policy_param("tax", "rate", self.market.policy.tax_rate)
+        
+        print(f"[PolicyAsync] 政策已应用: {result.get('initial_news', '未知')}")
+        print(f"  - 税率: {self.market.policy.tax_rate:.4%}")
+        print(f"  - 恐慌因子: {self.market.panic_level:.2f}")
+        print(f"  - 流动性注入: {self.market.policy.liquidity_injection:.2f}")
+        
+        return result
+
     async def run_tick(self) -> Dict[str, Any]:
         """
         执行单个仿真步 (One Tick)

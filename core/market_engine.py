@@ -31,8 +31,10 @@ from core.time_manager import SimulationClock
 
 # Import C++ Optimized OrderBook
 try:
-    from core.exchange.order_book_cpp import OrderBookCPP
+    from core.exchange.order_book_cpp import OrderBookCPP, _civitas_lob
     from core.exchange.order_book import Order as OrderModel
+    if _civitas_lob is None:
+        raise ImportError("C++ extension _civitas_lob not available")
     USE_CPP_LOB = True
     print("[*] High-Performance C++ OrderBook Activated")
 except ImportError as e:

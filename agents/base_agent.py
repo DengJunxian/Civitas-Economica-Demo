@@ -60,7 +60,7 @@ class MarketSnapshot:
     panic_level: float = 0.0
     timestamp: float = 0.0
     
-    # [NEW] Policy Perception
+    # 政策感知字段
     policy_description: str = ""
     policy_tax_rate: float = 0.0
     policy_news: str = ""

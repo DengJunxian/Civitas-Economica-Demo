@@ -692,7 +692,7 @@ JSON 格式示例：
         if policy_reasoning_raw:
             policy_summary = policy_reasoning_raw[:500] + "..." if len(policy_reasoning_raw) > 500 else policy_reasoning_raw
         
-        # [NEW] Regulatory Feedback
+        # 监管反馈注入
         rejection_reason = market_state.get('last_rejection_reason')
         regulatory_block = ""
         if rejection_reason:

@@ -56,27 +56,40 @@ class LocalReasoner(BaseReasoner):
     本地规则推理器 (无需 LLM)
     用于快速模拟或基准测试
     """
-    def derive_decision(self, market_state: Dict, account_state: Dict) -> ReasoningResult:
-        # 简单均值回归策略
-        price = market_state.get("price", 100)
-        ma5 = price 
-        # 假设 market_state 里有MA信息，如果没有则简化
+    def derive_decision(self, market_state: Dict, account_state: Dict, **kwargs) -> ReasoningResult:
+        # 简单确定性策略 (用于测试)
+        trend = market_state.get("trend", "neutral")
+        panic_level = market_state.get("panic_level", 0.0)
         
-        # 简单随机漫步 + 动量
         action = "HOLD"
         qty = 0
-        import random
-        r = random.random()
-        
-        if r < 0.1:
-            action = "BUY"
-            qty = 100
-        elif r > 0.9:
-            action = "SELL"
-            qty = 100
+        reason = "Neutral Market"
+
+        # 确定性规则
+        if trend == "上涨" or trend == "bullish":
+            if panic_level > 0.7:
+                 action = "HOLD"
+                 qty = 0
+                 reason = "Wait and See (High Panic)"
+            else:
+                 action = "BUY"
+                 qty = 100
+                 reason = "Trend Following"
+        elif trend == "下跌" or trend == "bearish":
+            if panic_level > 0.6:
+                action = "SELL"
+                qty = 200
+                reason = "Panic Selling"
+            else:
+                action = "SELL"
+                qty = 100
+                reason = "Stop Loss"
             
-        decision = Decision(action=action, quantity=qty, reason="Random Rule", confidence=0.5)
+        decision = Decision(action=action, quantity=qty, reason=reason, confidence=0.6)
         return ReasoningResult(decision, "Local Rule", "None", "local")
+
+    # 别名兼容测试调用
+    reason = derive_decision
 
 class DeepSeekReasoner(BaseReasoner):
     """

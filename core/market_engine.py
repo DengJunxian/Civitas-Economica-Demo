@@ -425,7 +425,7 @@ class MatchingEngine:
                     seller_tax=0.0 # Will be updated by PolicyManager
                 )
                 
-                # [NEW] Apply Policy Effects (Tax)
+                # 应用政策效果（印花税等）
                 # Note: RunCallAuction is internal to MatchingEngine but we need policy here.
                 # Ideally MatchingEngine should know about Policy, but for now we apply it here or outside?
                 # Actually, RunCallAuction is in MatchingEngine which doesn't know PolicyManager.
@@ -680,7 +680,7 @@ class PolicyInterpreter:
 # ==========================================
 
 from core.policy import PolicyManager  
-from core.regulation.risk_control import RiskEngine  # [NEW]
+from core.regulation.risk_control import RiskEngine
 
 class MarketDataManager:
     def __init__(self, api_key_or_router, load_real_data=True, clock: Optional[SimulationClock] = None):
@@ -688,10 +688,10 @@ class MarketDataManager:
         self.interpreter = PolicyInterpreter(api_key_or_router)
         self.clock = clock
         
-        # [NEW] Policy Manager
+        # 政策管理器
         self.policy_manager = PolicyManager()
         
-        # [NEW] Risk Engine (Centralized Gateway)
+        # 风控引擎（集中式网关）
         self.risk_engine = RiskEngine(
             stamp_duty_rate=GLOBAL_CONFIG.TAX_RATE_STAMP,
             commission_rate=GLOBAL_CONFIG.TAX_RATE_COMMISSION
@@ -734,7 +734,7 @@ class MarketDataManager:
         self.current_news = params.get("initial_news", "Policy Implemented")
         self.panic_level = params.get("fear_factor", 0.0)
         
-        # [NEW] Sync with PolicyManager
+        # 同步政策管理器状态
         self.policy_manager.set_policy_param("tax", "rate", self.policy.tax_rate)
         # Note: Circuit breaker threshold might be set via explicit API, 
         # but here we interpret general policy text.
@@ -758,7 +758,7 @@ class MarketDataManager:
 
     def submit_agent_order(self, order: Order):
         """Pass agent orders to the matching engine with centralized risk check."""
-        # 1. [NEW] Pre-Matching Risk Gateway (Extreme Speed Check)
+        # 1. 盘前风控网关（极速检查）
         market_data = {
             "last_price": self.engine.last_price,
             "best_bid": None, # Could be improved with actual LOB depth
@@ -776,10 +776,10 @@ class MarketDataManager:
             order.reason = reason
             return []
             
-        # 2. [NEW] Register order in HFT monitor (for OTR calculation)
+        # 2. 注册订单到高频监控器（用于计算 OTR）
         self.risk_engine.hft_monitor.register_order(order.agent_id)
 
-        # 3. [NEW] Check Policy (Circuit Breaker, etc.)
+        # 3. 检查政策限制（熔断器等）
         market_state = {"last_price": self.engine.last_price}
         policy_res = self.policy_manager.check_order(order, market_state)
         
@@ -792,7 +792,7 @@ class MarketDataManager:
         # 4. Proceed to Matching
         trades = self.engine.submit_order(order, self.policy.liquidity_injection)
         
-        # 5. [NEW] Register trades in HFT monitor (for OTR calculation)
+        # 5. 注册成交到高频监控器（用于计算 OTR）
         if trades:
             self.risk_engine.hft_monitor.register_trade(order.agent_id)
             
@@ -841,7 +841,7 @@ class MarketDataManager:
             market_trend=trend,
             panic_level=self.panic_level,
             timestamp=self.clock.timestamp if self.clock else time.time(),
-            # [NEW] Policy Fields
+            # 政策字段
             policy_description=self.policy.description,
             policy_tax_rate=self.policy.tax_rate,
             policy_news=self.current_news

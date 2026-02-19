@@ -1380,7 +1380,7 @@ if not st.session_state.backtest_mode:
                     - **Agent {v['agent_id']}**: {v['type']} - {v['detail']}
                     """)
 
-        # ====== [NEW] PolicyManager 策略风洞控制台 ======
+        # ====== PolicyManager 策略风洞控制台 ======
         st.markdown("---")
         st.markdown("### 🎛️ 策略风洞控制台")
         st.caption("实时调整监管策略参数，观察对市场微观结构的影响")

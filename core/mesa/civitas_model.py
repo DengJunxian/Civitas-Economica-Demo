@@ -11,8 +11,8 @@ import numpy as np
 import asyncio
 from typing import Dict, List, Optional, Any
 
-from core.society.network import SocialGraph, InformationDiffusion # [NEW]
-from agents.persona import Persona, PersonaGenerator, RiskAppetite # [NEW]
+from core.society.network import SocialGraph, InformationDiffusion
+from agents.persona import Persona, PersonaGenerator, RiskAppetite
 from core.mesa.civitas_agent import CivitasAgent
 from agents.cognition.utility import InvestorType
 import time
@@ -69,7 +69,7 @@ class CivitasModel(Model):
         # 0. 初始化仿真时钟
         self.clock = SimulationClock()
         
-        # [NEW] 初始化社会网络与传播引擎
+        # 初始化社会网络与传播引擎
         # k must be <= n and even for Watts-Strogatz
         graph_k = min(10, n_agents - 1)
         if graph_k % 2 != 0:
@@ -122,7 +122,7 @@ class CivitasModel(Model):
                 "Avg_Wealth": lambda m: np.mean([a.wealth for a in m.agents]),
                 "Avg_Sentiment": lambda m: np.mean([a.sentiment for a in m.agents]),
                 "Volume": lambda m: m.market_manager.sim_candles[-1].volume if m.market_manager.sim_candles else 0,
-                "Infected_Count": lambda m: m.diffusion.history[-1]['infected'] if m.diffusion.history else 0 # [NEW]
+                "Infected_Count": lambda m: m.diffusion.history[-1]['infected'] if m.diffusion.history else 0
             },
             agent_reporters={
                 "Wealth": "wealth",
@@ -173,7 +173,7 @@ class CivitasModel(Model):
             self._create_single_agent(idx, InvestorType.NORMAL, p)
             idx += 1
             
-        # [NEW] 4. National Team Agent (The Whales)
+        # 4. National Team Agent (国家队)
         # Create 1 National Team Agent
         from agents.roles.national_team import NationalTeamAgent
         nt_core = NationalTeamAgent(
@@ -227,7 +227,7 @@ class CivitasModel(Model):
             "csad": self.csad,
             "news": truncate_text(self.market_manager.current_news, 500),
             "dates": self.market_manager.history_candles[-1].timestamp if self.market_manager.history_candles else "2024-01-01",
-            "infected_ratio": self.diffusion.history[-1]['infected'] / self.n_agents if self.diffusion.history else 0 # [NEW]
+            "infected_ratio": self.diffusion.history[-1]['infected'] / self.n_agents if self.diffusion.history else 0
         }
     
     @property
@@ -287,12 +287,12 @@ class CivitasModel(Model):
         3. 分发结果并执行交易
         4. 市场结算
         """
-        # [NEW] Update Circuit Breaker reference price at start of each step
+        # 更新熔断器参考价
         cb = self.market_manager.policy_manager.policies.get("circuit_breaker")
         if cb:
             cb.update_reference_price(self.current_price)
         
-        # [NEW] Update Social Network Dynamics
+        # 更新社交网络情绪传播
         if self.diffusion:
             self.diffusion.update_sentiment_propagation()
         
@@ -480,38 +480,4 @@ class CivitasModel(Model):
         }
 
 
-# ==========================================
-# 使用示例
-# ==========================================
 
-if __name__ == "__main__":
-    print("=" * 60)
-    print("Mesa Model 测试")
-    print("=" * 60)
-    
-    async def main():
-        # 创建模型
-        model = CivitasModel(n_agents=50, seed=42)
-        print(f"创建 {model.n_agents} 个 Agent")
-        
-        # 运行 20 步
-        print("\n[运行模拟 - 20 步]")
-        for i in range(20):
-            await model.async_step()
-            if i % 5 == 0:
-                print(f"  Step {model.steps}: Price={model.current_price:.2f}, "
-                      f"CSAD={model.csad:.4f}, Panic={model.panic_level:.2f}")
-        
-        # 获取结果
-        results = model.get_results()
-        print(f"\n[结果]")
-        print(f"  最终价格: {results['final_price']:.2f}")
-        print(f"  Model DataFrame shape: {results['model_data'].shape}")
-        print(f"  Agent DataFrame shape: {results['agent_data'].shape}")
-    
-    import asyncio
-    asyncio.run(main())
-    
-    print("\n" + "=" * 60)
-    print("测试完成")
-    print("=" * 60)

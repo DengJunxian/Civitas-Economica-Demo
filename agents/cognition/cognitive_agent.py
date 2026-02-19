@@ -127,8 +127,8 @@ class CognitiveAgent:
             api_key: DeepSeek API Key
             use_local_reasoner: 是否使用本地规则引擎 (无 API 调用)
             lambda_override: 覆盖损失厌恶系数 (可选)
-            risk_aversion_lambda: [NEW] 损失厌恶系数 (默认2.25)
-            reference_point: [NEW] 参考点/持仓成本
+            risk_aversion_lambda: 损失厌恶系数 (默认2.25)
+            reference_point: 参考点/持仓成本
         """
         self.agent_id = agent_id
         self.investor_type = investor_type
@@ -162,7 +162,7 @@ class CognitiveAgent:
     
     def calculate_psychological_value(self, current_price: float) -> float:
         """
-        [NEW] 计算当前价格相对于参考点(持仓成本)的心理效用值 V(x)
+        计算当前价格相对于参考点(持仓成本)的心理效用值 V(x)
         
         基于前景理论公式：
         - 盈利时: V = (price - ref)^0.88
@@ -281,7 +281,7 @@ class CognitiveAgent:
         memory_context = self.memory.get_context_for_decision(market_state)
         
         # ========== 阶段 2: LLM 推理 ==========
-        # [NEW] 更新参考点并计算心理效用
+        # 更新参考点并计算心理效用
         if avg_cost > 0:
             self.reference_point = avg_cost
         psychological_value = self.calculate_psychological_value(current_price)
@@ -337,14 +337,14 @@ class CognitiveAgent:
             final_quantity=final_quantity,
             final_confidence=result.decision.confidence,
             llm_action=llm_action,
-            llm_reasoning=result.chain_of_thought,
+            llm_reasoning=result.thought_chain,
             prospect_value=prospect_result.subjective_value,
             pain_gain_ratio=prospect_result.pain_gain_ratio,
             decision_bias=prospect_result.decision_bias,
             was_overridden=was_overridden,
             override_reason=override_reason,
-            fear_level=result.emotional_state.fear_level,
-            greed_level=result.emotional_state.greed_level,
+            fear_level=result.decision.fear_level,
+            greed_level=result.decision.greed_level,
             memory_context=memory_context,
             inference_time_ms=(time.time() - start_time) * 1000,
             model_used=result.model_used
@@ -434,8 +434,14 @@ class CognitiveAgent:
 # ==========================================
 
 def create_panic_retail_agent(agent_id: str, **kwargs) -> CognitiveAgent:
-    """创建恐慌型散户 Agent"""
-    return CognitiveAgent(agent_id, InvestorType.PANIC_RETAIL, **kwargs)
+    """创建恐慌型散户 Agent (λ=3.0)"""
+    # 显式传递 lambda 以覆盖默认值 2.25
+    return CognitiveAgent(
+        agent_id, 
+        InvestorType.PANIC_RETAIL, 
+        risk_aversion_lambda=3.0,
+        **kwargs
+    )
 
 
 def create_normal_agent(agent_id: str, **kwargs) -> CognitiveAgent:
@@ -444,8 +450,13 @@ def create_normal_agent(agent_id: str, **kwargs) -> CognitiveAgent:
 
 
 def create_quant_agent(agent_id: str, **kwargs) -> CognitiveAgent:
-    """创建纪律型量化 Agent"""
-    return CognitiveAgent(agent_id, InvestorType.DISCIPLINED_QUANT, **kwargs)
+    """创建纪律型量化 Agent (λ=1.0)"""
+    return CognitiveAgent(
+        agent_id, 
+        InvestorType.DISCIPLINED_QUANT, 
+        risk_aversion_lambda=1.0,
+        **kwargs
+    )
 
 
 def create_population(
@@ -488,64 +499,4 @@ def create_population(
     return agents
 
 
-# ==========================================
-# 使用示例
-# ==========================================
 
-if __name__ == "__main__":
-    print("=" * 60)
-    print("CognitiveAgent 认知 Agent 测试")
-    print("=" * 60)
-    
-    # 创建不同类型的 Agent
-    panic_agent = create_panic_retail_agent("散户小明", use_local_reasoner=True)
-    quant_agent = create_quant_agent("量化1号", use_local_reasoner=True)
-    
-    # 模拟市场状态
-    market = {
-        "price": 3000.0,
-        "trend": "下跌",
-        "panic_level": 0.75,
-        "volatility": 0.04,
-        "news": "美联储加息超预期"
-    }
-    
-    # 模拟账户状态 - 亏损中
-    account = {
-        "cash": 40000.0,
-        "market_value": 60000.0,
-        "pnl_pct": -0.08
-    }
-    
-    print("\n[场景] 市场下跌，恐慌指数 0.75，账户亏损 8%")
-    print("-" * 50)
-    
-    # 测试恐慌散户
-    decision1 = panic_agent.make_decision(market, account)
-    print(f"\n[恐慌散户 - λ={panic_agent.prospect.lambda_coeff}]")
-    print(f"  LLM 建议: {decision1.llm_action}")
-    print(f"  前景值: {decision1.prospect_value:.4f}")
-    print(f"  最终决策: {decision1.final_action}")
-    print(f"  是否覆盖: {decision1.was_overridden}")
-    if decision1.override_reason:
-        print(f"  覆盖原因: {decision1.override_reason}")
-    print(f"  决策偏差: {decision1.decision_bias}")
-    
-    # 测试量化
-    decision2 = quant_agent.make_decision(market, account)
-    print(f"\n[量化 Agent - λ={quant_agent.prospect.lambda_coeff}]")
-    print(f"  LLM 建议: {decision2.llm_action}")
-    print(f"  前景值: {decision2.prospect_value:.4f}")
-    print(f"  最终决策: {decision2.final_action}")
-    print(f"  是否覆盖: {decision2.was_overridden}")
-    print(f"  决策偏差: {decision2.decision_bias}")
-    
-    # 测试情绪画像
-    print(f"\n[情绪画像]")
-    profile = panic_agent.get_emotional_profile()
-    for k, v in profile.items():
-        print(f"  {k}: {v}")
-    
-    print("\n" + "=" * 60)
-    print("测试完成")
-    print("=" * 60)

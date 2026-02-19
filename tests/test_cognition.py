@@ -19,7 +19,7 @@ from agents.cognition.utility import (
     InvestorType, create_panic_retail, create_normal_investor, create_disciplined_quant
 )
 from agents.cognition.llm_brain import (
-    DeepSeekReasoner, LocalReasoner, Decision, EmotionalState
+    DeepSeekReasoner, LocalReasoner, Decision
 )
 from agents.cognition.memory import TraumaMemory, TraumaEvent
 from agents.cognition.cognitive_agent import (

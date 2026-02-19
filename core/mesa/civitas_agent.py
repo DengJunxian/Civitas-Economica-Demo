@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any, List, Tuple
 from agents.base_agent import BaseAgent, MarketSnapshot
 from agents.trader_agent import TraderAgent
 from agents.cognition.utility import InvestorType
-from agents.persona import Persona # [NEW]
+from agents.persona import Persona
 from config import GLOBAL_CONFIG
 from core.types import Order
 
@@ -31,8 +31,8 @@ class CivitasAgent(Agent):
         investor_type: InvestorType = InvestorType.NORMAL,
         initial_cash: float = 100000.0,
         use_local_reasoner: bool = True,
-        persona: Optional[Persona] = None, # [NEW]
-        core_agent: Optional[BaseAgent] = None # [NEW] Dependency Injection
+        persona: Optional[Persona] = None,
+        core_agent: Optional[BaseAgent] = None
     ):
         """
         初始化 Mesa Agent
@@ -61,11 +61,10 @@ class CivitasAgent(Agent):
                 cash_balance=initial_cash,
                 portfolio={},
                 psychology_profile=profile,
-                persona=persona # [NEW] Pass persona
+                persona=persona
             )
         
-        # 兼容性字段
-        # ... (pending_action logic)
+        # 待执行动作（用于情绪推断和 DataCollector）
         self.pending_action: Optional[Dict[str, Any]] = None
         
         # 恢复成本跟踪 (用于计算 PnL)
@@ -109,6 +108,14 @@ class CivitasAgent(Agent):
 
     @property
     def sentiment(self) -> float:
+        """获取 Agent 情绪值 (-1.0 ~ 1.0)，基于最近决策推断"""
+        if self.pending_action is None:
+            return 0.0
+        action = self.pending_action.get("action", "HOLD")
+        if action == "BUY":
+            return 0.5
+        elif action == "SELL":
+            return -0.5
         return 0.0
 
     @property

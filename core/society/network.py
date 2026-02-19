@@ -171,7 +171,7 @@ class SocialGraph:
         return bearish_count / len(neighbors)
     
     def get_bullish_ratio(self, node_id: int) -> float:
-        """[NEW] 计算邻居中看多者的比例"""
+        """计算邻居中看多者的比例"""
         neighbors = self.get_neighbors(node_id)
         if not neighbors:
             return 0.0
@@ -184,7 +184,7 @@ class SocialGraph:
     
     def generate_social_summary(self, node_id: int) -> str:
         """
-        [NEW] 生成朋友圈舆情摘要
+        生成朋友圈舆情摘要
         
         用于注入 LLM Prompt，模拟社交媒体对投资决策的影响。
         
@@ -493,60 +493,4 @@ class InformationDiffusion:
         return self.history
 
 
-# ==========================================
-# 使用示例
-# ==========================================
 
-if __name__ == "__main__":
-    print("=" * 60)
-    print("社会网络与情绪传播测试")
-    print("=" * 60)
-    
-    # 创建小世界网络
-    print("\n[创建社会网络]")
-    graph = SocialGraph(n_agents=500, k=6, p=0.3, seed=42)
-    
-    stats = graph.get_network_stats()
-    print(f"  节点数: {stats['total_nodes']}")
-    print(f"  平均度: {stats['avg_degree']:.2f}")
-    print(f"  聚类系数: {stats['clustering_coefficient']:.4f}")
-    
-    # 创建传播引擎
-    print("\n[初始化 SIR 传播引擎]")
-    diffusion = InformationDiffusion(
-        social_graph=graph,
-        beta=0.3,      # 30% 基础感染率
-        gamma=0.1,     # 10% 恢复率
-        delta=0.05,    # 5% 免疫衰减
-        lambda_amplifier=0.5
-    )
-    
-    # 注入恐慌种子
-    print("\n[注入恐慌种子]")
-    seeds = diffusion.inject_panic(n_seeds=10, method="influential")
-    print(f"  感染 {len(seeds)} 个高影响力节点")
-    
-    # 运行传播模拟
-    print("\n[运行传播模拟 - 50 轮]")
-    for i in range(50):
-        stats = diffusion.update_sentiment_propagation()
-        
-        if i % 10 == 0:
-            print(f"  Tick {stats['tick']:3d}: S={stats['susceptible']:4d}, "
-                  f"I={stats['infected']:4d}, R={stats['recovered']:4d}")
-    
-    # 最终统计
-    prop_stats = diffusion.get_propagation_stats()
-    print(f"\n[传播统计]")
-    print(f"  峰值感染: {prop_stats['peak_infected']} (第 {prop_stats['peak_tick']} 轮)")
-    
-    # 检查 Lambda 变化
-    print(f"\n[羊群效应 - Lambda 变化]")
-    lambdas = [a.lambda_coeff for a in graph.agents.values()]
-    print(f"  平均 λ: {np.mean(lambdas):.3f}")
-    print(f"  最大 λ: {np.max(lambdas):.3f}")
-    print(f"  最小 λ: {np.min(lambdas):.3f}")
-    
-    print("\n" + "=" * 60)
-    print("测试完成")
-    print("=" * 60)

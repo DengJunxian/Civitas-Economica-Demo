@@ -366,47 +366,4 @@ class TraumaMemory:
         return len(self.fragments)
 
 
-# ==========================================
-# 使用示例
-# ==========================================
 
-if __name__ == "__main__":
-    print("=" * 60)
-    print("增强型 RAG 记忆模块测试")
-    print("=" * 60)
-    
-    memory = TraumaMemory()
-    
-    # 添加一些记忆
-    memory.add_memory("大盘上涨5%，成功抄底，盈利丰厚", 0.8)
-    memory.add_memory("追高买入，当天跌停，亏损惨重", -0.7)
-    memory.add_memory("贸易战消息，恐慌抛售，割肉出局", -0.5)
-    memory.add_memory("震荡行情，持仓观望，小幅盈利", 0.2)
-    
-    print(f"\n记忆库大小: {len(memory)}")
-    
-    # 测试普通检索
-    print("\n[普通检索] 查询: '大盘下跌'")
-    results = memory.retrieve("大盘下跌", top_k=2)
-    for r in results:
-        print(f"  - {r}")
-    
-    # 测试创伤记忆检索
-    print("\n[创伤记忆] 波动率 5% 触发")
-    trauma = memory.retrieve_trauma(volatility=0.05)
-    for t in trauma:
-        print(f"  - {t[:80]}...")
-    
-    # 测试情绪包袱
-    baggage, desc = memory.get_emotional_baggage()
-    print(f"\n[情绪包袱] 程度: {baggage:.2f}")
-    print(f"  描述: {desc}")
-    
-    # 测试决策上下文
-    market = {"volatility": 0.04, "trend": "下跌", "panic_level": 0.75}
-    context = memory.get_context_for_decision(market)
-    print(f"\n[决策上下文]\n{context}")
-    
-    print("\n" + "=" * 60)
-    print("测试完成")
-    print("=" * 60)

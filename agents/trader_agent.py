@@ -7,7 +7,7 @@ TraderAgent 实现 — 基于认知闭环的交易智能体
 1. 心理画像驱动: 风险厌恶、自信程度、关注广度等个性化参数
 2. 模拟 DeepSeek R1 推理: 生成类人思维链 (Chain of Thought)
 3. 结构化决策: 输出标准 Limit Order
-4. [NEW] 快慢思考双层架构 (System 1/2): 节约算力，模拟直觉与深思
+4. 快慢思考双层架构 (System 1/2): 节约算力，模拟直觉与深思
 
 作者: Civitas Economica Team
 """
@@ -21,8 +21,8 @@ from typing import Dict, List, Optional, Any, Tuple
 from agents.base_agent import BaseAgent, MarketSnapshot
 from agents.brain import DeepSeekBrain
 from core.types import Order, OrderSide, OrderType, OrderStatus
-from agents.persona import Persona, RiskAppetite # [NEW]
-from core.society.network import SocialGraph, SentimentState # [NEW] Added SentimentState
+from agents.persona import Persona, RiskAppetite
+from core.society.network import SocialGraph, SentimentState
 
 class TraderAgent(BaseAgent):
     """
@@ -36,14 +36,14 @@ class TraderAgent(BaseAgent):
         portfolio: Optional[Dict[str, int]] = None,
         psychology_profile: Optional[Dict[str, float]] = None,
         model_router: Optional[Any] = None, # Support Router
-        persona: Optional[Persona] = None # [NEW] Persona
+        persona: Optional[Persona] = None
     ):
         super().__init__(agent_id, cash_balance, portfolio, psychology_profile)
         
-        # [NEW] Persona Integration
+        # 人格画像集成
         self.persona = persona if persona else Persona(name=agent_id)
         
-        # [NEW] Social Network Integration
+        # 社交网络集成
         self.social_node_id: Optional[int] = None
         self.social_graph: Optional[SocialGraph] = None
         
@@ -67,10 +67,10 @@ class TraderAgent(BaseAgent):
             model_router=model_router
         )
         
-        # [NEW] Compliance Feedback Memory
+        # 合规反馈记忆（存储被风控拒绝的原因）
         self.compliance_feedback: List[str] = []
         
-        # [NEW] State Tracking for Fast/Slow Mode
+        # 快/慢思考模式状态跟踪
         self._last_news_count = 0
         self._last_social_sentiment = "neutral"
         self._fast_mode_consecutive_steps = 0
@@ -245,7 +245,7 @@ class TraderAgent(BaseAgent):
         核心认知方法：结合市场感知、情绪、社交信号进行推理决策
         此方法对应 User Request Prompt 3 中的 "reason_and_act"
         
-        [REFAC] 引入快慢思考双层架构
+        采用快慢思考双层架构 (System 1/2)
         """
         # 0. System 1 vs System 2 Check
         if not self._needs_deep_thinking(perceived_data, social_signal):
@@ -265,7 +265,7 @@ class TraderAgent(BaseAgent):
             "panic_level": getattr(snapshot, "panic_level", 0.5), 
             "news": "; ".join(news) if news else "无重大新闻",
             "last_rejection_reason": self.compliance_feedback[-1] if self.compliance_feedback else None,
-            # [NEW] Policy Perception
+            # 政策感知
             "policy_description": getattr(snapshot, "policy_description", ""),
             "policy_tax_rate": getattr(snapshot, "policy_tax_rate", 0.0),
             "policy_news": getattr(snapshot, "policy_news", "")
@@ -440,7 +440,7 @@ class TraderAgent(BaseAgent):
              score = 1.0 if pnl > 0 else -1.0
              self.brain.memory.add_memory(content, score)
              
-        # [NEW] 3. Handle REJECTED status (Regulatory Awareness)
+        # 3. 处理被风控拒绝的订单（监管认知）
         status = outcome.get("status")
         if status == "REJECTED" or status == OrderStatus.REJECTED:
              reason = outcome.get("reason", "Unknown regulatory rejection")
@@ -469,7 +469,7 @@ class TraderAgent(BaseAgent):
     
     def share_opinion(self) -> Dict[str, Any]:
         """
-        [NEW] 分享自己的投资观点到社交网络
+        分享自己的投资观点到社交网络
         
         生成当前 Agent 的情绪/观点信号，供邻居 Agent 接收。
         
@@ -504,7 +504,7 @@ class TraderAgent(BaseAgent):
     
     def receive_opinion(self, opinions: List[Dict[str, Any]]) -> str:
         """
-        [NEW] 接收邻居的观点，生成社交压力描述
+        接收邻居的观点，生成社交压力描述
         
         Args:
             opinions: 邻居分享的观点列表
@@ -533,7 +533,7 @@ class TraderAgent(BaseAgent):
 
     def get_social_summary(self) -> str:
         """
-        [NEW] 获取绑定社交网络的舆情摘要
+        获取绑定社交网络的舆情摘要
         
         Returns:
             社交舆情摘要字符串

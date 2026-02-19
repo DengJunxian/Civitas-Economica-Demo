@@ -270,32 +270,4 @@ class ParallelUniverseEngine:
         return "\n".join(lines)
 
 
-# 使用示例 (仅供测试)
-if __name__ == "__main__":
-    async def test():
-        engine = ParallelUniverseEngine()
-        config = UniverseConfig(
-            seed=42,
-            n_agents=50,
-            panic_ratio=0.3,
-            quant_ratio=0.1,
-            initial_price=3000.0
-        )
-        
-        # A: 无政策
-        # B: 降税 + 利好新闻
-        policy_b = {
-            "tax_rate": 0.0005,
-            "initial_news": "重磅利好：监管层宣布印花税减半，鼓励长期资金入市！"
-        }
-        
-        res = await engine.run_counterfactual_experiment(
-            base_config=config,
-            policy_a=None,
-            policy_b=policy_b,
-            n_steps=10
-        )
-        
-        print(res.analysis)
-        
-    asyncio.run(test())
+

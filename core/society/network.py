@@ -215,6 +215,17 @@ class SocialGraph:
         
         return " ".join(parts)
     
+    def get_most_influential_node(self) -> Optional[int]:
+        """
+        获取影响力最高的节点 ID (网络枢纽)
+        
+        Returns:
+            影响力最高节点的 ID，若网络为空则返回 None
+        """
+        if not self.agents:
+            return None
+        return max(self.agents.items(), key=lambda x: x[1].influence)[0]
+
     def get_network_stats(self) -> Dict:
         """获取网络统计信息"""
         states = [a.sentiment_state for a in self.agents.values()]

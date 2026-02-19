@@ -19,6 +19,7 @@ from agents.roles.analyst import (
     SignalType,
     tool,
 )
+from agents.roles.national_team import NationalTeamAgent
 
 __all__ = [
     "Analyst",
@@ -28,4 +29,5 @@ __all__ = [
     "Signal",
     "SignalType",
     "tool",
+    "NationalTeamAgent",
 ]

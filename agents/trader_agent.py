@@ -7,6 +7,7 @@ TraderAgent 实现 — 基于认知闭环的交易智能体
 1. 心理画像驱动: 风险厌恶、自信程度、关注广度等个性化参数
 2. 模拟 DeepSeek R1 推理: 生成类人思维链 (Chain of Thought)
 3. 结构化决策: 输出标准 Limit Order
+4. [NEW] 快慢思考双层架构 (System 1/2): 节约算力，模拟直觉与深思
 
 作者: Civitas Economica Team
 """
@@ -21,7 +22,7 @@ from agents.base_agent import BaseAgent, MarketSnapshot
 from agents.brain import DeepSeekBrain
 from core.types import Order, OrderSide, OrderType, OrderStatus
 from agents.persona import Persona, RiskAppetite # [NEW]
-from core.society.network import SocialGraph # [NEW]
+from core.society.network import SocialGraph, SentimentState # [NEW] Added SentimentState
 
 class TraderAgent(BaseAgent):
     """
@@ -68,6 +69,11 @@ class TraderAgent(BaseAgent):
         
         # [NEW] Compliance Feedback Memory
         self.compliance_feedback: List[str] = []
+        
+        # [NEW] State Tracking for Fast/Slow Mode
+        self._last_news_count = 0
+        self._last_social_sentiment = "neutral"
+        self._fast_mode_consecutive_steps = 0
         
         # Sync initial confidence
         self.brain.state.confidence = self.profile.get("confidence_level", 0.5) * 100
@@ -131,6 +137,104 @@ class TraderAgent(BaseAgent):
         # 调用增强版推理方法 (reason_and_act logic integrated here)
         return await self.reason_and_act(perceived_data, self.emotional_state, social_signal)
 
+    def _needs_deep_thinking(self, perceived_data: Dict[str, Any], social_signal: str) -> bool:
+        """
+        判断是否需要触发慢思考 (System 2 / LLM)
+        
+        触发条件:
+        1. 突发新闻: 新闻数量增加
+        2. 盈亏剧烈: 触及止损/止盈阈值 (效用极值)
+        3. 社交逆转: 社交信号发生方向性改变
+        4. 强制刷新: 连续 N 步快思考后强制刷新一次
+        """
+        # Condition 1: New News
+        news = perceived_data.get("news", [])
+        if len(news) > self._last_news_count:
+            self._last_news_count = len(news)
+            return True
+            
+        # Condition 2: PnL Extremes (Use Prospect Theory utility approximation)
+        pnl_pct = perceived_data.get("pnl_pct", 0)
+        # 简化版前景效用: 亏损更敏感
+        utility = pnl_pct if pnl_pct > 0 else pnl_pct * 2.25
+        if utility < -0.15 or utility > 0.10: # 大亏或大赚
+            # 但如果已经在同一状态很久，可能不需要每步都想？
+            # 暂时简化为：极端情况始终深思
+            return True
+            
+        # Condition 3: Social Signal Reversal
+        # Parse social signal simple sentiment
+        current_social = "neutral"
+        if "Panic" in social_signal or "selling" in social_signal: current_social = "bearish"
+        elif "buy" in social_signal or "FOMO" in social_signal: current_social = "bullish"
+        
+        if current_social != self._last_social_sentiment:
+            self._last_social_sentiment = current_social
+            return True
+            
+        # Condition 4: Forced Refresh (every 10 steps to prevent zombies)
+        if self._fast_mode_consecutive_steps > 10:
+            return True
+            
+        return False
+
+    def _fast_think(
+        self, 
+        perceived_data: Dict[str, Any],
+        emotional_state: str,
+        social_signal: str
+    ) -> Dict[str, Any]:
+        """
+        快思考 (System 1): 基于规则和启发式的快速反应
+        不调用 LLM，极其高效。
+        """
+        snapshot: MarketSnapshot = perceived_data["snapshot"]
+        trend_val = getattr(snapshot, "market_trend", 0)
+        pnl_pct = perceived_data.get("pnl_pct", 0)
+        
+        action = "HOLD"
+        qty = 0
+        price = 0.0
+        
+        last_price = snapshot.last_price
+        
+        # Heuristic 1: Trend Following (Momentum)
+        if trend_val > 0.03: # Strong Up
+             if self.cash_balance > last_price * 100:
+                 action = "BUY"
+                 # Buy small amount (10% of cash)
+                 qty = int((self.cash_balance * 0.1) / last_price) // 100 * 100
+                 price = round(last_price * 1.02, 2) # Aggressive
+        elif trend_val < -0.03: # Strong Down
+             holding = self.portfolio.get(snapshot.symbol, 0)
+             if holding > 0:
+                 action = "SELL"
+                 # Sell 20% of holding
+                 qty = int(holding * 0.2) // 100 * 100
+                 price = round(last_price * 0.98, 2) # Aggressive
+                 
+        # Heuristic 2: Panic Selling (Override)
+        if "Panic" in social_signal or emotional_state == "Fearful":
+             holding = self.portfolio.get(snapshot.symbol, 0)
+             if holding > 0:
+                 action = "SELL"
+                 qty = int(holding * 0.5) // 100 * 100 # Dump 50%
+                 if qty == 0 and holding > 0: qty = holding # Dump all if small
+                 price = round(last_price * 0.95, 2) # Panic price
+        
+        reasoning = f"(System 1) Fast response. Trend={trend_val:.3f}, Emotion={emotional_state}"
+        
+        return {
+            "decision": {
+                "action": action,
+                "qty": qty,
+                "price": price
+            },
+            "reasoning": reasoning,
+            "symbol": snapshot.symbol,
+            "timestamp": snapshot.timestamp
+        }
+
     async def reason_and_act(
         self,
         perceived_data: Dict[str, Any],
@@ -140,7 +244,17 @@ class TraderAgent(BaseAgent):
         """
         核心认知方法：结合市场感知、情绪、社交信号进行推理决策
         此方法对应 User Request Prompt 3 中的 "reason_and_act"
+        
+        [REFAC] 引入快慢思考双层架构
         """
+        # 0. System 1 vs System 2 Check
+        if not self._needs_deep_thinking(perceived_data, social_signal):
+            self._fast_mode_consecutive_steps += 1
+            return self._fast_think(perceived_data, emotional_state, social_signal)
+            
+        # Trigger System 2 (Slow Thinking)
+        self._fast_mode_consecutive_steps = 0
+        
         snapshot: MarketSnapshot = perceived_data["snapshot"]
         news = perceived_data["news"]
         
@@ -290,8 +404,8 @@ class TraderAgent(BaseAgent):
             holding = self.portfolio.get(symbol, 0)
             if qty > holding:
                 qty = holding
-                if qty <= 0:
-                    return None
+            if qty <= 0:
+                return None
         
         # 生成 Order
         order = Order(
@@ -352,3 +466,78 @@ class TraderAgent(BaseAgent):
             f"Risk: {self.profile.get('risk_aversion', 0.5):.2f}, "
             f"Conf: {self.brain.state.confidence:.1f}"
         )
+    
+    def share_opinion(self) -> Dict[str, Any]:
+        """
+        [NEW] 分享自己的投资观点到社交网络
+        
+        生成当前 Agent 的情绪/观点信号，供邻居 Agent 接收。
+        
+        Returns:
+            包含 agent_id、sentiment、confidence 的字典
+        """
+        # 基于最近的决策和情绪确定观点
+        sentiment = "neutral"
+        if hasattr(self, 'emotional_state'):
+            if self.emotional_state in ("Greedy", "Confident"):
+                sentiment = "bullish"
+            elif self.emotional_state in ("Fearful", "Regretful", "Anxious"):
+                sentiment = "bearish"
+        
+        # 如果绑定了社交网络，更新节点状态
+        if self.social_graph and self.social_node_id is not None:
+            node = self.social_graph.agents.get(self.social_node_id)
+            if node:
+                if sentiment == "bearish":
+                    node.sentiment_state = SentimentState.INFECTED
+                elif sentiment == "bullish":
+                    node.sentiment_state = SentimentState.BULLISH
+                else:
+                    node.sentiment_state = SentimentState.SUSCEPTIBLE
+        
+        return {
+            "agent_id": self.agent_id,
+            "sentiment": sentiment,
+            "confidence": self.brain.state.confidence / 100.0,
+            "emotional_state": getattr(self, 'emotional_state', 'Neutral')
+        }
+    
+    def receive_opinion(self, opinions: List[Dict[str, Any]]) -> str:
+        """
+        [NEW] 接收邻居的观点，生成社交压力描述
+        
+        Args:
+            opinions: 邻居分享的观点列表
+            
+        Returns:
+            社交压力描述字符串 (用于注入 Prompt)
+        """
+        if not opinions:
+            return "没有收到朋友们的消息。"
+        
+        bearish_count = sum(1 for o in opinions if o.get("sentiment") == "bearish")
+        bullish_count = sum(1 for o in opinions if o.get("sentiment") == "bullish")
+        total = len(opinions)
+        
+        # 计算社交压力
+        if bearish_count > total * 0.6:
+            return f"朋友圈{bearish_count}/{total}个人在恐慌抛售！你感到巨大的社交压力。"
+        elif bullish_count > total * 0.6:
+            return f"朋友圈{bullish_count}/{total}个人在兴奋加仓！你感到 FOMO 压力。"
+        elif bearish_count > bullish_count:
+            return f"朋友圈偏悲观 ({bearish_count}空 vs {bullish_count}多)。"
+        elif bullish_count > bearish_count:
+            return f"朋友圈偏乐观 ({bullish_count}多 vs {bearish_count}空)。"
+        else:
+            return "朋友圈观点分歧，情绪比较混乱。"
+
+    def get_social_summary(self) -> str:
+        """
+        [NEW] 获取绑定社交网络的舆情摘要
+        
+        Returns:
+            社交舆情摘要字符串
+        """
+        if self.social_graph and self.social_node_id is not None:
+            return self.social_graph.generate_social_summary(self.social_node_id)
+        return "未加入任何投资社群。"

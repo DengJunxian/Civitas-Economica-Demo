@@ -69,7 +69,9 @@ class TestTraderAgent:
             "emotion_score": 0.8
         })
         
-        order = await agent.act(snapshot, [])
+        
+        order = await agent.act(snapshot, ["News"])
+        agent.brain.think_async.assert_called_once()
         
         assert order is not None
         assert isinstance(order, Order)
@@ -96,7 +98,9 @@ class TestTraderAgent:
             "emotion_score": -0.8
         })
         
-        order = await agent.act(snapshot, [])
+        
+        order = await agent.act(snapshot, ["News"])
+        agent.brain.think_async.assert_called_once()
         
         assert order is not None
         assert order.side == OrderSide.SELL
@@ -121,7 +125,9 @@ class TestTraderAgent:
         
         # Should return None because logic in `decide` checks funds
         # and if it adjusts to 0 quantity, it returns None.
-        order = await agent.act(snapshot, [])
+        # and if it adjusts to 0 quantity, it returns None.
+        order = await agent.act(snapshot, ["News"])
+        agent.brain.think_async.assert_called_once()
         assert order is None
 
     @pytest.mark.asyncio

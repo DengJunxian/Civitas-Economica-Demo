@@ -170,6 +170,51 @@ class SocialGraph:
         )
         return bearish_count / len(neighbors)
     
+    def get_bullish_ratio(self, node_id: int) -> float:
+        """[NEW] 计算邻居中看多者的比例"""
+        neighbors = self.get_neighbors(node_id)
+        if not neighbors:
+            return 0.0
+        
+        bullish_count = sum(
+            1 for n in neighbors
+            if self.agents[n].sentiment_state == SentimentState.BULLISH
+        )
+        return bullish_count / len(neighbors)
+    
+    def generate_social_summary(self, node_id: int) -> str:
+        """
+        [NEW] 生成朋友圈舆情摘要
+        
+        用于注入 LLM Prompt，模拟社交媒体对投资决策的影响。
+        
+        Returns:
+            描述朋友圈情绪的中文字符串
+        """
+        sentiments = self.get_neighbor_sentiments(node_id)
+        neighbors = self.get_neighbors(node_id)
+        total = len(neighbors) if neighbors else 1
+        
+        bearish = sentiments.get(SentimentState.INFECTED, 0)
+        bullish = sentiments.get(SentimentState.BULLISH, 0)
+        neutral = sentiments.get(SentimentState.SUSCEPTIBLE, 0)
+        
+        parts = []
+        if bearish > total * 0.5:
+            parts.append(f"你的{bearish}个朋友中超过半数在看空！群里弥漫着悲观情绪。")
+        elif bearish > total * 0.3:
+            parts.append(f"朋友圈开始出现恐慌情绪，{bearish}人发帖说要割肉。")
+        
+        if bullish > total * 0.5:
+            parts.append(f"你的{bullish}个朋友都在喊加仓！群里非常亢奋。")
+        elif bullish > total * 0.3:
+            parts.append(f"有{bullish}个朋友分享了盈利截图，气氛偏乐观。")
+        
+        if not parts:
+            parts.append(f"朋友圈比较平静，{neutral}人在观望中。")
+        
+        return " ".join(parts)
+    
     def get_network_stats(self) -> Dict:
         """获取网络统计信息"""
         states = [a.sentiment_state for a in self.agents.values()]

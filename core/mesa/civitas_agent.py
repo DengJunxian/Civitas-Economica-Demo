@@ -31,7 +31,8 @@ class CivitasAgent(Agent):
         investor_type: InvestorType = InvestorType.NORMAL,
         initial_cash: float = 100000.0,
         use_local_reasoner: bool = True,
-        persona: Optional[Persona] = None # [NEW]
+        persona: Optional[Persona] = None, # [NEW]
+        core_agent: Optional[BaseAgent] = None # [NEW] Dependency Injection
     ):
         """
         初始化 Mesa Agent
@@ -42,22 +43,26 @@ class CivitasAgent(Agent):
             initial_cash: 初始资金
             use_local_reasoner: 是否使用本地推理器 (已废弃，由 TraderAgent 内部处理)
             persona: 智能体人格 (可选)
+            core_agent: 预先创建的核心 Agent 实例 (可选)
         """
         super().__init__(model)
         self.investor_type = investor_type
         
-        # 根据投资者类型生成心理画像 (Legacy compatibility)
-        profile = self._get_profile_by_type(investor_type)
-        
-        # 初始化内核 Agent
-        # Mesa 的 unique_id 可能是 int
-        self.core: TraderAgent = TraderAgent(
-            agent_id=str(self.unique_id),
-            cash_balance=initial_cash,
-            portfolio={},
-            psychology_profile=profile,
-            persona=persona # [NEW] Pass persona
-        )
+        if core_agent:
+            self.core = core_agent
+        else:
+            # 根据投资者类型生成心理画像 (Legacy compatibility)
+            profile = self._get_profile_by_type(investor_type)
+            
+            # 初始化内核 Agent
+            # Mesa 的 unique_id 可能是 int
+            self.core: TraderAgent = TraderAgent(
+                agent_id=str(self.unique_id),
+                cash_balance=initial_cash,
+                portfolio={},
+                psychology_profile=profile,
+                persona=persona # [NEW] Pass persona
+            )
         
         # 兼容性字段
         # ... (pending_action logic)

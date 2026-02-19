@@ -4,32 +4,46 @@
 
 支持"平行宇宙"实验：在同一历史时刻分叉两个仿真环境，
 比较不同政策下的市场表现差异。
+
+本次重构：从"伪仿真"升级为真实的 Agent-Based 平行宇宙运行。
 """
 
 import copy
 import numpy as np
+import asyncio
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime
+import pandas as pd
 
+# 引用真实模型
+from core.mesa.civitas_model import CivitasModel
+from core.policy import PolicyManager
 
 @dataclass
-class UniverseSnapshot:
-    """宇宙快照：保存仿真状态"""
-    timestamp: datetime
-    candles: List[Any]
-    agent_states: Dict[str, Any]
-    population_state: np.ndarray
-    matcher_state: Dict[str, Any]
-    policy: Optional[str] = None
-    
-    
+class UniverseConfig:
+    """宇宙配置快照：用于重建等效的仿真环境"""
+    seed: int
+    n_agents: int
+    panic_ratio: float
+    quant_ratio: float
+    initial_price: float
+    # 可以添加更多参数以确保一致性
+
 @dataclass
 class CounterfactualResult:
-    """反事实实验结果"""
+    """反事实实验结果 (增强版)"""
     universe_a_name: str
     universe_b_name: str
     fork_point: int  # 分叉点（K线索引）
+    
+    # K 线数据 (DataFrame)
+    candles_a: pd.DataFrame
+    candles_b: pd.DataFrame
+    
+    # 社交/网络数据
+    network_stats_a: List[Dict[str, Any]]
+    network_stats_b: List[Dict[str, Any]]
     
     # 对比指标
     final_price_a: float
@@ -48,172 +62,187 @@ class CounterfactualResult:
 
 class ParallelUniverseEngine:
     """
-    平行宇宙仿真引擎
+    平行宇宙仿真引擎 (Real Agent-Based)
     
     核心功能：
-    1. 在指定时刻创建仿真状态快照
-    2. 分叉为两个独立的仿真环境
-    3. 分别注入不同政策，运行仿真
-    4. 生成差异分析报告
+    1. 接受基础模型配置
+    2. 实例化两个独立的 CivitasModel (Model A & Model B)
+    3. 确保随机种子一致
+    4. 注入不同 Policy
+    5. 并发运行并收集数据
     """
     
     def __init__(self):
-        self.snapshots: Dict[str, UniverseSnapshot] = {}
-        self.universe_a_history: List[float] = []
-        self.universe_b_history: List[float] = []
+        pass
     
-    def create_snapshot(self, name: str, controller) -> UniverseSnapshot:
+    def _create_mirrored_models(self, config: UniverseConfig) -> Tuple[CivitasModel, CivitasModel]:
         """
-        创建仿真状态快照
+        创建两个初始状态完全一致的镜像世界
         
         Args:
-            name: 快照名称
-            controller: SimulationController 实例
+            config: 宇宙配置
             
         Returns:
-            快照对象
+            (model_a, model_b)
         """
-        snapshot = UniverseSnapshot(
-            timestamp=datetime.now(),
-            candles=[copy.deepcopy(c) for c in controller.market.candles],
-            agent_states={
-                agent.id: {
-                    "cash": controller.smart_portfolios[agent.id].available_cash,
-                    "confidence": agent.brain.state.confidence,
-                    "consecutive_losses": agent.brain.state.consecutive_losses
-                }
-                for agent in controller.population.smart_agents
-            },
-            population_state=controller.population.state.copy(),
-            matcher_state={
-                "last_price": controller.matcher.last_price,
-                "prev_close": controller.matcher.prev_close,
-                "total_volume": controller.matcher.total_volume
-            },
-            policy=getattr(controller.market, 'current_news', None)
+        # Create Universe A
+        model_a = CivitasModel(
+            n_agents=config.n_agents,
+            panic_ratio=config.panic_ratio,
+            quant_ratio=config.quant_ratio,
+            initial_price=config.initial_price,
+            seed=config.seed
         )
         
-        self.snapshots[name] = snapshot
-        return snapshot
+        # Create Universe B (Same Seed -> Same Agents/Network)
+        model_b = CivitasModel(
+            n_agents=config.n_agents,
+            panic_ratio=config.panic_ratio,
+            quant_ratio=config.quant_ratio,
+            initial_price=config.initial_price,
+            seed=config.seed
+        )
+        
+        return model_a, model_b
     
-    def fork_universe(self, snapshot_name: str) -> Tuple[Any, Any]:
-        """
-        从快照分叉两个宇宙
-        
-        注意：这是一个概念性接口。在实际实现中，
-        需要完整重建 SimulationController 的状态。
-        
-        Args:
-            snapshot_name: 快照名称
+    def _apply_policy_to_model(self, model: CivitasModel, policy_config: Optional[Dict[str, Any]]):
+        """将政策配置应用到模型"""
+        if not policy_config:
+            return
             
-        Returns:
-            (universe_a_state, universe_b_state) 两个独立的状态副本
-        """
-        if snapshot_name not in self.snapshots:
-            raise ValueError(f"快照 '{snapshot_name}' 不存在")
+        pm = model.market_manager.policy_manager
         
-        snapshot = self.snapshots[snapshot_name]
-        
-        # 创建两个独立的状态副本
-        universe_a = copy.deepcopy(snapshot)
-        universe_b = copy.deepcopy(snapshot)
-        
-        return universe_a, universe_b
-    
-    def run_counterfactual_experiment(
+        # 处理印花税
+        if "tax_rate" in policy_config:
+            tax = pm.policies.get("tax")
+            if tax:
+                tax.rate = policy_config.get("tax_rate", 0.001)
+                tax.active = True
+                
+        # 处理熔断
+        if "circuit_breaker" in policy_config:
+            cb = pm.policies.get("circuit_breaker")
+            cb_conf = policy_config["circuit_breaker"]
+            if cb:
+                cb.threshold_pct = cb_conf.get("threshold", 0.10)
+                cb.active = cb_conf.get("active", True)
+                
+        # 处理初始新闻/舆情注入
+        if "initial_news" in policy_config:
+            news_item = policy_config["initial_news"]
+            model.market_manager.add_news(news_item)
+            
+    async def run_counterfactual_experiment(
         self,
-        base_prices: List[float],
-        policy_a: Optional[str],
-        policy_b: str,
+        base_config: UniverseConfig,
+        policy_a: Optional[Dict[str, Any]],
+        policy_b: Dict[str, Any],
         n_steps: int = 30,
-        base_volatility: float = 0.02
+        policy_a_name: str = "Baseline",
+        policy_b_name: str = "Treatment"
     ) -> CounterfactualResult:
         """
-        运行反事实实验（简化版）
-        
-        模拟两种政策下的价格演化差异。
+        运行反事实实验 (真实仿真)
         
         Args:
-            base_prices: 基准价格序列
-            policy_a: 原始政策（可为None表示无政策）
-            policy_b: 反事实政策
-            n_steps: 仿真步数
-            base_volatility: 基础波动率
+            base_config: 基础环境配置
+            policy_a: 宇宙A的政策 (通常为 None 或基准)
+            policy_b: 宇宙B的政策 (实验组)
+            n_steps: 运行步数
             
         Returns:
-            实验结果
+            实验结果对比
         """
-        if not base_prices:
-            raise ValueError("基准价格序列不能为空")
+        # 1. 创建镜像世界
+        model_a, model_b = self._create_mirrored_models(base_config)
         
-        fork_price = base_prices[-1]
+        # 2. 注入政策
+        self._apply_policy_to_model(model_a, policy_a)
+        self._apply_policy_to_model(model_b, policy_b)
         
-        # 宇宙A：维持原状（较低波动）
-        np.random.seed(42)
-        universe_a_prices = [fork_price]
-        for _ in range(n_steps):
-            shock = np.random.normal(0, base_volatility)
-            new_price = universe_a_prices[-1] * (1 + shock)
-            universe_a_prices.append(new_price)
+        # 3. 并发运行
+        # 使用 asyncio.gather 并行跑两个模型的 step 循环
+        async def run_model(model: CivitasModel, steps: int):
+            for _ in range(steps):
+                await model.async_step()
+            return model
+            
+        print(f"Starting Parallel Universe Simulation ({n_steps} steps)...")
+        tasks = [
+            run_model(model_a, n_steps),
+            run_model(model_b, n_steps)
+        ]
         
-        # 宇宙B：注入政策（引入方向性偏移）
-        np.random.seed(42)  # 相同随机种子确保可比性
-        universe_b_prices = [fork_price]
+        await asyncio.gather(*tasks)
+        print("Simulation Completed.")
         
-        # 模拟政策效应（根据政策关键词判断方向）
-        policy_bias = 0.001  # 默认轻微看多
-        if policy_b:
-            policy_lower = policy_b.lower()
-            if any(word in policy_lower for word in ['降', '减', '下调', '放松']):
-                policy_bias = 0.003  # 利好政策
-            elif any(word in policy_lower for word in ['涨', '加', '上调', '收紧']):
-                policy_bias = -0.002  # 利空政策
+        # 4. 收集数据
+        def get_candles_df(model: CivitasModel) -> pd.DataFrame:
+            # 转换 Candle 对象列表为 DataFrame
+            data = []
+            for c in model.market_manager.sim_candles:
+                data.append({
+                    "timestamp": c.timestamp,
+                    "open": c.open,
+                    "high": c.high,
+                    "low": c.low,
+                    "close": c.close,
+                    "volume": c.volume
+                })
+            if not data:
+                # Fallback if empty
+                return pd.DataFrame({"close": [base_config.initial_price]})
+            return pd.DataFrame(data)
+            
+        candles_a = get_candles_df(model_a)
+        candles_b = get_candles_df(model_b)
         
-        for i in range(n_steps):
-            shock = np.random.normal(policy_bias, base_volatility * 1.2)
-            # 政策效应随时间衰减
-            decay = 1 / (1 + i * 0.1)
-            effective_shock = shock * decay + np.random.normal(0, base_volatility) * (1 - decay)
-            new_price = universe_b_prices[-1] * (1 + effective_shock)
-            universe_b_prices.append(new_price)
+        # 获取网络统计 (Infected count history)
+        # model.diffusion.history is List[Dict]
+        net_stats_a = model_a.diffusion.history if hasattr(model_a.diffusion, 'history') else []
+        net_stats_b = model_b.diffusion.history if hasattr(model_b.diffusion, 'history') else []
         
-        self.universe_a_history = universe_a_prices
-        self.universe_b_history = universe_b_prices
+        # 计算统计指标
+        price_a = candles_a.iloc[-1]["close"]
+        price_b = candles_b.iloc[-1]["close"]
         
-        # 计算指标
-        def calc_return(prices: List[float]) -> float:
-            return (prices[-1] - prices[0]) / prices[0]
+        ret_a = (price_a - base_config.initial_price) / base_config.initial_price
+        ret_b = (price_b - base_config.initial_price) / base_config.initial_price
         
-        def calc_volatility(prices: List[float]) -> float:
-            returns = np.diff(prices) / np.array(prices[:-1])
-            return np.std(returns) * np.sqrt(252)  # 年化
-        
+        vol_a = candles_a["close"].pct_change().std() * np.sqrt(252) if len(candles_a) > 1 else 0
+        vol_b = candles_b["close"].pct_change().std() * np.sqrt(252) if len(candles_b) > 1 else 0
+
+        # 5. 构建结果
         result = CounterfactualResult(
-            universe_a_name=policy_a or "维持原状",
-            universe_b_name=policy_b,
-            fork_point=len(base_prices) - 1,
-            final_price_a=universe_a_prices[-1],
-            final_price_b=universe_b_prices[-1],
-            price_divergence=abs(universe_a_prices[-1] - universe_b_prices[-1]) / fork_price,
-            volatility_a=calc_volatility(universe_a_prices),
-            volatility_b=calc_volatility(universe_b_prices),
-            cumulative_return_a=calc_return(universe_a_prices),
-            cumulative_return_b=calc_return(universe_b_prices)
+            universe_a_name=policy_a_name,
+            universe_b_name=policy_b_name,
+            fork_point=0, # 从头开始跑
+            candles_a=candles_a,
+            candles_b=candles_b,
+            network_stats_a=net_stats_a,
+            network_stats_b=net_stats_b,
+            final_price_a=price_a,
+            final_price_b=price_b,
+            price_divergence=abs(price_a - price_b) / base_config.initial_price,
+            volatility_a=vol_a,
+            volatility_b=vol_b,
+            cumulative_return_a=ret_a,
+            cumulative_return_b=ret_b,
         )
         
-        # 生成分析
-        result.analysis = self._generate_analysis(result, policy_b)
+        # 6. 生成分析报告
+        result.analysis = self._generate_analysis(result, policy_b_name)
         
         return result
     
     def _generate_analysis(self, result: CounterfactualResult, policy: str) -> str:
         """生成差异分析报告"""
         lines = [
-            "## 反事实推理分析报告",
+            "## 平行宇宙反事实推演报告",
             "",
-            f"**分叉点**: 第 {result.fork_point} 个交易日",
+            f"**政策干预**: {policy}",
             "",
-            "### 价格对比",
+            "### 市场表现对比",
             f"| 指标 | {result.universe_a_name} | {result.universe_b_name} |",
             "|------|------------------------|------------------------|",
             f"| 最终价格 | {result.final_price_a:.2f} | {result.final_price_b:.2f} |",
@@ -222,42 +251,51 @@ class ParallelUniverseEngine:
             "",
             f"**价格分歧度**: {result.price_divergence:.2%}",
             "",
-            "### 政策效应解读",
+            "### 社会网络影响",
         ]
         
-        if result.cumulative_return_b > result.cumulative_return_a:
-            lines.append(f"注入政策 **「{policy}」** 后，模拟市场表现优于原状，")
-            lines.append(f"累计收益提升 {(result.cumulative_return_b - result.cumulative_return_a):.2%}。")
-        else:
-            lines.append(f"注入政策 **「{policy}」** 后，模拟市场表现不及原状，")
-            lines.append(f"累计收益下降 {(result.cumulative_return_a - result.cumulative_return_b):.2%}。")
+        # 简单的网络对比分析
+        final_inf_a = result.network_stats_a[-1].get('infected', 0) if result.network_stats_a else 0
+        final_inf_b = result.network_stats_b[-1].get('infected', 0) if result.network_stats_b else 0
         
-        if result.volatility_b > result.volatility_a * 1.1:
-            lines.append("")
-            lines.append("⚠️ **波动率警告**: 政策导致市场波动显著加剧。")
+        lines.append(f"- **{result.universe_a_name}** 最终恐慌感染人数: {final_inf_a}")
+        lines.append(f"- **{result.universe_b_name}** 最终恐慌感染人数: {final_inf_b}")
+        
+        diff = final_inf_b - final_inf_a
+        if diff > 10:
+             lines.append(f"⚠️ 警告：政策导致恐慌情绪显著扩散 (+{diff} 人)")
+        elif diff < -10:
+             lines.append(f"✅ 正面：政策有效抑制了恐慌传播 ({diff} 人)")
         
         return "\n".join(lines)
-    
-    def get_comparison_data(self) -> Dict[str, List[float]]:
-        """获取用于绘图的对比数据"""
-        return {
-            "universe_a": self.universe_a_history,
-            "universe_b": self.universe_b_history
-        }
 
 
-# 使用示例
+# 使用示例 (仅供测试)
 if __name__ == "__main__":
-    engine = ParallelUniverseEngine()
-    
-    # 模拟历史价格
-    base_prices = [3000 + i * 5 for i in range(30)]
-    
-    result = engine.run_counterfactual_experiment(
-        base_prices=base_prices,
-        policy_a=None,
-        policy_b="印花税减半至0.025%",
-        n_steps=20
-    )
-    
-    print(result.analysis)
+    async def test():
+        engine = ParallelUniverseEngine()
+        config = UniverseConfig(
+            seed=42,
+            n_agents=50,
+            panic_ratio=0.3,
+            quant_ratio=0.1,
+            initial_price=3000.0
+        )
+        
+        # A: 无政策
+        # B: 降税 + 利好新闻
+        policy_b = {
+            "tax_rate": 0.0005,
+            "initial_news": "重磅利好：监管层宣布印花税减半，鼓励长期资金入市！"
+        }
+        
+        res = await engine.run_counterfactual_experiment(
+            base_config=config,
+            policy_a=None,
+            policy_b=policy_b,
+            n_steps=10
+        )
+        
+        print(res.analysis)
+        
+    asyncio.run(test())

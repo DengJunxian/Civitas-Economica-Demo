@@ -114,7 +114,9 @@ class CognitiveAgent:
         investor_type: InvestorType = InvestorType.NORMAL,
         api_key: Optional[str] = None,
         use_local_reasoner: bool = False,
-        lambda_override: Optional[float] = None
+        lambda_override: Optional[float] = None,
+        risk_aversion_lambda: float = 2.25,
+        reference_point: float = 0.0
     ):
         """
         初始化认知 Agent
@@ -125,15 +127,18 @@ class CognitiveAgent:
             api_key: DeepSeek API Key
             use_local_reasoner: 是否使用本地规则引擎 (无 API 调用)
             lambda_override: 覆盖损失厌恶系数 (可选)
+            risk_aversion_lambda: [NEW] 损失厌恶系数 (默认2.25)
+            reference_point: [NEW] 参考点/持仓成本
         """
         self.agent_id = agent_id
         self.investor_type = investor_type
+        self.reference_point = reference_point
         
         # 初始化前景理论计算器
         if lambda_override is not None:
             self.prospect = ProspectTheory(lambda_coeff=lambda_override)
         else:
-            self.prospect = ProspectTheory(investor_type=investor_type)
+            self.prospect = ProspectTheory(investor_type=investor_type, lambda_coeff=risk_aversion_lambda)
         
         # 初始化推理引擎
         if use_local_reasoner:
@@ -154,6 +159,24 @@ class CognitiveAgent:
         # 覆盖阈值配置
         self.fear_threshold = -0.5    # 恐惧覆盖阈值
         self.greed_threshold = 0.3    # 贪婪覆盖阈值
+    
+    def calculate_psychological_value(self, current_price: float) -> float:
+        """
+        [NEW] 计算当前价格相对于参考点(持仓成本)的心理效用值 V(x)
+        
+        基于前景理论公式：
+        - 盈利时: V = (price - ref)^0.88
+        - 亏损时: V = -lambda * (ref - price)^0.88
+        
+        Args:
+            current_price: 当前市场价格
+        Returns:
+            float: 心理效用值 (正=快乐, 负=痛苦)
+        """
+        if self.reference_point <= 0:
+            return 0.0
+        pnl_pct = (current_price - self.reference_point) / self.reference_point
+        return self.prospect.calculate_value(pnl_pct)
     
     async def prepare_decision_prompt_async(self, market_state: Dict, account_state: Dict) -> Optional[List[Dict]]:
         """
@@ -258,6 +281,15 @@ class CognitiveAgent:
         memory_context = self.memory.get_context_for_decision(market_state)
         
         # ========== 阶段 2: LLM 推理 ==========
+        # [NEW] 更新参考点并计算心理效用
+        if avg_cost > 0:
+            self.reference_point = avg_cost
+        psychological_value = self.calculate_psychological_value(current_price)
+        
+        # 注入心理状态到 market_state (供 Brain Prompt 使用)
+        market_state["_psychological_value"] = psychological_value
+        market_state["_risk_aversion"] = self.prospect.lambda_coeff
+        
         # 计算前景值用于本地推理器
         prospect_value = self.prospect.calculate_value(pnl_pct)
         

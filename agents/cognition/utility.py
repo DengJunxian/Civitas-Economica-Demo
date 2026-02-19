@@ -192,3 +192,22 @@ class AnchorTracker:
 def create_panic_retail(): return InvestorType.PANIC_RETAIL
 def create_normal_investor(): return InvestorType.NORMAL
 def create_disciplined_quant(): return InvestorType.DISCIPLINED_QUANT
+
+def calculate_prospect_value(
+    pnl_pct: float,
+    investor_type: InvestorType = InvestorType.NORMAL,
+    lambda_coeff: Optional[float] = None
+) -> ProspectValue:
+    """
+    模块级便捷函数：计算前景理论综合估值
+    
+    Args:
+        pnl_pct: 盈亏百分比
+        investor_type: 投资者类型
+        lambda_coeff: 自定义损失厌恶系数（可选）
+        
+    Returns:
+        ProspectValue 对象，包含效用值、参考点、痛苦/快乐比率
+    """
+    pt = ProspectTheory(investor_type=investor_type, lambda_coeff=lambda_coeff)
+    return pt.calculate_full(pnl_pct)

@@ -45,7 +45,7 @@ class QuantStrategyGroup:
     # 阈值配置
     panic_sell_threshold: float = 0.7  # 超过70%卖出触发集体抛售警报
     
-    def add_agent(self, agent_id: str, persona: Dict, api_key: Optional[str] = None):
+    def add_agent(self, agent_id: str, persona: Dict, api_key: Optional[str] = None, model_router: Optional[Any] = None):
         """
         添加一个使用共享策略的 Agent
         
@@ -53,40 +53,35 @@ class QuantStrategyGroup:
             agent_id: Agent 唯一标识
             persona: Agent 人格设定
             api_key: DeepSeek API 密钥
+            model_router: 模型路由器
         """
         brain = DeepSeekBrain(
             agent_id=f"{self.group_id}_{agent_id}",
             persona=persona,
-            api_key=api_key
+            api_key=api_key,
+            model_router=model_router
         )
         # 注入共享策略提示词
         brain._shared_strategy_prompt = self.strategy_prompt
         self.agents.append(brain)
     
-    def get_group_decisions(
+    async def get_group_decisions_async(
         self, 
         market_state: Dict, 
         account_states: Dict[str, Dict],
         progress_callback: Optional[Callable[[int, int, str], None]] = None
     ) -> List[Dict]:
         """
-        获取群体所有成员的决策
-        
-        Args:
-            market_state: 市场状态
-            account_states: 各 Agent 的账户状态 {agent_id: account_state}
-            progress_callback: 进度回调函数 (current, total, agent_id)
-            
-        Returns:
-            决策列表
+        获取群体所有成员的决策 (异步)
         """
+        import asyncio
         decisions = []
         total = len(self.agents)
         
+        # 批量异步任务
+        tasks = []
+        
         for i, agent in enumerate(self.agents):
-            if progress_callback:
-                progress_callback(i + 1, total, agent.agent_id)
-            
             acct = account_states.get(agent.agent_id, {
                 "cash": GLOBAL_CONFIG.DEFAULT_CASH,
                 "market_value": 0,
@@ -97,9 +92,21 @@ class QuantStrategyGroup:
             enhanced_market_state = market_state.copy()
             enhanced_market_state['quant_strategy'] = self.strategy_prompt
             
-            result = agent.think(enhanced_market_state, acct)
-            result['agent_id'] = agent.agent_id
-            decisions.append(result)
+            # 优先使用 think_async
+            tasks.append(agent.think_async(enhanced_market_state, acct))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for i, res in enumerate(results):
+             if isinstance(res, Exception):
+                 print(f"Quant Agent Error: {res}")
+                 continue
+             
+             res['agent_id'] = self.agents[i].agent_id
+             decisions.append(res)
+             
+             if progress_callback:
+                progress_callback(i + 1, total, self.agents[i].agent_id)
         
         # 分析集体行为
         self._analyze_collective_behavior(decisions)
@@ -248,9 +255,18 @@ class QuantGroupManager:
         """
     }
     
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, model_router: Optional[Any] = None):
         self.api_key = api_key
+        self.model_router = model_router
         self.groups: Dict[str, QuantStrategyGroup] = {}
+
+    def set_model_router(self, router: Any):
+        """Later binding of model router"""
+        self.model_router = router
+        for group in self.groups.values():
+            for agent in group.agents:
+                if hasattr(agent, 'set_model_router'):
+                    agent.set_model_router(router)
     
     def create_group(
         self, 
@@ -262,16 +278,6 @@ class QuantGroupManager:
     ) -> QuantStrategyGroup:
         """
         创建一个量化策略群体
-        
-        Args:
-            group_id: 群体ID
-            strategy_name: 策略名称
-            strategy_prompt: 共享的策略提示词
-            n_agents: Agent 数量
-            progress_callback: 进度回调
-            
-        Returns:
-            创建的群体实例
         """
         group = QuantStrategyGroup(
             group_id=group_id,
@@ -288,7 +294,7 @@ class QuantGroupManager:
                 'risk_preference': random.choice(['激进', '稳健', '保守']),
                 'loss_aversion': random.uniform(1.5, 3.0)
             }
-            group.add_agent(f"Agent_{i}", persona, self.api_key)
+            group.add_agent(f"Agent_{i}", persona, self.api_key, self.model_router)
         
         self.groups[group_id] = group
         return group

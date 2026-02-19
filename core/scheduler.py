@@ -42,7 +42,9 @@ class SimulationController:
         deepseek_key: str, 
         hunyuan_key: Optional[str] = None,
         zhipu_key: Optional[str] = None,
-        mode: str = "SMART"
+        mode: str = "SMART",
+        quant_manager: Optional[Any] = None,
+        regulatory_module: Optional[Any] = None
     ):
         """
         初始化仿真控制器
@@ -52,6 +54,8 @@ class SimulationController:
             hunyuan_key: 混元API密钥（可选）
             zhipu_key: 智谱API密钥（可选，快速模式专用）
             mode: 仿真模式 "SMART" | "FAST" | "DEEP"
+            quant_manager: 量化群体管理器 (可选)
+            regulatory_module: 监管模块 (可选)
         """
         # API密钥
         self.deepseek_key = deepseek_key
@@ -69,7 +73,9 @@ class SimulationController:
         self.model = CivitasModel(
             n_agents=100, # 默认 100 个 Agents
             model_router=self.model_router,
-            initial_price=3000.0
+            initial_price=3000.0,
+            quant_manager=quant_manager,
+            regulatory_module=regulatory_module
         )
         
         # 兼容性: MarketDataManager 由 Model 管理

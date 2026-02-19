@@ -407,7 +407,9 @@ with st.sidebar:
                         deepseek_key=api_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY or "",
                         hunyuan_key=hunyuan_key or GLOBAL_CONFIG.HUNYUAN_API_KEY or None,
                         zhipu_key=zhipu_key or GLOBAL_CONFIG.ZHIPU_API_KEY or None,
-                        mode=st.session_state.simulation_mode
+                        mode=st.session_state.simulation_mode,
+                        quant_manager=st.session_state.quant_manager,
+                        regulatory_module=st.session_state.regulatory_module
                     )
                     
                     progress_bar.progress(50)

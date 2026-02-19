@@ -48,7 +48,9 @@ class CivitasModel(Model):
         quant_ratio: float = 0.1,
         initial_price: float = 3000.0,
         seed: Optional[int] = None,
-        model_router: Optional[Any] = None
+        model_router: Optional[Any] = None,
+        quant_manager: Optional[Any] = None,
+        regulatory_module: Optional[Any] = None
     ):
         """
         初始化模型
@@ -60,11 +62,17 @@ class CivitasModel(Model):
             initial_price: 初始价格
             seed: 随机种子
             model_router: 模型路由器 (用于 Policy 和 LLM)
+            quant_manager: 量化群体管理器 (可选)
+            regulatory_module: 监管模块 (可选)
         """
+        # 初始化监管模块 (如果传入)
+        self.regulatory_module = regulatory_module
+        
         super().__init__(seed=seed)
         
         self.n_agents = n_agents
         self.shared_router = model_router
+        self.quant_manager = quant_manager
         
         # 0. 初始化仿真时钟
         self.clock = SimulationClock()
@@ -80,7 +88,12 @@ class CivitasModel(Model):
         # 1. 初始化市场引擎 (单一真实之源)
         from core.market_engine import MarketDataManager
         # 注意: 我们不需要在这里传 api_key，MarketDataManager 会自己从 Config 或 Env 获取
-        self.market_manager = MarketDataManager(api_key_or_router=model_router, load_real_data=True, clock=self.clock)
+        self.market_manager = MarketDataManager(
+            api_key_or_router=model_router, 
+            load_real_data=True, 
+            clock=self.clock,
+            regulatory_module=self.regulatory_module
+        )
         
         # 覆写初始价格 (如果有指定)
         if hasattr(self.market_manager.engine, 'last_price'):
@@ -208,7 +221,8 @@ class CivitasModel(Model):
             investor_type=inv_type,
             initial_cash=cash,
             use_local_reasoner=True,
-            persona=persona
+            persona=persona,
+            model_router=self.shared_router
         )
         
         # Bind to Social Network
@@ -416,6 +430,47 @@ class CivitasModel(Model):
                 np.array(vec_qtys),
                 np.array(vec_dirs)
             )
+
+        # 阶段 5.7: 监管处理 (Phase 7)
+        if self.regulatory_module:
+            reg_result = self.regulatory_module.process_tick(
+                current_tick=self.steps,
+                price=self.current_price,
+                prev_close=self.price_history[-2] if len(self.price_history) > 1 else self.current_price,
+                panic_level=self.panic_level
+            )
+            # 如果触发熔断/干预，记录或广播
+            if reg_result.get("circuit_break"):
+                 print(f"[Regulatory] 熔断: {reg_result['circuit_break']}")
+            if reg_result.get("intervention"):
+                 print(f"[Regulatory] 国家队干预: {reg_result['intervention']}")
+
+        # 阶段 5.8: 量化群体决策 (Phase 6)
+        # 此处不直接参与交易，仅用于生成观察指标
+        if self.quant_manager:
+            try:
+                # 获取简单的市场状态
+                q_market = {
+                    "price": self.current_price,
+                    "trend": self.trend,
+                    "panic_level": self.panic_level,
+                    "news": self.market_manager.current_news
+                }
+                # 简单的账户状态 (Dummy)
+                q_accounts = {} 
+                
+                # 并行执行所有群体的决策
+                group_tasks = []
+                for group in self.quant_manager.groups.values():
+                    # 调用异步决策方法
+                    if hasattr(group, 'get_group_decisions_async'):
+                        group_tasks.append(group.get_group_decisions_async(q_market, q_accounts))
+                
+                if group_tasks:
+                    await asyncio.gather(*group_tasks, return_exceptions=True)
+                    
+            except Exception as e:
+                print(f"[QuantGroup Error] {e}")
 
         last_date = "2024-01-01"
         if self.market_manager.sim_candles:

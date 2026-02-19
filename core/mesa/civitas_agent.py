@@ -32,7 +32,8 @@ class CivitasAgent(Agent):
         initial_cash: float = 100000.0,
         use_local_reasoner: bool = True,
         persona: Optional[Persona] = None,
-        core_agent: Optional[BaseAgent] = None
+        core_agent: Optional[BaseAgent] = None,
+        model_router: Optional[Any] = None
     ):
         """
         初始化 Mesa Agent
@@ -44,6 +45,7 @@ class CivitasAgent(Agent):
             use_local_reasoner: 是否使用本地推理器 (已废弃，由 TraderAgent 内部处理)
             persona: 智能体人格 (可选)
             core_agent: 预先创建的核心 Agent 实例 (可选)
+            model_router: 模型路由器 (用于 LLM 调用)
         """
         super().__init__(model)
         self.investor_type = investor_type
@@ -61,7 +63,8 @@ class CivitasAgent(Agent):
                 cash_balance=initial_cash,
                 portfolio={},
                 psychology_profile=profile,
-                persona=persona
+                persona=persona,
+                model_router=model_router
             )
         
         # 待执行动作（用于情绪推断和 DataCollector）
@@ -120,7 +123,8 @@ class CivitasAgent(Agent):
 
     @property
     def confidence(self) -> float:
-        return self.core.profile.get("confidence_level", 0.5)
+        profile = getattr(self.core, "profile", getattr(self.core, "psychology_profile", {}))
+        return profile.get("confidence_level", 0.5)
 
     @property
     def wealth(self) -> float:

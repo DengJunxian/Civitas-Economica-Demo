@@ -683,15 +683,16 @@ from core.policy import PolicyManager
 from core.regulation.risk_control import RiskEngine
 
 class MarketDataManager:
-    def __init__(self, api_key_or_router, load_real_data=True, clock: Optional[SimulationClock] = None):
+    def __init__(self, api_key_or_router, load_real_data=True, clock: Optional[SimulationClock] = None, regulatory_module: Optional[Any] = None):
         self.policy = PolicyState()
         self.interpreter = PolicyInterpreter(api_key_or_router)
         self.clock = clock
+        self.regulatory_module = regulatory_module
         
-        # 政策管理器
+        # 政策管理器 (Legacy, keeping for now)
         self.policy_manager = PolicyManager()
         
-        # 风控引擎（集中式网关）
+        # 风控引擎（集中式网关） (Keep as dual check or remove later)
         self.risk_engine = RiskEngine(
             stamp_duty_rate=GLOBAL_CONFIG.TAX_RATE_STAMP,
             commission_rate=GLOBAL_CONFIG.TAX_RATE_COMMISSION
@@ -758,7 +759,30 @@ class MarketDataManager:
 
     def submit_agent_order(self, order: Order):
         """Pass agent orders to the matching engine with centralized risk check."""
-        # 1. 盘前风控网关（极速检查）
+        
+        # 0. Regulatory Module Check (New)
+        if self.regulatory_module:
+            # 0.1 Check Circuit Breaker
+            if self.regulatory_module.circuit_breaker.is_halted:
+                 order.status = OrderStatus.REJECTED
+                 order.reason = "Market Halted (Circuit Breaker)"
+                 return []
+                 
+            # 0.2 Check Programmatic Trading Regulation
+            allowed, reg_reason = self.regulatory_module.trading_regulator.register_order(
+                agent_id=order.agent_id,
+                order_type=order.order_type.value, # Use value string
+                price=order.price,
+                qty=order.quantity
+            )
+            
+            if not allowed:
+                order.status = OrderStatus.REJECTED
+                order.reason = f"Regulatory Reject: {reg_reason}"
+                print(f"[Regulatory] Order REJECTED for Agent {order.agent_id}: {reg_reason}")
+                return []
+        
+        # 1. 盘前风控网关（Legacy Check）
         market_data = {
             "last_price": self.engine.last_price,
             "best_bid": None, # Could be improved with actual LOB depth
@@ -776,10 +800,10 @@ class MarketDataManager:
             order.reason = reason
             return []
             
-        # 2. 注册订单到高频监控器（用于计算 OTR）
+        # 2. 注册订单到高频监控器（Legacy）
         self.risk_engine.hft_monitor.register_order(order.agent_id)
 
-        # 3. 检查政策限制（熔断器等）
+        # 3. 检查政策限制（Legacy PolicyManager）
         market_state = {"last_price": self.engine.last_price}
         policy_res = self.policy_manager.check_order(order, market_state)
         
@@ -792,7 +816,7 @@ class MarketDataManager:
         # 4. Proceed to Matching
         trades = self.engine.submit_order(order, self.policy.liquidity_injection)
         
-        # 5. 注册成交到高频监控器（用于计算 OTR）
+        # 5. 注册成交到高频监控器（Legacy）
         if trades:
             self.risk_engine.hft_monitor.register_trade(order.agent_id)
             

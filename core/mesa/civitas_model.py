@@ -181,6 +181,7 @@ class CivitasModel(Model):
             cash_balance=10_000_000_000.0
         )
         
+        # Mesa 3.x: Agent 在 __init__ 时自动注册到 model.agents，无需手动 schedule.add()
         nt_mesa = CivitasAgent(
             model=self,
             investor_type=InvestorType.DISCIPLINED_QUANT, # Use QUANT type for high discipline
@@ -188,20 +189,14 @@ class CivitasModel(Model):
             use_local_reasoner=False,
             core_agent=nt_core # Inject Core
         )
-        nt_mesa.unique_id = idx # Ensure unique ID matches schedule
-        
-        self.schedule.add(nt_mesa)
+        # nt_mesa 已自动加入 self.agents，无需 self.schedule.add()
+
         # Bind to a node (Preferably a hub)
-        # For simplicity, bind to the last node or find a hub
         hub_node = self.social_graph.get_most_influential_node()
         if hub_node is not None:
              nt_core.bind_social_node(hub_node, self.social_graph)
         else:
              nt_core.bind_social_node(idx, self.social_graph) # Fallback
-             
-        # Add to agents list (Mesa 3.0+ uses agent_set, here we use schedule as list proxy during init)
-        # Note: In Mesa < 3.0, schedule.agents is the list. In 3.0+, model.agents is the set.
-        # self.schedule.add already handles it for the scheduler.
         idx += 1
             
     def _create_single_agent(self, idx: int, inv_type: InvestorType, persona: Persona, cash: float = None) -> CivitasAgent:

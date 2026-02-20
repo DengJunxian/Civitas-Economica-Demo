@@ -555,8 +555,10 @@ with st.sidebar:
 
                         # --- 使用独立线程执行异步 API 调用 ---
                         router = ctrl_ref.model_router
-                        # 默认报告使用 Chat 模型
+                        # 报告模型优先级：先尝试 deepseek-chat，再降级到智谱 GLM
                         priority = ["deepseek-chat"]
+                        if router.has_zhipu:
+                            priority.append("glm-4-flashx")
                         
                         def _sync_get_report(prompt, models):
                             """在独立线程的独立事件循环中执行异步 API 调用"""
@@ -566,7 +568,7 @@ with st.sidebar:
                                     router.call_with_fallback(
                                         [{"role": "user", "content": prompt}],
                                         priority_models=models,
-                                        timeout_budget=60.0, # Increased timeout
+                                        timeout_budget=90.0,
                                         fallback_response="报告生成服务暂时不可用，请稍后重试。"
                                     )
                                 )
@@ -575,7 +577,6 @@ with st.sidebar:
 
                         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                             future = executor.submit(_sync_get_report, summary_prompt, priority)
-                            # Remove timeout or set to very long
                             content, _, model = future.result(timeout=120)
 
                         st.success(f"✅ 报告已生成 (使用模型: {model}) High-Speed Mode")

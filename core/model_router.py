@@ -252,7 +252,9 @@ class ModelRouter:
                 continue
             
             # 计算此次调用的超时
-            call_timeout = min(model_info.timeout, remaining)
+            # 使用剩余预算作为超时，不再受 model_info.timeout 限制
+            # model_info.timeout 仅作为默认参考，调用者通过 timeout_budget 控制总时间
+            call_timeout = remaining
             
             try:
                 result = await self._call_model(

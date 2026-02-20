@@ -127,16 +127,18 @@ class StratifiedPopulation:
     def _init_vectorized_state(self):
         """初始化散户矩阵"""
         # 资金: 对数正态分布 (贫富差距)
-        self.state[:, self.IDX_CASH] = np.random.lognormal(10, 1, self.n_vectorized)
+        # 修正: 提高初始现金使之与持仓价值匹配，避免结构性卖压
+        self.state[:, self.IDX_CASH] = np.random.lognormal(11.5, 0.8, self.n_vectorized)
         
-        # 持仓: 随机分布
-        self.state[:, self.IDX_HOLDINGS] = np.random.randint(0, 5000, self.n_vectorized)
+        # 持仓: 随机分布 (降低初始持仓，避免卖压过大)
+        self.state[:, self.IDX_HOLDINGS] = np.random.randint(0, 1000, self.n_vectorized)
         
         # 成本: 围绕 3000 点波动
         self.state[:, self.IDX_COST] = np.random.normal(3000, 200, self.n_vectorized)
         
-        # 情绪: 初始中性 (Beta分布模拟微弱偏好)
-        self.state[:, self.IDX_SENTIMENT] = np.random.beta(2, 2, self.n_vectorized) * 2 - 1
+        # 情绪: 初始微正偏好 (正常市场散户通常略偏乐观)
+        # Beta(3,2) 均值=0.6, 映射到 [-1,1] 后均值=0.2, 适度偏多
+        self.state[:, self.IDX_SENTIMENT] = np.random.beta(3, 2, self.n_vectorized) * 2 - 1
         
         # 认知类型: 0=技术派(20%), 1=消息派(30%), 2=跟风派(50%)
         type_probs = np.random.random(self.n_vectorized)
@@ -144,9 +146,9 @@ class StratifiedPopulation:
             type_probs < 0.2, 0, np.where(type_probs < 0.5, 1, 2)
         )
         
-        # 信心指数: 正态分布，均值50
+        # 信心指数: 正态分布，均值55 (略偏信心充足)
         self.state[:, self.IDX_CONFIDENCE] = np.clip(
-            np.random.normal(50, 15, self.n_vectorized), 0, 100
+            np.random.normal(55, 15, self.n_vectorized), 0, 100
         )
     
     def _build_neighbor_network(self, n_neighbors: int = 5) -> np.ndarray:

@@ -900,8 +900,15 @@ class MarketDataManager:
         # 4. Generate Candle
         if not step_trades:
             # No trades: Simulate random drift based on panic
-            drift = random.normalvariate(0, 0.005)
-            if self.panic_level > 0.5: drift -= 0.01
+            drift = random.normalvariate(0, 0.003)
+            
+            # 恐慌时增加向下偏移，但要温和（与恐慌程度成比例）
+            if self.panic_level > 0.3:
+                drift -= self.panic_level * 0.003  # 最大约0.3%的额外下行
+            
+            # 均值回归: 偏离前收过多时拉回
+            deviation = (open_p - self.engine.prev_close) / self.engine.prev_close
+            drift -= deviation * 0.1  # 温和的回归力
             
             # Simple drift
             close_p = open_p * (1 + drift)

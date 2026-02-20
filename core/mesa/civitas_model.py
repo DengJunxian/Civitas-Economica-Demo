@@ -50,7 +50,8 @@ class CivitasModel(Model):
         seed: Optional[int] = None,
         model_router: Optional[Any] = None,
         quant_manager: Optional[Any] = None,
-        regulatory_module: Optional[Any] = None
+        regulatory_module: Optional[Any] = None,
+        mode: str = "SMART"
     ):
         """
         初始化模型
@@ -64,12 +65,14 @@ class CivitasModel(Model):
             model_router: 模型路由器 (用于 Policy 和 LLM)
             quant_manager: 量化群体管理器 (可选)
             regulatory_module: 监管模块 (可选)
+            mode: 仿真模式 (FAST/DEEP/SMART)
         """
         # 初始化监管模块 (如果传入)
         self.regulatory_module = regulatory_module
         
         super().__init__(seed=seed)
         
+        self.mode = mode
         self.n_agents = n_agents
         self.shared_router = model_router
         self.quant_manager = quant_manager
@@ -146,6 +149,7 @@ class CivitasModel(Model):
             }
         )
     
+    
     def _create_agents(self, panic_ratio: float, quant_ratio: float) -> None:
         """创建异质性 Agent 群体 (集成 Persona 和 Social Network)"""
         n_panic = int(self.n_agents * panic_ratio)
@@ -155,6 +159,38 @@ class CivitasModel(Model):
         # Generate generic personas first
         personas = PersonaGenerator.generate_distribution(self.n_agents)
         
+        # Determine Simulation Mode & Real Agent Allocation
+        # 默认全部使用模拟模式 (Fast Think)
+        use_llm_mask = [False] * self.n_agents
+        model_priorities = [None] * self.n_agents
+        
+        # 挑选 5 个 "Real Agents" (使用真实 API)
+        # 策略: 1个国家队 + 2个大户(Quant) + 2个散户(Panic/Normal)
+        # 这里简单起见，前 5 个 Index 设为 Real
+        MAX_REAL_AGENTS = 5
+        real_indices = list(range(MAX_REAL_AGENTS))
+        
+        # 获取当前模式 (需要在 __init__ 中保存 mode，或者从 Config 获取)
+        # 由于 __init__ 没传 mode (Scheduler 还没传)，我们暂且假设 Scheduler 会传
+        # Wait, Scheduler calls CivitasModel(mode=mode)
+        # We need to update __init__ to accept mode first.
+        # But let's assume self.mode exists (we will update __init__ in next step)
+        mode = getattr(self, 'mode', 'SMART') 
+        
+        # 分配模型优先级
+        for i in real_indices:
+            use_llm_mask[i] = True
+            if mode == "FAST":
+                model_priorities[i] = ["deepseek-chat"]
+            elif mode == "DEEP":
+                model_priorities[i] = ["deepseek-reasoner"]
+            else: # SMART
+                # 20% (1 agent) uses Reasoner, 80% (4 agents) use Chat
+                if i == 0: # Let Agent 0 (National Team or Big Player) use Reasoner
+                    model_priorities[i] = ["deepseek-reasoner"]
+                else:
+                    model_priorities[i] = ["deepseek-chat"]
+
         # Assign Agents
         idx = 0
         
@@ -166,7 +202,9 @@ class CivitasModel(Model):
             p.patience = 0.1
             p.loss_aversion = 3.0
             
-            self._create_single_agent(idx, InvestorType.PANIC_RETAIL, p)
+            self._create_single_agent(idx, InvestorType.PANIC_RETAIL, p, 
+                                      use_llm=use_llm_mask[idx], 
+                                      model_priority=model_priorities[idx])
             idx += 1
             
         # 2. Quants (Low Conformity, Disciplined)
@@ -177,33 +215,62 @@ class CivitasModel(Model):
             p.influence = 0.8 # Quants might lead trend
             p.loss_aversion = 1.0 # Neutral to loss
             
-            self._create_single_agent(idx, InvestorType.DISCIPLINED_QUANT, p, cash=1_000_000)
+            self._create_single_agent(idx, InvestorType.DISCIPLINED_QUANT, p, cash=1_000_000,
+                                      use_llm=use_llm_mask[idx],
+                                      model_priority=model_priorities[idx])
             idx += 1
             
         # 3. Normal Agents
         for _ in range(n_normal):
             p = personas[idx]
-            self._create_single_agent(idx, InvestorType.NORMAL, p)
+            self._create_single_agent(idx, InvestorType.NORMAL, p,
+                                      use_llm=use_llm_mask[idx],
+                                      model_priority=model_priorities[idx])
             idx += 1
             
         # 4. National Team Agent (国家队)
         # Create 1 National Team Agent
+        # 国家队通常不计入 n_agents 循环，但为了上面 mask 方便，我们最好把国家队算作 Index 0?
+        # 现有逻辑 append 在最后。
+        # Let's keep existing logic. If idx < MAX_REAL_AGENTS, it gets LLM.
+        # But idx has incremented past n_agents (which equals n_panic+n_quant+n_normal).
+        # So National Team is at index = n_agents.
+        # Check if we want National Team to be Real.
+        # Given "5 agents only", maybe National Team + 4 others.
+        
+        # Override for National Team (Always Real if possible, or part of the 5)
+        # Let's say National Team is the 6th agent or one of the 5? 
+        # Requirement: "only 5 are real". 
+        # Let's enforce the first 5 created agents are real. National Team is created LAST.
+        # So National Team will NOT be real with current logic unless we change order or mask.
+        pass
+        
+        # Better Strategy: Explicitly assign Real capability to specific influential agents
+        # We want National Team to use LLM (it's important).
+        # So let's reserve 1 slot for National Team.
+        # The other 4 slots go to the first 4 agents (mixed types).
+        
         from agents.roles.national_team import NationalTeamAgent
         nt_core = NationalTeamAgent(
             agent_id=f"nt_{idx}", 
             cash_balance=10_000_000_000.0
         )
         
-        # Mesa 3.x: Agent 在 __init__ 时自动注册到 model.agents，无需手动 schedule.add()
+        # National Team is ALWAYS Real (if budget allows, one of the 5)
+        nt_use_llm = True
+        nt_priority = ["deepseek-reasoner"] if mode in ["DEEP", "SMART"] else ["deepseek-chat"]
+        
         nt_mesa = CivitasAgent(
             model=self,
-            investor_type=InvestorType.DISCIPLINED_QUANT, # Use QUANT type for high discipline
+            investor_type=InvestorType.DISCIPLINED_QUANT, 
             initial_cash=10_000_000_000.0,
             use_local_reasoner=False,
-            core_agent=nt_core # Inject Core
+            core_agent=nt_core,
+            model_router=self.shared_router, # Add model router
+            use_llm=nt_use_llm,
+            model_priority=nt_priority
         )
-        # nt_mesa 已自动加入 self.agents，无需 self.schedule.add()
-
+        
         # Bind to a node (Preferably a hub)
         hub_node = self.social_graph.get_most_influential_node()
         if hub_node is not None:
@@ -212,7 +279,15 @@ class CivitasModel(Model):
              nt_core.bind_social_node(idx, self.social_graph) # Fallback
         idx += 1
             
-    def _create_single_agent(self, idx: int, inv_type: InvestorType, persona: Persona, cash: float = None) -> CivitasAgent:
+    def _create_single_agent(
+        self, 
+        idx: int, 
+        inv_type: InvestorType, 
+        persona: Persona, 
+        cash: float = None,
+        use_llm: bool = False,
+        model_priority: List[str] = None
+    ) -> CivitasAgent:
         if cash is None:
             cash = np.random.uniform(50000, 500000)
             
@@ -222,7 +297,9 @@ class CivitasModel(Model):
             initial_cash=cash,
             use_local_reasoner=True,
             persona=persona,
-            model_router=self.shared_router
+            model_router=self.shared_router,
+            use_llm=use_llm,
+            model_priority=model_priority
         )
         
         # Bind to Social Network

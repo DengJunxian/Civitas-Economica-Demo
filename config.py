@@ -83,9 +83,9 @@ class SimConfig:
     DEFAULT_SIMULATION_MODE: str = "SMART"
     
     # 各模式时间预算（秒/天）
-    TIME_BUDGET_SMART: float = 15.0
-    TIME_BUDGET_FAST: float = 5.0
-    TIME_BUDGET_DEEP: float = 30.0
+    TIME_BUDGET_SMART: float = 9999.0
+    TIME_BUDGET_FAST: float = 9999.0
+    TIME_BUDGET_DEEP: float = 9999.0
     
     # 每步深度思考的最大Agent数
     MAX_DEEP_AGENTS_SMART: int = 3

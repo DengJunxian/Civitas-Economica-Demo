@@ -33,7 +33,9 @@ class CivitasAgent(Agent):
         use_local_reasoner: bool = True,
         persona: Optional[Persona] = None,
         core_agent: Optional[BaseAgent] = None,
-        model_router: Optional[Any] = None
+        model_router: Optional[Any] = None,
+        use_llm: bool = True,
+        model_priority: Optional[List[str]] = None
     ):
         """
         初始化 Mesa Agent
@@ -64,7 +66,9 @@ class CivitasAgent(Agent):
                 portfolio={},
                 psychology_profile=profile,
                 persona=persona,
-                model_router=model_router
+                model_router=model_router,
+                use_llm=use_llm,
+                model_priority=model_priority
             )
         
         # 待执行动作（用于情绪推断和 DataCollector）

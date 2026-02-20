@@ -201,19 +201,14 @@ class ModelRouter:
             按优先级排序的可用模型列表
         """
         if mode == "FAST":
-            # 快速模式：优先智谱GLM快速模型，回落对话模型
-            priority = ["glm-4-flashx", "glm-4-flashx-250414", "deepseek-chat", "hunyuan-turbos-latest"]
+            # 快速模式：仅对话模型
+            priority = ["deepseek-chat"]
         elif mode == "DEEP":
             # 深度模式：仅推理模型
-            priority = ["deepseek-reasoner", "hunyuan-t1-latest"]
+            priority = ["deepseek-reasoner"]
         else:  # SMART
-            # 智能模式：全部模型按优先级排序
-            priority = [
-                "deepseek-reasoner",
-                "hunyuan-t1-latest",
-                "deepseek-chat",
-                "hunyuan-turbos-latest"
-            ]
+            # 智能模式：混合列表 (具体分配在Model层)
+            priority = ["deepseek-reasoner", "deepseek-chat"]
         
         # 过滤出可用模型
         return [m for m in priority if m in self.available_models]

@@ -36,9 +36,13 @@ class TraderAgent(BaseAgent):
         portfolio: Optional[Dict[str, int]] = None,
         psychology_profile: Optional[Dict[str, float]] = None,
         model_router: Optional[Any] = None, # Support Router
-        persona: Optional[Persona] = None
+        persona: Optional[Persona] = None,
+        use_llm: bool = True,
+        model_priority: Optional[List[str]] = None
     ):
         super().__init__(agent_id, cash_balance, portfolio, psychology_profile)
+        
+        self.use_llm = use_llm
         
         # 人格画像集成
         self.persona = persona if persona else Persona(name=agent_id)
@@ -66,6 +70,9 @@ class TraderAgent(BaseAgent):
             },
             model_router=model_router
         )
+        # 注入模型优先级 (如果 Brain 支持)
+        if hasattr(self.brain, 'model_priority'):
+            self.brain.model_priority = model_priority
         
         # 合规反馈记忆（存储被风控拒绝的原因）
         self.compliance_feedback: List[str] = []
@@ -247,7 +254,12 @@ class TraderAgent(BaseAgent):
         
         采用快慢思考双层架构 (System 1/2)
         """
-        # 0. System 1 vs System 2 Check
+        # 0. System 1 (Rule-based) Enforcement
+        # 如果被标记为非 LLM Agent，强制使用快思考 (模拟计算模式)
+        if not self.use_llm:
+            return self._fast_think(perceived_data, emotional_state, social_signal)
+
+        # 0.5. System 1 vs System 2 Check (Standard)
         if not self._needs_deep_thinking(perceived_data, social_signal):
             self._fast_mode_consecutive_steps += 1
             return self._fast_think(perceived_data, emotional_state, social_signal)

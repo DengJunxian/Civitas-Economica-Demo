@@ -239,6 +239,8 @@ class DeepSeekBrain:
         # 初始化思维链历史
         if agent_id not in DeepSeekBrain.thought_history:
             DeepSeekBrain.thought_history[agent_id] = []
+            
+        self.model_priority = None # Initialize attribute
         
         # 初始化 OpenAI 客户端 (兼容 DeepSeek) - 仅在无router时使用
         self._api_key = api_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY
@@ -632,7 +634,8 @@ JSON 格式示例：
         
         # 使用模型路由器调用
         if self.model_router:
-            priority = model_priority or ["deepseek-reasoner", "deepseek-chat"]
+            # 优先使用实例级别的 priority，否则使用传入的 (通常为空)，最后默认
+            priority = self.model_priority or model_priority or ["deepseek-reasoner", "deepseek-chat"]
             content, reasoning, model_used = await self.model_router.call_with_fallback(
                 messages=messages,
                 priority_models=priority,

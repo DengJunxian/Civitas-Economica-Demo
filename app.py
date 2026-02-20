@@ -555,17 +555,18 @@ with st.sidebar:
 
                         # --- 使用独立线程执行异步 API 调用 ---
                         router = ctrl_ref.model_router
-                        priority = ["glm-4-flashx", "glm-4-flashx-250414", "deepseek-chat"]
-
-                        def _sync_get_report():
+                        # 默认报告使用 Chat 模型
+                        priority = ["deepseek-chat"]
+                        
+                        def _sync_get_report(prompt, models):
                             """在独立线程的独立事件循环中执行异步 API 调用"""
                             loop = asyncio.new_event_loop()
                             try:
                                 return loop.run_until_complete(
                                     router.call_with_fallback(
-                                        [{"role": "user", "content": summary_prompt}],
-                                        priority_models=priority,
-                                        timeout_budget=30.0,
+                                        [{"role": "user", "content": prompt}],
+                                        priority_models=models,
+                                        timeout_budget=60.0, # Increased timeout
                                         fallback_response="报告生成服务暂时不可用，请稍后重试。"
                                     )
                                 )
@@ -573,10 +574,15 @@ with st.sidebar:
                                 loop.close()
 
                         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                            future = executor.submit(_sync_get_report)
-                            content, _, model = future.result(timeout=35)
+                            future = executor.submit(_sync_get_report, summary_prompt, priority)
+                            # Remove timeout or set to very long
+                            content, _, model = future.result(timeout=120)
 
-                        st.success(f"✅ 报告已生成 (使用模型: {model})")
+                        st.success(f"✅ 报告已生成 (使用模型: {model}) High-Speed Mode")
+                        
+                        # Store report content in session state to persist
+                        st.session_state.last_report = content
+                        
                         st.markdown(f"""
                         <div style="background: #161b22; padding: 20px; border-radius: 10px; border: 1px solid #30363d;">
                             <h4 style="color: #58a6ff;">📊 仿真结果评估报告</h4>
@@ -589,12 +595,76 @@ with st.sidebar:
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
+                        
+                        # Add "Further Analysis" Button (Nested inside the report block effectively)
+                        # We use session state to track if we need deep analysis
+                        
                 except concurrent.futures.TimeoutError:
-                    st.error("⏰ 报告生成超时（35秒），请稍后重试。")
+                    st.error("⏰ 报告生成超时（120秒），请稍后重试。")
                 except Exception as e:
                     st.error(f"报告生成失败: {e}")
                     import traceback
                     st.code(traceback.format_exc(), language="text")
+        
+    # 深度分析按钮 (独立于生成按钮，但依赖上一次报告)
+    if 'last_report' in st.session_state and st.session_state.last_report:
+        if st.button("🔬 深度思考 (DeepSeek R1 Analysis)", use_container_width=True):
+             with st.spinner("正在进行深度推理 (DeepSeek R1)..."):
+                try:
+                    import concurrent.futures
+                    ctrl_ref = st.session_state.controller
+                    router = ctrl_ref.model_router
+                    
+                    deep_prompt = f"""
+                    基于已生成的初步报告，请使用 DeepSeek R1 进行深度因果推断和反事实推理：
+                    
+                    【初步报告】
+                    {st.session_state.last_report}
+                    
+                    【任务】
+                    1. 挖掘市场波动的深层微观机制
+                    2. 评估如果在第10天实施反向政策，市场会如何演变？
+                    3. 提供更具体的监管建议
+                    """
+                    
+                    def _sync_get_deep_report():
+                        loop = asyncio.new_event_loop()
+                        try:
+                            return loop.run_until_complete(
+                                router.call_with_fallback(
+                                    [{"role": "user", "content": deep_prompt}],
+                                    priority_models=["deepseek-reasoner"],
+                                    timeout_budget=300.0, # 5 minutes for reasoning
+                                    fallback_response="深度分析失败。"
+                                )
+                            )
+                        finally:
+                            loop.close()
+                    
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(_sync_get_deep_report)
+                        content, reasoning, model = future.result(timeout=320)
+                        
+                    st.markdown(f"""
+                    <div style="background: #2D1A39; padding: 20px; border-radius: 10px; border: 1px solid #9D4EDD;">
+                        <h4 style="color: #E0AAFF;">🔬 深度思考分析报告 (DeepSeek R1)</h4>
+                         <div style="font-size: 12px; color: #aaa; margin-bottom: 10px;">
+                            思维链长度: {len(reasoning) if reasoning else 0} 字符
+                        </div>
+                        <div style="font-size: 14px; line-height: 1.8; color: #E0AAFF; white-space: pre-wrap;">
+{content}
+                        </div>
+                        <details>
+                            <summary style="color: #9D4EDD; cursor: pointer;">查看思维链 (CoT)</summary>
+                            <div style="background: #111; padding: 10px; border-radius: 5px; color: #888; white-space: pre-wrap; margin-top: 10px;">
+{reasoning}
+                            </div>
+                        </details>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                except Exception as e:
+                    st.error(f"深度分析失败: {e}")
         else:
             st.warning("请先启动仿真系统")
 

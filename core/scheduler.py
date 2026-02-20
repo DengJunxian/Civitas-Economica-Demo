@@ -75,7 +75,8 @@ class SimulationController:
             model_router=self.model_router,
             initial_price=3000.0,
             quant_manager=quant_manager,
-            regulatory_module=regulatory_module
+            regulatory_module=regulatory_module,
+            mode=mode
         )
         
         # 兼容性: MarketDataManager 由 Model 管理

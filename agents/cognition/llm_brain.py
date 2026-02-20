@@ -100,7 +100,7 @@ class DeepSeekReasoner(BaseReasoner):
     - 自动降级
     """
     
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, model_priority: Optional[List[str]] = None):
         # 注意: 这里最好共享 Router，但为了兼容旧代码，我们在此实例化
         # 如果 Config 正确加载，这里可以用 Global Router?
         # 为了支持 Parallel Refactoring，我们建议从外部传入 Router，或者使用 Global 单例
@@ -110,6 +110,7 @@ class DeepSeekReasoner(BaseReasoner):
             hunyuan_key=GLOBAL_CONFIG.HUNYUAN_API_KEY,
             zhipu_key=GLOBAL_CONFIG.ZHIPU_API_KEY
         )
+        self.model_priority = model_priority
         # 提示词模板
         self.system_prompt = """你是一个A股市场的个人投资者，你需要根据市场信息和账户状态做出交易决策。
 请严格遵守以下 JSON 格式输出:
@@ -164,8 +165,8 @@ class DeepSeekReasoner(BaseReasoner):
         messages = self.build_messages(market_state, account_state)
         
         # 使用 Router 调用 (Smart Mode)
-        # TODO: Mode should be configurable
-        priority = self.router.get_model_priority("SMART")
+        # 优先使用实例绑定的优先级，否则向 Router 查询 SMART 模式默认值
+        priority = self.model_priority or self.router.get_model_priority("SMART")
         
         content, reasoning, model = await self.router.call_with_fallback(
             messages=messages,

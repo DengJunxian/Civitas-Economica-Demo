@@ -191,8 +191,7 @@ class DeepSeekBrain:
     
     支持模型：
     - DeepSeek: deepseek-reasoner, deepseek-chat
-    - 混元: hunyuan-t1-latest, hunyuan-turbos-latest（可选）
-    - 智谱: glm-4-flashx（快速模式）
+    - 智谱: glm-4-flashx（快速模式或降级）
     
     特性：
     1. 多模型路由与自动降级
@@ -242,11 +241,14 @@ class DeepSeekBrain:
             
         self.model_priority = None # Initialize attribute
         
-        # 初始化 OpenAI 客户端 (兼容 DeepSeek) - 仅在无router时使用
         self._api_key = api_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY
-        self.client = None
-        if self._api_key and not model_router:
-            self._init_client()
+        if self.model_router is None:
+            from core.model_router import ModelRouter
+            self.model_router = ModelRouter(
+                deepseek_key=self._api_key,
+                zhipu_key=GLOBAL_CONFIG.ZHIPU_API_KEY
+            )
+        self._api_healthy = True
     
     def _generate_cache_key(self, market_state: Dict, account_state: Dict) -> str:
         """
@@ -317,17 +319,10 @@ class DeepSeekBrain:
         Returns:
             bool: API是否可用
         """
-        if not self.client:
+        if not self.model_router:
             return False
-        try:
-            # 发送一个极小的请求测试连通性
-            self.client.models.list()
-            self._api_healthy = True
-            return True
-        except Exception as e:
-            self._api_healthy = False
-            self._last_error = str(e)
-            return False
+        self._api_healthy = True
+        return True
     
     @property
     def is_healthy(self) -> bool:
@@ -414,28 +409,6 @@ JSON 格式示例：
 }}
 """
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type((APIConnectionError, APITimeoutError, RateLimitError)),
-        reraise=True
-    )
-    def _call_api(self, messages: List[Dict]) -> Any:
-        """
-        带重试机制的 API 调用
-        
-        使用 tenacity 实现指数退避重试，处理网络抖动和限流
-        """
-        if not self.client:
-            raise RuntimeError("API客户端未初始化")
-        
-        response = self.client.chat.completions.create(
-            model="deepseek-reasoner",
-            messages=messages,
-            temperature=0.6
-        )
-        self._api_healthy = True
-        return response
 
     def _analyze_emotion(self, reasoning: str, decision: Dict) -> float:
         """
@@ -508,65 +481,41 @@ JSON 格式示例：
         请基于你的人设和当前政策环境做出交易决策。
         """
 
-        try:
-            # 3. 调用 DeepSeek R1 (带重试机制)
-            messages = [
-                {"role": "system", "content": self._build_system_prompt()},
-                {"role": "user", "content": user_prompt}
-            ]
-            response = self._call_api(messages)
-            
-            # 4. 双流解析 (Dual Stream Parsing)
-            message = response.choices[0].message
-            
-            # A. 提取思维链 (Reasoning Content)
-            # 注意：DeepSeek API 将思维链放在 reasoning_content 字段
-            reasoning = getattr(message, 'reasoning_content', "")
-            if not reasoning:
-                # 兼容性处理：防止SDK版本差异，有时可能在 model_extra 中
-                reasoning = "（思维过程未捕获）"
-            
-            # B. 提取最终决策 (Content)
-            content_raw = message.content
-            decision_json = self._extract_json(content_raw)
-            
-            # 5. 情绪分析
-            emotion_score = self._analyze_emotion(reasoning, decision_json)
-            
-            # 6. 记录思维链历史（用于fMRI可视化）
-            thought_record = ThoughtRecord(
-                agent_id=self.agent_id,
-                timestamp=time.time(),
-                reasoning_content=reasoning,
-                emotion_score=emotion_score,
-                decision=decision_json,
-                market_context=market_state
-            )
-            DeepSeekBrain.thought_history[self.agent_id].append(thought_record)
-            # deque 自动处理 maxlen，无需手动 pop
-            
-            return {
-                "decision": decision_json,
-                "reasoning": reasoning,
-                "raw_content": content_raw,
-                "emotion_score": emotion_score
-            }
-
-        except (APIConnectionError, APITimeoutError) as e:
-            self._api_healthy = False
-            self._last_error = f"网络连接失败: {str(e)}"
-            print(f"[Brain Network Error] Agent {self.agent_id}: {e}")
-            return self._fallback_decision("网络连接失败")
+        # 3. 调用多模型路由器的同步 fallback 处理机制 (内置重试与降级，绝不崩溃)
+        messages = [
+            {"role": "system", "content": self._build_system_prompt()},
+            {"role": "user", "content": user_prompt}
+        ]
         
-        except RateLimitError as e:
-            self._last_error = f"API限流: {str(e)}"
-            print(f"[Brain RateLimit] Agent {self.agent_id}: {e}")
-            return self._fallback_decision("API调用频率限制")
+        content_raw, reasoning, model_used = self.model_router.sync_call_with_fallback(
+            messages,
+            priority_models=self.model_priority or ["deepseek-reasoner", "glm-4-flashx", "deepseek-chat"],
+            timeout_budget=15.0
+        )
         
-        except Exception as e:
-            self._last_error = str(e)
-            print(f"[Brain Error] Agent {self.agent_id} failed to think: {e}")
-            return self._fallback_decision(str(e))
+        # 判断逻辑异常降级
+        decision_json = self._extract_json(content_raw)
+        
+        # 5. 情绪分析
+        emotion_score = self._analyze_emotion(reasoning, decision_json)
+        
+        # 6. 记录思维链历史（用于fMRI可视化）
+        thought_record = ThoughtRecord(
+            agent_id=self.agent_id,
+            timestamp=time.time(),
+            reasoning_content=reasoning,
+            emotion_score=emotion_score,
+            decision=decision_json,
+            market_context=market_state
+        )
+        DeepSeekBrain.thought_history[self.agent_id].append(thought_record)
+        
+        return {
+            "decision": decision_json,
+            "reasoning": reasoning,
+            "raw_content": content_raw,
+            "emotion_score": emotion_score
+        }
     
     def _fallback_decision(self, error_msg: str) -> Dict:
         """API不可用时的兜底决策"""

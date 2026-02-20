@@ -13,7 +13,6 @@ async def test_controller():
     # Mock keys for testing
     controller = SimulationController(
         deepseek_key="test_key",
-        hunyuan_key="test_key",
         zhipu_key="test_key"
     )
     

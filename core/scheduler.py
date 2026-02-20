@@ -40,7 +40,6 @@ class SimulationController:
     def __init__(
         self, 
         deepseek_key: str, 
-        hunyuan_key: Optional[str] = None,
         zhipu_key: Optional[str] = None,
         mode: str = "SMART",
         quant_manager: Optional[Any] = None,
@@ -51,7 +50,6 @@ class SimulationController:
         
         Args:
             deepseek_key: DeepSeek API密钥（必需）
-            hunyuan_key: 混元API密钥（可选）
             zhipu_key: 智谱API密钥（可选，快速模式专用）
             mode: 仿真模式 "SMART" | "FAST" | "DEEP"
             quant_manager: 量化群体管理器 (可选)
@@ -59,14 +57,13 @@ class SimulationController:
         """
         # API密钥
         self.deepseek_key = deepseek_key
-        self.hunyuan_key = hunyuan_key
         self.zhipu_key = zhipu_key
         
         # 仿真模式
         self.mode = SimulationMode(mode)
         
         # 初始化多模型路由器（包含智谱）
-        self.model_router = ModelRouter(deepseek_key, hunyuan_key, zhipu_key)
+        self.model_router = ModelRouter(deepseek_key, zhipu_key)
         
         # 初始化核心组件
         # 使用 CivitasModel 接管 Market 和 Agent

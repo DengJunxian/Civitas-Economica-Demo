@@ -172,27 +172,22 @@ class PolicyCommittee:
     
     def __init__(self, api_key: Optional[str] = None):
         self._api_key = api_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY
-        self.client = None
         
         if self._api_key:
-            self.client = OpenAI(
-                api_key=self._api_key,
-                base_url=GLOBAL_CONFIG.API_BASE_URL,
-                timeout=GLOBAL_CONFIG.API_TIMEOUT
+            from core.model_router import ModelRouter
+            self.model_router = ModelRouter(
+                deepseek_key=self._api_key,
+                zhipu_key=GLOBAL_CONFIG.ZHIPU_API_KEY
             )
+        else:
+            self.model_router = None
         
         # 解析历史
         self.interpretation_history: List[PolicyInterpretationResult] = []
     
-    @retry(
-        stop=stop_after_attempt(2),
-        wait=wait_exponential(multiplier=1, min=1, max=5),
-        retry=retry_if_exception_type((APIConnectionError, APITimeoutError, RateLimitError)),
-        reraise=True
-    )
     def _call_agent(self, role: CommitteeRole, context: str) -> Dict:
         """调用单个 Agent"""
-        if not self.client:
+        if not self.model_router:
             return {"error": "API 未连接"}
         
         messages = [
@@ -200,13 +195,11 @@ class PolicyCommittee:
             {"role": "user", "content": context}
         ]
         
-        response = self.client.chat.completions.create(
-            model="deepseek-reasoner",
-            messages=messages,
-            temperature=0.3
+        content, _, _ = self.model_router.sync_call_with_fallback(
+            messages,
+            priority_models=["deepseek-reasoner", "glm-4-flashx", "deepseek-chat"],
+            timeout_budget=30.0
         )
-        
-        content = response.choices[0].message.content
         
         # 提取 JSON
         json_match = re.search(r'\{[\s\S]*\}', content)

@@ -46,12 +46,7 @@ class SimConfig:
         default_factory=lambda: os.environ.get("DEEPSEEK_API_KEY", "sk-ef4fd5a8ac9c4861aa812af3875652f7")
     )
     
-    # 混元 API (可选)
-    HUNYUAN_API_BASE_URL: str = "https://api.hunyuan.cloud.tencent.com/v1"
-    HUNYUAN_API_KEY: Optional[str] = field(
-        default_factory=lambda: os.environ.get("HUNYUAN_API_KEY", "")
-    )
-    
+
     # 智谱 GLM API (快速模式专用)
     ZHIPU_API_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
     ZHIPU_API_KEY: Optional[str] = field(
@@ -64,10 +59,7 @@ class SimConfig:
     MODEL_DEEPSEEK_REASONER: str = "deepseek-reasoner"
     MODEL_DEEPSEEK_CHAT: str = "deepseek-chat"
     
-    # 混元模型 (可选)
-    MODEL_HUNYUAN_THINK: str = "hunyuan-t1-latest"
-    MODEL_HUNYUAN_INSTRUCT: str = "hunyuan-turbos-latest"
-    
+
     # 智谱GLM模型 (快速模式)
     MODEL_ZHIPU_FLASHX: str = "glm-4-flashx"
     MODEL_ZHIPU_FLASHX_250414: str = "glm-4-flashx-250414"

@@ -107,7 +107,6 @@ class DeepSeekReasoner(BaseReasoner):
         from config import GLOBAL_CONFIG
         self.router = ModelRouter(
             deepseek_key=api_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY,
-            hunyuan_key=GLOBAL_CONFIG.HUNYUAN_API_KEY,
             zhipu_key=GLOBAL_CONFIG.ZHIPU_API_KEY
         )
         self.model_priority = model_priority

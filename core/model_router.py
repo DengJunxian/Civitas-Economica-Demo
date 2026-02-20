@@ -29,7 +29,7 @@ class ModelType(Enum):
 class ModelInfo:
     """模型信息"""
     name: str
-    provider: str  # "deepseek" | "hunyuan"
+    provider: str  # "deepseek" | "zhipu"
     model_type: ModelType
     base_url: str
     timeout: float
@@ -83,20 +83,6 @@ class ModelRouter:
             base_url=GLOBAL_CONFIG.API_BASE_URL,
             timeout=GLOBAL_CONFIG.API_TIMEOUT_CHAT
         ),
-        "hunyuan-t1-latest": ModelInfo(
-            name="hunyuan-t1-latest",
-            provider="hunyuan",
-            model_type=ModelType.REASONER,
-            base_url=GLOBAL_CONFIG.HUNYUAN_API_BASE_URL,
-            timeout=GLOBAL_CONFIG.API_TIMEOUT_REASONER
-        ),
-        "hunyuan-turbos-latest": ModelInfo(
-            name="hunyuan-turbos-latest",
-            provider="hunyuan",
-            model_type=ModelType.CHAT,
-            base_url=GLOBAL_CONFIG.HUNYUAN_API_BASE_URL,
-            timeout=GLOBAL_CONFIG.API_TIMEOUT_CHAT
-        ),
         # 智谱GLM模型 (快速模式专用)
         "glm-4-flashx": ModelInfo(
             name="glm-4-flashx",
@@ -114,17 +100,15 @@ class ModelRouter:
         ),
     }
     
-    def __init__(self, deepseek_key: str, hunyuan_key: Optional[str] = None, zhipu_key: Optional[str] = None):
+    def __init__(self, deepseek_key: str, zhipu_key: Optional[str] = None):
         """
         初始化路由器
         
         Args:
-            deepseek_key: DeepSeek API密钥（可选，为空时使用智谱降级）
-            hunyuan_key: 混元API密钥（可选）
-            zhipu_key: 智谱API密钥（可选，快速模式专用或DeepSeek降级）
+            deepseek_key: DeepSeek API密钥
+            zhipu_key: 智谱API密钥（用于自动降级）
         """
         self.deepseek_key = deepseek_key
-        self.hunyuan_key = hunyuan_key
         self.zhipu_key = zhipu_key
         
         # 初始化客户端
@@ -156,14 +140,6 @@ class ModelRouter:
                 timeout=GLOBAL_CONFIG.API_TIMEOUT_REASONER
             )
         
-        # 混元客户端（可选）
-        if self.hunyuan_key:
-            self.clients["hunyuan"] = AsyncOpenAI(
-                api_key=self.hunyuan_key,
-                base_url=GLOBAL_CONFIG.HUNYUAN_API_BASE_URL,
-                timeout=GLOBAL_CONFIG.API_TIMEOUT_REASONER
-            )
-        
         # 智谱客户端（可选，快速模式专用）
         if self.zhipu_key:
             self.clients["zhipu"] = AsyncOpenAI(
@@ -180,10 +156,6 @@ class ModelRouter:
         if self.deepseek_key:
             available.extend(["deepseek-reasoner", "deepseek-chat"])
         
-        # 混元模型（可选）
-        if self.hunyuan_key:
-            available.extend(["hunyuan-t1-latest", "hunyuan-turbos-latest"])
-        
         # 智谱GLM模型（可选，快速模式专用）
         if self.zhipu_key:
             available.extend(["glm-4-flashx", "glm-4-flashx-250414"])
@@ -192,26 +164,14 @@ class ModelRouter:
     
     def get_model_priority(self, mode: str) -> List[str]:
         """
-        根据模式获取模型优先级列表
-        
-        Args:
-            mode: "SMART" | "FAST" | "DEEP"
-            
-        Returns:
-            按优先级排序的可用模型列表
+        获取模型优先级列表：始终优先 deepseek-reasoner，降级至 glm-4-flashx 或 deepseek-chat
         """
-        if mode == "FAST":
-            # 快速模式：仅对话模型
-            priority = ["deepseek-chat"]
-        elif mode == "DEEP":
-            # 深度模式：仅推理模型
-            priority = ["deepseek-reasoner"]
-        else:  # SMART
-            # 智能模式：混合列表 (具体分配在Model层)
-            priority = ["deepseek-reasoner", "deepseek-chat"]
+        base_priority = ["deepseek-reasoner", "glm-4-flashx", "deepseek-chat"]
         
-        # 过滤出可用模型
-        return [m for m in priority if m in self.available_models]
+        if mode == "FAST":
+            base_priority = ["glm-4-flashx", "deepseek-chat", "deepseek-reasoner"]
+            
+        return [m for m in base_priority if m in self.available_models]
     
     async def call_with_fallback(
         self,
@@ -305,6 +265,35 @@ class ModelRouter:
         
         # 全部失败，返回降级响应
         return self._fallback_response(last_error, fallback_content=fallback_response)
+    
+    def sync_call_with_fallback(
+        self,
+        messages: List[Dict],
+        priority_models: List[str] = None,
+        timeout_budget: float = 30.0,
+        fallback_response: Optional[str] = None
+    ) -> Tuple[str, Optional[str], str]:
+        """
+        供同步代码调用的代理方法
+        """
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 如果在现有的事件循环内(即环境本身已异步)，使用 create_task 
+                # 但这通常需要 await，所以我们应当使用嵌套 asyncio
+                import nest_asyncio
+                nest_asyncio.apply()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        if not priority_models:
+            priority_models = ["deepseek-reasoner", "glm-4-flashx", "deepseek-chat"]
+            
+        return loop.run_until_complete(
+            self.call_with_fallback(messages, priority_models, timeout_budget, fallback_response)
+        )
     
     async def _call_model(
         self,

@@ -132,15 +132,16 @@ class ReflectionEngine:
         self.tick_count = 0
         self.last_reflection_tick = 0
         
-        # 初始化 API 客户端
+        # 初始化 API 客户端路由器
         self._api_key = api_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY
-        self.client = None
         if self._api_key:
-            self.client = OpenAI(
-                api_key=self._api_key,
-                base_url=GLOBAL_CONFIG.API_BASE_URL,
-                timeout=GLOBAL_CONFIG.API_TIMEOUT
+            from core.model_router import ModelRouter
+            self.model_router = ModelRouter(
+                deepseek_key=self._api_key,
+                zhipu_key=GLOBAL_CONFIG.ZHIPU_API_KEY
             )
+        else:
+            self.model_router = None
         
         # 初始化存储
         if agent_id not in ReflectionEngine.agent_reflections:
@@ -162,7 +163,7 @@ class ReflectionEngine:
         
         从最近记忆中提炼洞见
         """
-        if not self.client:
+        if not self.model_router:
             return None
         
         self.last_reflection_tick = self.tick_count
@@ -202,16 +203,16 @@ class ReflectionEngine:
 """
         
         try:
-            response = self.client.chat.completions.create(
-                model="deepseek-reasoner",
+            content, _, _ = self.model_router.sync_call_with_fallback(
                 messages=[
                     {"role": "system", "content": "你是一位善于自我反思的投资者。"},
                     {"role": "user", "content": reflection_prompt}
                 ],
-                temperature=0.6
+                priority_models=["deepseek-reasoner", "glm-4-flashx", "deepseek-chat"],
+                timeout_budget=30.0
             )
             
-            insight_content = response.choices[0].message.content
+            insight_content = content
             
             insight = Insight(
                 timestamp=time.time(),
@@ -241,7 +242,7 @@ class ReflectionEngine:
         
         综合当日记忆生成完整的日记条目
         """
-        if not self.client:
+        if not self.model_router:
             return None
         
         # 获取当日记忆
@@ -277,16 +278,16 @@ class ReflectionEngine:
 """
         
         try:
-            response = self.client.chat.completions.create(
-                model="deepseek-reasoner",
+            content, _, _ = self.model_router.sync_call_with_fallback(
                 messages=[
-                    {"role": "system", "content": "你是一位正在写投资日记的个人投资者。"},
+                    {"role": "system", "content": "你是一位专业的金融日记作者。"},
                     {"role": "user", "content": diary_prompt}
                 ],
-                temperature=0.7
+                priority_models=["deepseek-reasoner", "glm-4-flashx", "deepseek-chat"],
+                timeout_budget=40.0
             )
             
-            diary_content = response.choices[0].message.content
+            diary_content = content
             
             diary = InvestmentDiary(
                 date=datetime.now().strftime("%Y-%m-%d"),

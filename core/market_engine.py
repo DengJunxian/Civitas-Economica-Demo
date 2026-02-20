@@ -598,40 +598,26 @@ class PolicyInterpreter:
             content = ""
             reasoning = ""
             
-            if self.router:
-                # 使用 GLM-4-FlashX 快速响应 或者 DeepSeek (Router 内部 handle 异步)
-                # 默认优先级
-                priority = ["deepseek-reasoner", "deepseek-chat", "glm-4-flashx"]
-                
-                response = await self.router.call_with_fallback(
-                    [{"role": "user", "content": prompt}],
-                    priority_models=priority,
-                    timeout_budget=60.0
+            if not self.router:
+                from core.model_router import ModelRouter
+                self.router = ModelRouter(
+                    deepseek_key=self.api_key,
+                    zhipu_key=GLOBAL_CONFIG.ZHIPU_API_KEY
                 )
-                
-                # router 返回的是 content, reasoning, model
-                content = response[0]
-                reasoning = response[1]
-                
-            else:
-                # 直接使用 AsyncOpenAI
-                from openai import AsyncOpenAI
-                
-                client = AsyncOpenAI(
-                    api_key=self.api_key, 
-                    base_url=GLOBAL_CONFIG.API_BASE_URL,
-                    timeout=GLOBAL_CONFIG.API_TIMEOUT_REASONER
-                )
-                
-                print(f"[PolicyInterpreter] 异步调用 deepseek-reasoner...")
-                resp = await client.chat.completions.create(
-                    model="deepseek-reasoner",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.3
-                )
-                message = resp.choices[0].message
-                content = message.content
-                reasoning = getattr(message, 'reasoning_content', '')
+            
+            # 使用默认优先级
+            priority = ["deepseek-reasoner", "glm-4-flashx", "deepseek-chat"]
+            
+            response = await self.router.call_with_fallback(
+                [{"role": "user", "content": prompt}],
+                priority_models=priority,
+                timeout_budget=60.0,
+                fallback_response='{"tax_rate": 0.0005, "fear_factor": 0, "liquidity_injection": 0}'
+            )
+            
+            # router 返回的是 content, reasoning, model
+            content = response[0]
+            reasoning = response[1]
 
             self.last_reasoning = reasoning
             

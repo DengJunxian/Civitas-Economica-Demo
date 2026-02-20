@@ -223,8 +223,6 @@ with st.sidebar:
     # --- API 密钥输入 ---
     api_key = st.text_input("DeepSeek API 密钥 *", type="password", 
                             help="必填，用于驱动智能体思考")
-    hunyuan_key = st.text_input("混元 API 密钥 (可选)", type="password",
-                                help="可选，用于多模型增强")
     zhipu_key = st.text_input("智谱 API 密钥 (快速模式)", type="password",
                               value="4d963afd591d4c93940b08b06d766e91.bWaMIWJnuKhOUo7y",
                               help="快速模式专用，使用GLM-4-FlashX模型")
@@ -405,7 +403,6 @@ with st.sidebar:
                     
                     st.session_state.controller = SimulationController(
                         deepseek_key=api_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY or "",
-                        hunyuan_key=hunyuan_key or GLOBAL_CONFIG.HUNYUAN_API_KEY or None,
                         zhipu_key=zhipu_key or GLOBAL_CONFIG.ZHIPU_API_KEY or None,
                         mode=st.session_state.simulation_mode,
                         quant_manager=st.session_state.quant_manager,

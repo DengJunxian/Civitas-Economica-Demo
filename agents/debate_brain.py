@@ -166,29 +166,21 @@ class DebateBrain(DeepSeekBrain):
         
         return context
     
-    @retry(
-        stop=stop_after_attempt(2),
-        wait=wait_exponential(multiplier=1, min=1, max=5),
-        retry=retry_if_exception_type((APIConnectionError, APITimeoutError, RateLimitError)),
-        reraise=True
-    )
     def _call_role_api(self, role: DebateRole, context: str) -> str:
         """调用 API 获取角色发言"""
-        if not self.client:
-            return f"[{role.value}] API 未连接"
+        if not self.model_router:
+            return f"[{role.value}] 路由未连接"
         
         messages = [
             {"role": "system", "content": self._build_role_system_prompt(role)},
             {"role": "user", "content": context + "\n\n请发表你的观点（100-200字）："}
         ]
         
-        response = self.client.chat.completions.create(
-            model="deepseek-reasoner",
-            messages=messages,
-            temperature=0.7
+        content, _, _ = self.model_router.sync_call_with_fallback(
+            messages,
+            timeout_budget=15.0
         )
-        
-        return response.choices[0].message.content
+        return content
     
     def _synthesize_decision(
         self, 
@@ -224,21 +216,13 @@ class DebateBrain(DeepSeekBrain):
             {"role": "user", "content": synthesis_prompt}
         ]
         
-        try:
-            response = self.client.chat.completions.create(
-                model="deepseek-reasoner",
-                messages=messages,
-                temperature=0.3
-            )
-            
-            content = response.choices[0].message.content
-            reasoning = getattr(response.choices[0].message, 'reasoning_content', '')
-            
-            decision = self._extract_json(content)
-            return decision, reasoning
-            
-        except Exception as e:
-            return {"action": "HOLD", "qty": 0, "reason": f"决策失败: {e}"}, ""
+        content, reasoning, _ = self.model_router.sync_call_with_fallback(
+            messages,
+            timeout_budget=20.0
+        )
+        
+        decision = self._extract_json(content)
+        return decision, reasoning or ""
     
     def _risk_review(
         self, 
@@ -269,7 +253,7 @@ class DebateBrain(DeepSeekBrain):
         # (这里简化处理)
         
         # 通过 LLM 进行更智能的审核
-        if self.client:
+        if self.model_router:
             review_prompt = f"""
 作为风控经理，审核以下交易决策：
 
@@ -283,23 +267,19 @@ class DebateBrain(DeepSeekBrain):
 请判断是否批准（JSON格式）：
 {{"approved": true/false, "reason": "理由"}}
 """
-            try:
-                messages = [
-                    {"role": "system", "content": self.ROLE_PROMPTS[DebateRole.RISK_MGR]},
-                    {"role": "user", "content": review_prompt}
-                ]
-                
-                response = self.client.chat.completions.create(
-                    model="deepseek-reasoner",
-                    messages=messages,
-                    temperature=0.2
-                )
-                
-                result = self._extract_json(response.choices[0].message.content)
-                return result.get('approved', True), result.get('reason', '风控通过')
-                
-            except Exception as e:
-                return True, f"风控审核异常，默认通过: {e}"
+            messages = [
+                {"role": "system", "content": self.ROLE_PROMPTS[DebateRole.RISK_MGR]},
+                {"role": "user", "content": review_prompt}
+            ]
+            
+            content, _, _ = self.model_router.sync_call_with_fallback(
+                messages,
+                timeout_budget=10.0,
+                fallback_response='{"approved": true, "reason": "风控服务降级，默认通过"}'
+            )
+            
+            result = self._extract_json(content)
+            return result.get('approved', True), result.get('reason', '风控请求处理')
         
         return True, "✅ 风控通过"
     

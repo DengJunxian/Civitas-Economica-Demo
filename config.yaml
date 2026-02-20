@@ -1,0 +1,22 @@
+# Civitas-Economica 全局配置文件
+# 这个文件将消除所有的硬编码（Magic Numbers）以确保系统的可维护性
+
+# Ebbinghaus 认知记忆基础衰减率 (S_base)
+ebbinghaus_base_decay_rate: 0.1
+ebbinghaus_alpha: 0.5
+ebbinghaus_retention_threshold: 0.1
+retrieval_cosine_weight: 0.6
+retrieval_retention_weight: 0.4
+
+# 市场微结构参数
+market_slippage: 0.001
+transaction_costs: 0.0005
+
+# LLM 配置参数
+llm_temperature: 0.7
+llm_model_name: "gpt-4-turbo"  # 或 deepseek-chat 等原生大语言模型 API 名称
+
+# 其他可以配置的预留参数
+default_starting_cash: 100000.0
+price_impact_factor: 0.05
+initial_market_price: 100.0

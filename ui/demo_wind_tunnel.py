@@ -90,7 +90,8 @@ def render_phase1(ctrl):
         debate_agents = []
         if ctrl and hasattr(ctrl, 'model') and ctrl.model and hasattr(ctrl.model, 'population') and ctrl.model.population:
             for agent in ctrl.model.population.smart_agents:
-                if "DebateBrain" in str(type(agent.brain)) or agent.id.startswith("Debate_"):
+                has_debate_brain = hasattr(agent, 'brain') and "DebateBrain" in str(type(agent.brain))
+                if has_debate_brain or agent.id.startswith("Debate_"):
                     debate_agents.append(agent.id)
                     
         if hasattr(DebateBrain, 'debate_history'):

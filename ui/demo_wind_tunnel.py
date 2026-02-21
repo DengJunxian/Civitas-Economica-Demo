@@ -165,95 +165,186 @@ def render_phase2(ctrl):
             from agents.brain import DeepSeekBrain
             import networkx as nx
             import numpy as np
+            import json
+            import streamlit.components.v1 as components
             
-            if ctrl and hasattr(ctrl.model, 'social_graph'):
+            if ctrl and hasattr(ctrl, 'model') and ctrl.model and hasattr(ctrl.model, 'social_graph') and ctrl.model.social_graph:
                 G = ctrl.model.social_graph.graph
             else:
-                # Mock graph
+                # Mock graph with sufficient nodes for visual impact
                 np.random.seed(42)
-                G = nx.barabasi_albert_graph(100, 2)
+                G = nx.barabasi_albert_graph(800, 2)
                 
-            pos = nx.spring_layout(G, seed=42)
-            
-            edge_x = []
-            edge_y = []
-            for edge in G.edges():
-                x0, y0 = pos[edge[0]]
-                x1, y1 = pos[edge[1]]
-                edge_x.extend([x0, x1, None])
-                edge_y.extend([y0, y1, None])
+            degree_dict = dict(G.degree(G.nodes()))
+            if degree_dict:
+                center_node = max(degree_dict, key=degree_dict.get)
+            else:
+                center_node = 0
                 
-            edges_trace = go.Scatter(
-                x=edge_x, y=edge_y,
-                line=dict(width=0.5, color='rgba(150, 150, 150, 0.4)'),
-                hoverinfo='none',
-                mode='lines')
-            
-            node_x = []
-            node_y = []
-            colors = []
-            sizes = []
-            texts = []
-            
+            nodes_data = []
             for node in G.nodes():
-                x, y = pos[node]
-                node_x.append(x)
-                node_y.append(y)
+                agent_type = "RETAIL"
+                if ctrl and hasattr(ctrl, 'model') and ctrl.model and hasattr(ctrl.model, 'population') and ctrl.model.population:
+                    agent = ctrl.model.population.get_agent_by_id(node)
+                    if agent:
+                        agent_type = getattr(agent, 'agent_type', 'RETAIL')
                 
-                color = '#00d4ff' # Default Blue
-                size = 10
-                text = f"Agent {node}"
+                nodes_data.append({
+                    "id": str(node),
+                    "isCenter": str(node) == str(center_node),
+                    "type": agent_type
+                })
                 
-                agent = ctrl.model.population.get_agent_by_id(node) if ctrl else None
-                if agent:
-                    # Institutional agents are larger
-                    agent_type = getattr(agent, 'agent_type', 'RETAIL')
-                    if agent_type != 'RETAIL':
-                        size = 20
-                        
-                    # Get real emotion if available
-                    if hasattr(DeepSeekBrain, 'thought_history') and node in DeepSeekBrain.thought_history:
-                        history = DeepSeekBrain.thought_history[node]
-                        if history:
-                            emotion = history[-1].emotion_score
-                            if emotion < -0.3:
-                                color = '#FF3B30' # Red
-                            elif emotion > 0.3:
-                                color = '#34C759' # Green
-                            else:
-                                color = '#FFD60A' # Yellow
-                            text += f"<br>Emotion: {emotion:+.2f}"
-                            
-                colors.append(color)
-                sizes.append(size)
-                texts.append(text)
+            links_data = []
+            for u, v in G.edges():
+                links_data.append({
+                    "source": str(u),
+                    "target": str(v)
+                })
                 
-            nodes_trace = go.Scatter(
-                x=node_x, y=node_y,
-                mode='markers',
-                hoverinfo='text',
-                text=texts,
-                marker=dict(
-                    showscale=False,
-                    color=colors,
-                    size=sizes,
-                    line_width=1,
-                    line_color='rgba(255,255,255,0.8)'
-                )
-            )
+            graph_json = json.dumps({"nodes": nodes_data, "links": links_data})
             
-            fig = go.Figure(data=[edges_trace, nodes_trace],
-                     layout=go.Layout(
-                        showlegend=False,
-                        hovermode='closest',
-                        margin=dict(b=0,l=0,r=0,t=0),
-                        paper_bgcolor='rgba(0,0,0,0)',
-                        plot_bgcolor='rgba(0,0,0,0)',
-                        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
-                     )
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            html_code = f'''
+<!DOCTYPE html>
+<html>
+<head>
+  <style> body {{ margin: 0; background-color: rgba(0,0,0,0); overflow: hidden; }} </style>
+  <script src="https://unpkg.com/force-graph"></script>
+</head>
+<body>
+  <div id="graph" style="width: 100%; height: 500px;"></div>
+  <script>
+    const graphData = {graph_json};
+    const centerNodeId = "{str(center_node)}";
+    
+    // Initialize nodes
+    graphData.nodes.forEach(node => {{
+        node.color = '#00d4ff'; // Blue
+        node.size = node.isCenter ? 12 : 2.5;
+        node.infected = false;
+    }});
+
+    const Graph = ForceGraph()(document.getElementById('graph'))
+      .graphData(graphData)
+      .nodeId('id')
+      .nodeColor(n => n.color)
+      .nodeVal(n => n.size)
+      .linkColor(() => 'rgba(150, 150, 150, 0.3)')
+      .linkWidth(0.5)
+      .linkDirectionalParticles(link => link.particleCount || 0)
+      .linkDirectionalParticleSpeed(0.012)
+      .linkDirectionalParticleWidth(2.5)
+      .linkDirectionalParticleColor(() => '#ff4444')
+      .backgroundColor('rgba(0,0,0,0)')
+      .nodeCanvasObject((node, ctx, globalScale) => {{
+          // Draw node
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.size, 0, 2 * Math.PI, false);
+          ctx.fillStyle = node.color;
+          ctx.fill();
+          
+          // Draw tooltip if hovered
+          if (node === Graph.hoverNode()) {{
+              const label = node.isCenter ? "大V机构节点 (情绪源)" : "System 2 正在读取大V的看空言论并修改自身的风险参数。";
+              const fontSize = (node.isCenter ? 14 : 12) / globalScale;
+              ctx.font = node.isCenter ? `bold ${{fontSize}}px Sans-Serif` : `${{fontSize}}px Sans-Serif`;
+              const textWidth = ctx.measureText(label).width;
+              const bckgDimensions = [textWidth, fontSize].map(n => n + fontSize * 0.4); 
+
+              ctx.fillStyle = 'rgba(22, 27, 34, 0.9)'; // Dark GitHub-like bg
+              ctx.fillRect(node.x - bckgDimensions[0] / 2, node.y - bckgDimensions[1] - node.size - 4, ...bckgDimensions);
+              ctx.strokeStyle = '#ff4444';
+              ctx.lineWidth = 1 / globalScale;
+              ctx.strokeRect(node.x - bckgDimensions[0] / 2, node.y - bckgDimensions[1] - node.size - 4, ...bckgDimensions);
+
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillStyle = '#ff4444';
+              ctx.fillText(label, node.x, node.y - bckgDimensions[1]/2 - node.size - 4);
+          }}
+      }})
+      .onNodeHover(node => {{
+          document.getElementById('graph').style.cursor = node ? 'pointer' : null;
+      }});
+
+    // Setup initial camera
+    setTimeout(() => {{
+        Graph.zoomToFit(400, 20);
+    }}, 500);
+
+    // Animation logic
+    setTimeout(() => {{
+        // 1. Center node turns red
+        const centerNode = graphData.nodes.find(n => n.id === centerNodeId);
+        if (centerNode) {{
+            centerNode.color = '#ff4444';
+            centerNode.infected = true;
+            Graph.nodeColor(Graph.nodeColor());
+            
+            // Generate BFS distances for infection propagation
+            const distances = {{}};
+            distances[centerNodeId] = 0;
+            
+            const adj = {{}};
+            graphData.nodes.forEach(n => adj[n.id] = []);
+            graphData.links.forEach(l => {{
+                // force-graph mutates strings to object handles
+                const u = typeof l.source === 'object' ? l.source.id : l.source;
+                const v = typeof l.target === 'object' ? l.target.id : l.target;
+                adj[u].push(v);
+                adj[v].push(u);
+            }});
+            
+            const queue = [centerNodeId];
+            while(queue.length > 0) {{
+                const u = queue.shift();
+                adj[u].forEach(v => {{
+                    if (distances[v] === undefined) {{
+                        distances[v] = distances[u] + 1;
+                        queue.push(v);
+                    }}
+                }});
+            }}
+            
+            // Start ripple effect based on distance
+            const baseDelay = 600; // Infection spread speed
+            graphData.nodes.forEach(n => {{
+                const dist = distances[n.id];
+                if (dist !== undefined) {{
+                    setTimeout(() => {{
+                        if (n.id !== centerNodeId) {{
+                            n.color = '#ff4444';
+                            n.infected = true;
+                            Graph.nodeColor(Graph.nodeColor());
+                        }}
+                        
+                        // Emit particles to further uninfected neighbors visually
+                        const myLinks = graphData.links.filter(l => 
+                           ((typeof l.source === 'object' ? l.source.id : l.source) === n.id || 
+                            (typeof l.target === 'object' ? l.target.id : l.target) === n.id)
+                        );
+                        myLinks.forEach(l => l.particleCount = 1);
+                        Graph.linkDirectionalParticles(Graph.linkDirectionalParticles());
+                        
+                        // Pulse effect
+                        const originalSize = n.size;
+                        n.size = originalSize * 1.8;
+                        Graph.nodeVal(Graph.nodeVal());
+                        setTimeout(() => {{
+                             n.size = originalSize;
+                             Graph.nodeVal(Graph.nodeVal());
+                        }}, 200);
+
+                    }}, dist * baseDelay);
+                }}
+            }});
+        }}
+    }}, 2000);
+  </script>
+</body>
+</html>
+'''
+            components.html(html_code, height=520)
             
         except Exception as e:
             st.error(f"图谱渲染失败: {str(e)}")

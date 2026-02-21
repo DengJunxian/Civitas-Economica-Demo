@@ -121,8 +121,14 @@ class StratifiedPopulation:
                 agent.brain.importance_level = 1  # 重要Agent
             else:
                 agent.brain.importance_level = 0  # 普通Agent
-            
             self.smart_agents.append(agent)
+
+    def get_agent_by_id(self, agent_id: str) -> Optional[SmartAgent]:
+        """根据 ID 获取 SmartAgent"""
+        for agent in self.smart_agents:
+            if agent.id == agent_id:
+                return agent
+        return None
 
     def _init_vectorized_state(self):
         """初始化散户矩阵"""

@@ -476,61 +476,64 @@ with st.sidebar:
     st.markdown("---")
     if st.button("📑 生成报告", use_container_width=True):
         if st.session_state.controller:
-            with st.spinner("正在生成仿真结果评估报告..."):
-                try:
-                    import concurrent.futures
+            if st.session_state.is_running:
+                st.warning("⚠️ 仿真正在运行中。请先点击上方的「停止/暂停」按钮暂停仿真，然后再生成报告。")
+            else:
+                with st.spinner("正在生成仿真结果评估报告..."):
+                    try:
+                        import concurrent.futures
 
-                    # --- 收集仿真上下文数据 ---
-                    history = st.session_state.market_history
-                    sim_history = [h for h in history if not h.get('is_historical', True)]
+                        # --- 收集仿真上下文数据 ---
+                        history = st.session_state.market_history
+                        sim_history = [h for h in history if not h.get('is_historical', True)]
 
-                    if not sim_history:
-                        st.warning("暂无仿真数据，请先运行仿真。")
-                    else:
-                        ctrl_ref = st.session_state.controller
-                        first_sim = sim_history[0]
-                        last_sim = sim_history[-1]
-                        sim_days = len(sim_history)
-
-                        start_price = first_sim['close']
-                        end_price = last_sim['close']
-                        total_return = (end_price - start_price) / start_price * 100
-
-                        # 波动率
-                        if len(sim_history) > 1:
-                            import numpy as np
-                            closes = [h['close'] for h in sim_history]
-                            returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
-                            volatility = float(np.std(returns) * 100)
-                            max_price = max(closes)
-                            min_price = min(closes)
+                        if not sim_history:
+                            st.warning("暂无仿真数据，请先运行仿真。")
                         else:
-                            volatility = 0.0
-                            max_price = end_price
-                            min_price = end_price
+                            ctrl_ref = st.session_state.controller
+                            first_sim = sim_history[0]
+                            last_sim = sim_history[-1]
+                            sim_days = len(sim_history)
 
-                        # 政策信息
-                        policy_info = st.session_state.policy_analysis
-                        policy_text = policy_info.get('text', '无') if policy_info else '无'
+                            start_price = first_sim['close']
+                            end_price = last_sim['close']
+                            total_return = (end_price - start_price) / start_price * 100
 
-                        # 政策参数
-                        try:
-                            policy_status = ctrl_ref.model.get_policy_status()
-                            cb_info = policy_status.get('circuit_breaker', {})
-                            tax_info = policy_status.get('transaction_tax', {})
-                        except Exception:
-                            cb_info = {}
-                            tax_info = {}
+                            # 波动率
+                            if len(sim_history) > 1:
+                                import numpy as np
+                                closes = [h['close'] for h in sim_history]
+                                returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
+                                volatility = float(np.std(returns) * 100)
+                                max_price = max(closes)
+                                min_price = min(closes)
+                            else:
+                                volatility = 0.0
+                                max_price = end_price
+                                min_price = end_price
 
-                        # CSAD 均值
-                        csad_data = st.session_state.csad_history
-                        avg_csad = sum(csad_data) / len(csad_data) if csad_data else 0
+                            # 政策信息
+                            policy_info = st.session_state.policy_analysis
+                            policy_text = policy_info.get('text', '无') if policy_info else '无'
 
-                        # 恐慌指数
-                        panic = ctrl_ref.market.panic_level if hasattr(ctrl_ref.market, 'panic_level') else 0
+                            # 政策参数
+                            try:
+                                policy_status = ctrl_ref.model.get_policy_status()
+                                cb_info = policy_status.get('circuit_breaker', {})
+                                tax_info = policy_status.get('transaction_tax', {})
+                            except Exception:
+                                cb_info = {}
+                                tax_info = {}
 
-                        # --- 构建评估报告 Prompt ---
-                        summary_prompt = f"""你是一位资深的金融政策分析师。请根据以下仿真实验数据，生成一份「政策效果评估报告」。
+                            # CSAD 均值
+                            csad_data = st.session_state.csad_history
+                            avg_csad = sum(csad_data) / len(csad_data) if csad_data else 0
+
+                            # 恐慌指数
+                            panic = ctrl_ref.market.panic_level if hasattr(ctrl_ref.market, 'panic_level') else 0
+
+                            # --- 构建评估报告 Prompt ---
+                            summary_prompt = f"""你是一位资深的金融政策分析师。请根据以下仿真实验数据，生成一份「政策效果评估报告」。
 
 【仿真概况】
 - 仿真天数: {sim_days} 天
@@ -558,121 +561,58 @@ with st.sidebar:
 3. **风险提示**: 指出仿真中暴露出的潜在风险
 4. **政策建议**: 针对当前市场状态给出政策调整建议"""
 
-                        # --- 使用独立线程执行异步 API 调用 ---
-                        router = ctrl_ref.model_router
-                        # 报告模型优先级：先尝试 deepseek-chat，再降级到智谱 GLM
-                        priority = ["deepseek-chat"]
-                        if router.has_zhipu:
-                            priority.append("glm-4-flashx")
-                        
-                        def _sync_get_report(prompt, models):
-                            """在独立线程的独立事件循环中执行异步 API 调用"""
-                            loop = asyncio.new_event_loop()
-                            try:
-                                return loop.run_until_complete(
-                                    router.call_with_fallback(
-                                        [{"role": "user", "content": prompt}],
-                                        priority_models=models,
-                                        timeout_budget=90.0,
-                                        fallback_response="报告生成服务暂时不可用，请稍后重试。"
+                            # --- 使用独立线程执行异步 API 调用 ---
+                            router = ctrl_ref.model_router
+                            # 报告模型优先级：先尝试 deepseek-chat，再降级到智谱 GLM
+                            priority = ["deepseek-chat"]
+                            if router.has_zhipu:
+                                priority.append("glm-4-flashx")
+                            
+                            def _sync_get_report(prompt, models):
+                                """在独立线程的独立事件循环中执行异步 API 调用"""
+                                loop = asyncio.new_event_loop()
+                                try:
+                                    return loop.run_until_complete(
+                                        router.call_with_fallback(
+                                            [{"role": "user", "content": prompt}],
+                                            priority_models=models,
+                                            timeout_budget=90.0,
+                                            fallback_response="报告生成服务暂时不可用，请稍后重试。"
+                                        )
                                     )
-                                )
-                            finally:
-                                loop.close()
+                                finally:
+                                    loop.close()
 
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                            future = executor.submit(_sync_get_report, summary_prompt, priority)
-                            content, _, model = future.result(timeout=120)
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                                future = executor.submit(_sync_get_report, summary_prompt, priority)
+                                content, _, model = future.result(timeout=120)
 
-                        st.success(f"✅ 报告已生成 (使用模型: {model}) High-Speed Mode")
-                        
-                        # Store report content in session state to persist
-                        st.session_state.last_report = content
-                        
-                        st.markdown(f"""
-                        <div style="background: #161b22; padding: 20px; border-radius: 10px; border: 1px solid #30363d;">
-                            <h4 style="color: #58a6ff;">📊 仿真结果评估报告</h4>
-                            <div style="font-size: 13px; color: #888; margin-bottom: 12px;">
-                                仿真周期: {first_sim['time']} ~ {last_sim['time']} ({sim_days}天)
-                                | 累计涨跌: <span style="color: {'#FF3B30' if total_return >= 0 else '#34C759'}">{total_return:+.2f}%</span>
-                            </div>
-                            <div style="font-size: 14px; line-height: 1.8; color: #c9d1d9; white-space: pre-wrap;">
+                            st.success(f"✅ 报告已生成 (使用模型: {model}) High-Speed Mode")
+                            
+                            # Store report content in session state to persist
+                            st.session_state.last_report = content
+                            
+                            st.markdown(f"""
+                            <div style="background: #161b22; padding: 20px; border-radius: 10px; border: 1px solid #30363d;">
+                                <h4 style="color: #58a6ff;">📊 仿真结果评估报告</h4>
+                                <div style="font-size: 13px; color: #888; margin-bottom: 12px;">
+                                    仿真周期: {first_sim['time']} ~ {last_sim['time']} ({sim_days}天)
+                                    | 累计涨跌: <span style="color: {'#FF3B30' if total_return >= 0 else '#34C759'}">{total_return:+.2f}%</span>
+                                </div>
+                                <div style="font-size: 14px; line-height: 1.8; color: #c9d1d9; white-space: pre-wrap;">
 {content}
+                                </div>
                             </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # Add "Further Analysis" Button (Nested inside the report block effectively)
-                        # We use session state to track if we need deep analysis
-                        
-                except concurrent.futures.TimeoutError:
-                    st.error("⏰ 报告生成超时（120秒），请稍后重试。")
-                except Exception as e:
-                    st.error(f"报告生成失败: {e}")
-                    import traceback
-                    st.code(traceback.format_exc(), language="text")
+                            """, unsafe_allow_html=True)
+                            
+                    except concurrent.futures.TimeoutError:
+                        st.error("⏰ 报告生成超时（120秒），请稍后重试。")
+                    except Exception as e:
+                        st.error(f"报告生成失败: {e}")
+                        import traceback
+                        st.code(traceback.format_exc(), language="text")
         
-    # 深度分析按钮 (独立于生成按钮，但依赖上一次报告)
-    if 'last_report' in st.session_state and st.session_state.last_report:
-        if st.button("🔬 深度思考 (DeepSeek R1 Analysis)", use_container_width=True):
-             with st.spinner("正在进行深度推理 (DeepSeek R1)..."):
-                try:
-                    import concurrent.futures
-                    ctrl_ref = st.session_state.controller
-                    router = ctrl_ref.model_router
-                    
-                    deep_prompt = f"""
-                    基于已生成的初步报告，请使用 DeepSeek R1 进行深度因果推断和反事实推理：
-                    
-                    【初步报告】
-                    {st.session_state.last_report}
-                    
-                    【任务】
-                    1. 挖掘市场波动的深层微观机制
-                    2. 评估如果在第10天实施反向政策，市场会如何演变？
-                    3. 提供更具体的监管建议
-                    """
-                    
-                    def _sync_get_deep_report():
-                        loop = asyncio.new_event_loop()
-                        try:
-                            return loop.run_until_complete(
-                                router.call_with_fallback(
-                                    [{"role": "user", "content": deep_prompt}],
-                                    priority_models=["deepseek-reasoner"],
-                                    timeout_budget=300.0, # 5 minutes for reasoning
-                                    fallback_response="深度分析失败。"
-                                )
-                            )
-                        finally:
-                            loop.close()
-                    
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(_sync_get_deep_report)
-                        content, reasoning, model = future.result(timeout=320)
-                        
-                    st.markdown(f"""
-                    <div style="background: #2D1A39; padding: 20px; border-radius: 10px; border: 1px solid #9D4EDD;">
-                        <h4 style="color: #E0AAFF;">🔬 深度思考分析报告 (DeepSeek R1)</h4>
-                         <div style="font-size: 12px; color: #aaa; margin-bottom: 10px;">
-                            思维链长度: {len(reasoning) if reasoning else 0} 字符
-                        </div>
-                        <div style="font-size: 14px; line-height: 1.8; color: #E0AAFF; white-space: pre-wrap;">
-{content}
-                        </div>
-                        <details>
-                            <summary style="color: #9D4EDD; cursor: pointer;">查看思维链 (CoT)</summary>
-                            <div style="background: #111; padding: 10px; border-radius: 5px; color: #888; white-space: pre-wrap; margin-top: 10px;">
-{reasoning}
-                            </div>
-                        </details>
-                    </div>
-                    """, unsafe_allow_html=True)
 
-                except Exception as e:
-                    st.error(f"深度分析失败: {e}")
-        else:
-            st.warning("请先启动仿真系统")
 
 # --- 5. 主界面逻辑 ---
 

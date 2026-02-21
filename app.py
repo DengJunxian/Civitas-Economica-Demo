@@ -47,6 +47,9 @@ from core.regulatory_sandbox import (
 )
 from core.policy_committee import PolicyCommittee
 
+# 引入UI组件
+from ui.demo_wind_tunnel import render_demo_tab
+
 # --- 1. 页面配置 ---
 st.set_page_config(
     page_title="数治观澜 —— 金融政策风洞推演沙箱",
@@ -671,9 +674,10 @@ with st.sidebar:
 # 创建标签页
 if st.session_state.backtest_mode:
     tab1, tab2 = st.tabs(["📊 回测结果", "🧠 Agent fMRI"])
-    tab_debate = tab_reg = tab_behavior = tab_quant = None
+    tab_demo = tab_debate = tab_reg = tab_behavior = tab_quant = None
 else:
-    tab1, tab2, tab_debate, tab_reg, tab_behavior, tab_quant = st.tabs([
+    tab_demo, tab1, tab2, tab_debate, tab_reg, tab_behavior, tab_quant = st.tabs([
+        "🌪️ 沙箱风洞",
         "📈 市场走势", 
         "🧠 Agent fMRI", 
         "⚔️ 辩论室",
@@ -737,6 +741,9 @@ if st.session_state.backtest_mode:
 
 else:
     # 实时仿真模式
+    with tab_demo:
+        render_demo_tab()
+        
     with tab1:
         # K线图全宽显示
         if ctrl:

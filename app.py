@@ -1236,8 +1236,17 @@ if not st.session_state.backtest_mode:
         st.markdown("*观察 Agent 的 Bull vs Bear 内心对抗过程*")
 
         if ctrl:
-            # 获取所有有辩论记录的 Agent
-            debate_agents = list(DebateBrain.debate_history.keys())
+            # 获取所有具有辩论能力的 Agent，即使他们还没有辩论记录
+            debate_agents = []
+            for agent in ctrl.model.population.smart_agents:
+                # 兼容不同导入方式的类型检查
+                if "DebateBrain" in str(type(agent.brain)) or agent.id.startswith("Debate_"):
+                    debate_agents.append(agent.id)
+            
+            # 补齐只存在于 history 里的 agent
+            for aid in DebateBrain.debate_history.keys():
+                if aid not in debate_agents:
+                    debate_agents.append(aid)
 
             if debate_agents:
                 col_d1, col_d2 = st.columns([1, 3])

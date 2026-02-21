@@ -86,15 +86,26 @@ def render_phase1(ctrl):
         st.markdown("**终端控制台 - 实时流式日志 (政策委员会 & 辩论室)**")
         
         from agents.debate_brain import DebateBrain, DebateRole
-        debate_agents = list(DebateBrain.debate_history.keys()) if hasattr(DebateBrain, 'debate_history') else []
+        
+        debate_agents = []
+        if ctrl and hasattr(ctrl, 'model') and ctrl.model and hasattr(ctrl.model, 'population') and ctrl.model.population:
+            for agent in ctrl.model.population.smart_agents:
+                if "DebateBrain" in str(type(agent.brain)) or agent.id.startswith("Debate_"):
+                    debate_agents.append(agent.id)
+                    
+        if hasattr(DebateBrain, 'debate_history'):
+            for aid in DebateBrain.debate_history.keys():
+                if aid not in debate_agents:
+                    debate_agents.append(aid)
         
         if debate_agents:
             # 找到最新的辩论记录
             latest_debate = None
             for agent in debate_agents:
-                debates = DebateBrain.debate_history[agent]
-                if debates and (not latest_debate or debates[-1].timestamp > latest_debate.timestamp):
-                     latest_debate = debates[-1]
+                if hasattr(DebateBrain, 'debate_history') and agent in DebateBrain.debate_history:
+                    debates = DebateBrain.debate_history[agent]
+                    if debates and (not latest_debate or debates[-1].timestamp > latest_debate.timestamp):
+                         latest_debate = debates[-1]
             
             if latest_debate:
                 html_logs = f"""
@@ -124,13 +135,20 @@ def render_phase1(ctrl):
                 """
                 st.markdown(html_logs, unsafe_allow_html=True)
             else:
-                st.info("暂无最新辩论记录。可以在『政策注入』进行政策干扰，触发新一轮辩论。")
+                members_str = ", ".join(debate_agents)
+                html = f"""
+                <div style="background-color: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; height: 300px; overflow-y: scroll; font-family: 'Consolas', monospace; font-size: 13px; color: #c9d1d9;">
+                    <div style="color: #4DA6FF;">[Sys] 政策委员会 (Policy Committee) 集结完毕。成员: {members_str}</div>
+                    <div style="color: #FFD700; margin-top: 8px;">[Agent: System] 当前系统评估处于平稳态，委员会随时待命，等待政策输入...</div>
+                </div>
+                """
+                st.markdown(html, unsafe_allow_html=True)
         else:
-            # Fallback mock
+            # Fallback mock if completely disconnected
             html = """
             <div style="background-color: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; height: 300px; overflow-y: scroll; font-family: 'Consolas', monospace; font-size: 13px; color: #c9d1d9;">
-                <div style="color: #4DA6FF;">[Sys] 等待政策输入中...</div>
-                <div style="color: #888;">[Agent: System] 当前系统处于平稳态，未触发SOP防御机制。</div>
+                <div style="color: #4DA6FF;">[Sys] 仿真尚未启动或未发现委员会成员。</div>
+                <div style="color: #888;">[Agent: System] 休眠中...</div>
             </div>
             """
             st.markdown(html, unsafe_allow_html=True)

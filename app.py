@@ -169,6 +169,9 @@ if 'simulation_mode' not in st.session_state:
     st.session_state.simulation_mode = "SMART"
 if 'day_cycle_paused' not in st.session_state:
     st.session_state.day_cycle_paused = False
+if 'regulatory_module' not in st.session_state:
+    from core.regulatory_sandbox import RegulatoryModule
+    st.session_state.regulatory_module = RegulatoryModule()
 
 # --- 3. 辅助函数 ---
 
@@ -343,6 +346,8 @@ with st.sidebar:
                 
                 if group:
                     st.success(f"✅ 创建了 {quant_agents} 个 {group.strategy_name} Agent")
+                    time.sleep(0.5)
+                    st.rerun()
             else:
                 st.warning("请先输入 API 密钥")
     

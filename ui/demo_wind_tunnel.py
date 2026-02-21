@@ -292,12 +292,12 @@ def render_phase3(ctrl):
         st.markdown("**实时限价订单簿深度 (LOB)**")
         
         if ctrl and hasattr(ctrl, 'market'):
-             bids = ctrl.market.engine.limit_order_book.get('buy', [])
-             asks = ctrl.market.engine.limit_order_book.get('sell', [])
+             depth = ctrl.market.engine.get_order_book_depth(5)
+             bids = depth.get('bids', [])
+             asks = depth.get('asks', [])
              
-             # Sort bids descending, asks ascending
-             bids = sorted(bids, key=lambda x: x.price, reverse=True)
-             asks = sorted(asks, key=lambda x: x.price)
+             # The result from get_order_book_depth is already sorted (bids desc, asks asc)
+             # and represents a list of dicts: {"price": float, "qty": int}
              
              html_lob = """
             <div style="background: #111; padding: 10px; border-radius: 8px; font-family: monospace; font-size: 13px; height: 350px; overflow-y:auto;">
@@ -308,7 +308,7 @@ def render_phase3(ctrl):
             """
              
              for i, order in enumerate(asks[:5]):
-                 html_lob += f'<tr style="background: rgba(52, 199, 89, {0.8 - i*0.1});"><td>卖{i+1}</td><td>{order.price:.2f}</td><td>{order.quantity}</td></tr>'
+                 html_lob += f'<tr style="background: rgba(52, 199, 89, {0.8 - i*0.1});"><td>卖{i+1}</td><td>{order["price"]:.2f}</td><td>{order["qty"]}</td></tr>'
                  
              if not asks:
                  html_lob += '<tr><td>无显著卖盘</td></tr>'
@@ -320,7 +320,7 @@ def render_phase3(ctrl):
              """
              
              for i, order in enumerate(bids[:5]):
-                 html_lob += f'<tr style="background: rgba(255, 59, 48, {0.8 - i*0.1});"><td>买{i+1}</td><td>{order.price:.2f}</td><td>{order.quantity}</td></tr>'
+                 html_lob += f'<tr style="background: rgba(255, 59, 48, {0.8 - i*0.1});"><td>买{i+1}</td><td>{order["price"]:.2f}</td><td>{order["qty"]}</td></tr>'
 
              if not bids:
                  html_lob += '<tr><td>流动性干涸 / 无买盘买单</td></tr>'

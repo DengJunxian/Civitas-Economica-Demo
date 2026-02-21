@@ -1240,7 +1240,7 @@ if not st.session_state.backtest_mode:
             debate_agents = []
             for agent in ctrl.model.population.smart_agents:
                 # 兼容不同导入方式的类型检查
-                if "DebateBrain" in str(type(agent.brain)) or agent.id.startswith("Debate_"):
+                if (hasattr(agent, 'brain') and "DebateBrain" in str(type(agent.brain))) or agent.id.startswith("Debate_"):
                     debate_agents.append(agent.id)
             
             # 补齐只存在于 history 里的 agent

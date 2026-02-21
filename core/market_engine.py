@@ -526,6 +526,20 @@ class RealMarketLoader:
                     volume=v, 
                     is_simulated=False
                 ))
+            
+            # 尝试拉取实时最新点位覆盖最后一个历史K线 (同步到最新大盘)
+            try:
+                spot_df = ak.stock_zh_index_spot()
+                symbol_code = symbol.replace("sh", "").replace("sz", "")
+                row_spot = spot_df[spot_df["代码"] == symbol_code]
+                if not row_spot.empty:
+                    latest_price = float(row_spot.iloc[0]["最新价"])
+                    if candles and latest_price > 0:
+                        candles[-1].close = latest_price
+                        print(f"[*] 实时盘口数据已同步: {symbol} 现价 {latest_price}")
+            except Exception as e:
+                print(f"[!] 实时盘口同步失败: {e}")
+                
             print(f"[OK] 成功加载 {len(candles)} 个交易日数据")
             return candles
         except Exception as e:

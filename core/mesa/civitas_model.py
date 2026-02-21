@@ -177,19 +177,16 @@ class CivitasModel(Model):
         # But let's assume self.mode exists (we will update __init__ in next step)
         mode = getattr(self, 'mode', 'SMART') 
         
-        # 分配模型优先级
+        # 分配模型优先级 (五十/五十开 deepseek-chat 和 glm-4-flashx)
         for i in real_indices:
             use_llm_mask[i] = True
-            if mode == "FAST":
-                model_priorities[i] = ["deepseek-chat"]
+            if mode == "FAST" or mode == "SMART":
+                if i % 2 == 0:
+                    model_priorities[i] = ["deepseek-chat"]
+                else:
+                    model_priorities[i] = ["glm-4-flashx"]
             elif mode == "DEEP":
                 model_priorities[i] = ["deepseek-reasoner"]
-            else: # SMART
-                # 20% (1 agent) uses Reasoner, 80% (4 agents) use Chat
-                if i == 0: # Let Agent 0 (National Team or Big Player) use Reasoner
-                    model_priorities[i] = ["deepseek-reasoner"]
-                else:
-                    model_priorities[i] = ["deepseek-chat"]
 
         # Assign Agents
         idx = 0
@@ -291,12 +288,26 @@ class CivitasModel(Model):
         if cash is None:
             cash = np.random.uniform(50000, 500000)
             
+        from agents.trader_agent import TraderAgent
+        agent_str_id = f"Debate_{idx}" if idx < 5 else str(idx)
+        core = TraderAgent(
+            agent_id=agent_str_id,
+            cash_balance=cash,
+            portfolio={},
+            psychology_profile=None,
+            persona=persona,
+            model_router=self.shared_router,
+            use_llm=use_llm,
+            model_priority=model_priority
+        )
+            
         agent = CivitasAgent(
             model=self,
             investor_type=inv_type,
             initial_cash=cash,
             use_local_reasoner=True,
             persona=persona,
+            core_agent=core,
             model_router=self.shared_router,
             use_llm=use_llm,
             model_priority=model_priority

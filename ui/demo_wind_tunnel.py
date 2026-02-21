@@ -444,6 +444,63 @@ def render_phase3(ctrl):
              """
              st.markdown(html_lob, unsafe_allow_html=True)
              
+             # --- 量化群体做空监控网 ---
+             st.markdown("<br>**🤖 量化群体做空监控网**", unsafe_allow_html=True)
+             if hasattr(ctrl, 'quant_manager') and ctrl.quant_manager and ctrl.quant_manager.groups:
+                 qm = ctrl.quant_manager
+                 risk_info = qm.detect_systemic_risk()
+                 
+                 if risk_info['risk_level'] in ['critical', 'high']:
+                     bg_color = "rgba(255, 59, 48, 0.15)"
+                     border_color = "#FF3B30"
+                     title = "🚨 系统性抛售共识形成！"
+                 elif risk_info['risk_level'] == 'medium':
+                     bg_color = "rgba(255, 149, 0, 0.15)"
+                     border_color = "#FF9500"
+                     title = "⚠️ 部分群体出现异动"
+                 else:
+                     bg_color = "rgba(52, 199, 89, 0.1)"
+                     border_color = "#34C759"
+                     title = "✅ 量化群体暂无异常抛压"
+                     
+                 html_quant = f"""
+                 <div style="background: {bg_color}; padding: 12px; border: 1px solid {border_color}; border-radius: 8px; font-family: monospace; font-size: 13px;">
+                     <div style="font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid {border_color}; padding-bottom: 4px; color: {border_color};">
+                         {title}
+                     </div>
+                 """
+                 
+                 for gid, group in qm.groups.items():
+                     action = group.collective_action or "HOLD"
+                     pressure = group.sell_pressure * 100
+                     if action in ["SELL", "PANIC_SELL"]:
+                         color = "#FF3B30"
+                         action_str = f"抛售 ↘ (压:{pressure:.1f}%)"
+                     elif action == "BUY":
+                         color = "#34C759"
+                         action_str = "吸筹 ↗"
+                     else:
+                         color = "#888"
+                         action_str = "观望 ~"
+                         
+                     html_quant += f"""
+                     <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                         <span style="color: #c9d1d9;">[{group.strategy_name}]</span>
+                         <span style="color: {color}; font-weight: bold;">{action_str}</span>
+                     </div>
+                     """
+                     
+                 if risk_info['warning']:
+                     html_quant += f"""
+                     <div style="margin-top: 8px; padding-top: 6px; border-top: 1px dotted {border_color}; color: {border_color}; font-size: 12px;">
+                         {risk_info['warning']}
+                     </div>
+                     """
+                 html_quant += "</div>"
+                 st.markdown(html_quant, unsafe_allow_html=True)
+             else:
+                 st.info("量化群体监控未激活或暂无数据。")
+             
         else:
              st.info("数据获取中，如果长时间没变化请确保系统正在运行。")
              

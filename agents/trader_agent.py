@@ -62,14 +62,27 @@ class TraderAgent(BaseAgent):
             self.profile.update(psychology_profile)
 
         # Initialize Brain
-        self.brain = DeepSeekBrain(
-            agent_id=agent_id,
-            persona={
-                "risk_preference": self.persona.risk_appetite.value,
-                "loss_aversion": self.profile.get("loss_sensitivity", 1.5)
-            },
-            model_router=model_router
-        )
+        if agent_id.startswith("Debate_"):
+            from agents.debate_brain import DebateBrain
+            self.brain = DebateBrain(
+                agent_id=agent_id,
+                persona={
+                    "risk_preference": self.persona.risk_appetite.value,
+                    "loss_aversion": self.profile.get("loss_sensitivity", 1.5)
+                },
+                api_key=None
+            )
+            if model_router is not None:
+                self.brain.set_model_router(model_router)
+        else:
+            self.brain = DeepSeekBrain(
+                agent_id=agent_id,
+                persona={
+                    "risk_preference": self.persona.risk_appetite.value,
+                    "loss_aversion": self.profile.get("loss_sensitivity", 1.5)
+                },
+                model_router=model_router
+            )
         # 注入模型优先级 (如果 Brain 支持)
         if hasattr(self.brain, 'model_priority'):
             self.brain.model_priority = model_priority

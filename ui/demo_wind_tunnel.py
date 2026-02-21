@@ -6,8 +6,8 @@ import plotly.graph_objects as go
 import networkx as nx
 
 def render_demo_tab():
-    st.markdown("## 🌪️ 沙箱风洞 —— 实盘推演 (Sandbox Wind Tunnel)")
-    st.markdown("这一专门展示页用于在 1.5 分钟内完整展示极端利空政策下从宏观注入到微观传染，最终导致“恐慌蔓延”的市场崩盘动线。请各位评委跟随讲解人的节奏共同见证。")
+    st.markdown("## 🌪️ 沙箱风洞 —— 实盘推演")
+    st.markdown("这一专门展示页用于完整展示极端利空政策下从宏观注入到微观传染，最终导致“恐慌蔓延”的市场崩盘动线。请各位评委跟随讲解人的节奏共同见证。")
     
     # Initialize state
     if "demo_phase" not in st.session_state:
@@ -58,7 +58,7 @@ def render_demo_tab():
         st.markdown("---")
         render_phase3()
     else:
-        st.info("👈 请点击上方按钮进入演示阶段 (请配合答辩逐字稿体验)。")
+        st.info("👈 请点击上方按钮进入演示阶段。")
 
 def render_phase1():
     st.markdown("### 阶段一：宏观注入与机构拆解 (00:00 - 00:40)")
@@ -159,9 +159,7 @@ def render_phase2():
 
     fig = go.Figure(data=[edges_trace, nodes_trace],
              layout=go.Layout(
-                title='Social Graph Contagion (SIR Force-Directed Model)',
-                titlefont_size=16,
-                titlefont_color="#c9d1d9",
+                title=dict(text='Social Graph Contagion (SIR Force-Directed Model)', font=dict(size=16, color="#c9d1d9")),
                 showlegend=False,
                 hovermode='closest',
                 margin=dict(b=20,l=5,r=5,t=40),

@@ -212,9 +212,11 @@ class ModelRouter:
                 continue
             
             # 计算此次调用的超时
-            # 使用剩余预算作为超时，不再受 model_info.timeout 限制
-            # model_info.timeout 仅作为默认参考，调用者通过 timeout_budget 控制总时间
-            call_timeout = remaining
+            # 为避免首个选中的模型(如DeepSeek)因堵塞耗尽所有 budget，需基于 model_info.timeout 设定合理上限
+            if model_name == priority_models[-1]:
+                call_timeout = remaining  # 最后一个降级模型可用尽剩余预算
+            else:
+                call_timeout = min(model_info.timeout * 2.5, remaining)
             
             try:
                 result = await self._call_model(

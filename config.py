@@ -66,8 +66,8 @@ class SimConfig:
     
     # 超时设置 (秒)
     API_TIMEOUT_REASONER: float = 30.0  # 推理模型超时
-    API_TIMEOUT_CHAT: float = 10.0  # 对话模型超时
-    API_TIMEOUT_FLASH: float = 3.0  # 快速模型超时
+    API_TIMEOUT_CHAT: float = 15.0  # 对话模型超时
+    API_TIMEOUT_FLASH: float = 15.0  # 快速模型超时
     
     # --- 仿真模式配置 ---
     

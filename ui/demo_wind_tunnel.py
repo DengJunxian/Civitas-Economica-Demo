@@ -16,25 +16,37 @@ def render_demo_tab():
         
     # Control Panel
     st.markdown("#### 面板控制 (Control Panel)")
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     with col1:
         if st.button("⏹️ 重置演示", use_container_width=True):
             st.session_state.demo_phase = 0
+            st.session_state.auto_play = False
+            st.rerun()
     with col2:
         if st.button("1️⃣ 政策与辩论", use_container_width=True):
             st.session_state.demo_phase = 1
+            st.session_state.auto_play = False
             st.rerun()
     with col3:
         if st.button("2️⃣ 网络传染", use_container_width=True):
             st.session_state.demo_phase = 2
+            st.session_state.auto_play = False
             st.rerun()
     with col4:
         if st.button("3️⃣ 撮合与崩盘", use_container_width=True):
             st.session_state.demo_phase = 3
+            st.session_state.auto_play = False
             st.rerun()
     with col5:
-        if st.button("▶️ 完整展示态", use_container_width=True):
+        if st.button("▶️ 完整展示", use_container_width=True):
             st.session_state.demo_phase = 4
+            st.session_state.auto_play = False
+            st.rerun()
+    with col6:
+        if st.button("🚀 自动推演", use_container_width=True, type="primary"):
+            st.session_state.demo_phase = 1
+            st.session_state.auto_play = True
+            st.session_state.auto_step_time = time.time()
             st.rerun()
             
     st.markdown("---")
@@ -63,7 +75,28 @@ def render_demo_tab():
         st.markdown("---")
         render_phase3(ctrl)
     else:
-        st.info("👈 请点击上方按钮进入演示阶段。")
+        st.info("👈 请点击上方按钮进入演示阶段，或点击【🚀 自动推演】开始全自动播报。")
+
+    # Auto Play Logic
+    if st.session_state.get('auto_play', False):
+        elapsed = time.time() - st.session_state.get('auto_step_time', time.time())
+        # Demo timings per phase based on typical reading/talking speed: 12 seconds
+        wait_time = 12
+        
+        if elapsed > wait_time:
+            if st.session_state.demo_phase < 4:
+                st.session_state.demo_phase += 1
+                st.session_state.auto_step_time = time.time()
+                st.rerun()
+            else:
+                st.session_state.auto_play = False
+                st.rerun()
+        else:
+            progress_val = min(1.0, elapsed / wait_time)
+            st.caption(f"🚀 **自动推演进行中...** 预计 {int(wait_time - elapsed)} 秒后自动进入下一阶段")
+            st.progress(progress_val)
+            time.sleep(1)
+            st.rerun()
 
 def render_phase1(ctrl):
     st.markdown("### 阶段一：宏观注入与机构拆解")

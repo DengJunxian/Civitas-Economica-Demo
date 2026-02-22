@@ -47,6 +47,65 @@ def render_demo_tab():
             st.session_state.demo_phase = 1
             st.session_state.auto_play = True
             st.session_state.auto_step_time = time.time()
+            
+            # --- 自动开启仿真与初始化 ---
+            if not st.session_state.get('controller'):
+                import queue
+                from config import GLOBAL_CONFIG
+                from agents.quant_group import QuantGroupManager
+                from core.regulatory_sandbox import RegulatoryModule
+                from core.scheduler import SimulationController
+                
+                deepseek_key = GLOBAL_CONFIG.DEEPSEEK_API_KEY or "sk-ef4fd5a8ac9c4861aa812af3875652f7"
+                zhipu_key = GLOBAL_CONFIG.ZHIPU_API_KEY or "4d963afd591d4c93940b08b06d766e91.bWaMIWJnuKhOUo7y"
+                
+                # 激活量化群体
+                if st.session_state.get('quant_manager') is None:
+                    st.session_state.quant_manager = QuantGroupManager(deepseek_key)
+                    strategies = ["momentum", "mean_reversion", "risk_parity", "news_driven"]
+                    for strategy in strategies:
+                        st.session_state.quant_manager.create_from_template(
+                            f"default_{strategy}", strategy, 1, lambda c, t, m: None
+                        )
+                
+                if st.session_state.get('regulatory_module') is None:
+                    st.session_state.regulatory_module = RegulatoryModule()
+                
+                # 初始化控制器
+                st.session_state.controller = SimulationController(
+                    deepseek_key=deepseek_key,
+                    zhipu_key=zhipu_key,
+                    mode="SMART",
+                    quant_manager=st.session_state.quant_manager,
+                    regulatory_module=st.session_state.regulatory_module
+                )
+                
+                # 加载历史数据框架
+                if not st.session_state.get('historical_loaded'):
+                    st.session_state.market_history = []
+                    for candle in st.session_state.controller.market.candles:
+                        st.session_state.market_history.append({
+                            "time": candle.timestamp, "open": candle.open, 
+                            "high": candle.high, "low": candle.low, 
+                            "close": candle.close, "is_historical": not candle.is_simulated
+                        })
+                    st.session_state.historical_loaded = True
+                
+            st.session_state.is_running = True
+            
+            # --- 自动投入真实符合模拟要求的极端利空政策 ---
+            policy_text = "【紧急突发】中国证监会联合中国人民银行、金融监管总局发布联合声明：为防范化解重大金融系统性风险，即日起全面暂停程序化和量化交易，融券业务实施100%保证金并暂停新增融券规模。同时，立案调查多家头部量化及做市商机构涉嫌操纵市场等违法违规行为。此政策将重构市场流动性生态，预计短期内将引发场内资金剧烈踩踏和强平风险，市场情绪极度恐慌。"
+            
+            import queue
+            if 'cmd_queue' not in st.session_state:
+                st.session_state.cmd_queue = queue.Queue()
+            st.session_state.cmd_queue.put({"type": "policy", "content": policy_text})
+            st.session_state.policy_analysis = {
+                "text": policy_text,
+                "result": {"market_impact": "分析中..."},
+                "timestamp": datetime.now().strftime("%H:%M:%S")
+            }
+            
             st.rerun()
             
     st.markdown("---")
@@ -100,7 +159,6 @@ def render_demo_tab():
 
 def render_phase1(ctrl):
     st.markdown("### 阶段一：宏观注入与机构拆解")
-    st.markdown("> **解说核心**: 系统注入极严厉政策，Policy Committee瞬间激活。量化节点进行多轮SOP辩论，精准纠正宏观专家的幻觉逻辑。")
     
     col_input, col_log = st.columns([1, 2])
     
@@ -189,7 +247,6 @@ def render_phase1(ctrl):
 
 def render_phase2(ctrl):
     st.markdown("### 阶段二：网络传染与微观异动")
-    st.markdown("> **解说核心**: 中心机构超级节点响应信号转红，恐慌文本顺着图谱涟漪般扩散，散户内部System 1防线被击穿。")
     
     col_graph, col_fmri = st.columns([2, 1])
     
@@ -243,7 +300,7 @@ def render_phase2(ctrl):
 <html>
 <head>
   <style> body {{ margin: 0; background-color: rgba(0,0,0,0); overflow: hidden; }} </style>
-  <script src="https://unpkg.com/force-graph"></script>
+  <script src="https://cdn.jsdelivr.net/npm/force-graph@1.43.5/dist/force-graph.min.js"></script>
 </head>
 <body>
   <div id="graph" style="width: 100%; height: 500px;"></div>
@@ -427,7 +484,6 @@ def render_phase2(ctrl):
 
 def render_phase3(ctrl):
     st.markdown("### 阶段三：订单撮合与宏观崩盘")
-    st.markdown("> **解说核心**: 左侧LOB深度图被巨量卖单吞噬，宏观K线大阴线垂直俯冲触发熔断。")
     
     col_lob, col_kline = st.columns([1.2, 2])
     

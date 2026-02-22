@@ -83,10 +83,8 @@ def render_demo_tab():
             st.session_state.auto_play = False
             st.rerun()
     with col5:
-        if st.button("▶️ 完整展示", use_container_width=True):
-            st.session_state.demo_phase = 4
-            st.session_state.auto_play = False
-            st.rerun()
+        # 移除了"完整展示"（原本是跳转到Phase 4 报告）
+        st.write("")
     with col6:
         if st.button("🚀 自动推演", use_container_width=True, type="primary"):
             st.session_state.demo_phase = 1
@@ -172,14 +170,12 @@ def render_demo_tab():
         render_phase2(ctrl)
         st.markdown("---")
         render_phase3(ctrl)
-    elif st.session_state.demo_phase == 4:
+    elif st.session_state.demo_phase == 3:
         render_phase1(ctrl)
         st.markdown("---")
         render_phase2(ctrl)
         st.markdown("---")
         render_phase3(ctrl)
-        st.markdown("---")
-        render_phase4_report(ctrl)
     else:
         st.info("👈 请点击上方按钮进入演示阶段，或点击【🚀 自动推演】开始全自动播报。")
 
@@ -190,7 +186,7 @@ def render_demo_tab():
         wait_time = 18
         
         if elapsed > wait_time:
-            if st.session_state.demo_phase < 4:
+            if st.session_state.demo_phase < 3:
                 st.session_state.demo_phase += 1
                 st.session_state.auto_step_time = time.time()
                 st.rerun()
@@ -367,7 +363,7 @@ def render_phase2(ctrl):
 <html>
 <head>
   <style> body {{ margin: 0; background-color: rgba(0,0,0,0); overflow: hidden; }} </style>
-  <script src="https://cdn.jsdelivr.net/npm/force-graph@1.43.5/dist/force-graph.min.js"></script>
+  <script src="https://cdn.bootcdn.net/ajax/libs/force-graph/1.43.5/force-graph.min.js"></script>
 </head>
 <body>
   <div id="graph" style="width: 100%; height: 500px;"></div>
@@ -695,79 +691,4 @@ def render_phase3(ctrl):
             st.plotly_chart(fig_k, use_container_width=True)
         else:
             st.info("暂无行情数据，请等候市场第一笔交易发生。")
-
-def render_phase4_report(ctrl):
-    st.markdown("### 📊 全局仿真评估与政策内参总结")
-    key = "ai_narration_phase_4_report"
-    
-    if key in st.session_state:
-        st.markdown(st.session_state[key], unsafe_allow_html=True)
-        return
-        
-    if not ctrl or not hasattr(ctrl, 'model_router'):
-        st.info("仿真系统未运行，无法生成总结报告。")
-        return
-        
-    history = st.session_state.get('market_history', [])
-    sim_history = [h for h in history if not h.get('is_historical', True)]
-    
-    if len(sim_history) < 2:
-        st.session_state[key] = "<div style='color:#FF3B30;'>市场交易数据不足，无法生成评估报告，请等待系统继续推演。</div>"
-        st.markdown(st.session_state[key], unsafe_allow_html=True)
-        return
-        
-    first_sim = sim_history[0]
-    last_sim = sim_history[-1]
-    sim_days = len(sim_history)
-    start_price = first_sim['close']
-    end_price = last_sim['close']
-    total_return = (end_price - start_price) / start_price * 100
-    
-    panic = ctrl.market.panic_level if hasattr(ctrl.market, 'panic_level') else 0
-    
-    prompt = f"""你是一位资深的国家金融智库政策分析师。刚才我们在数字沙盘中推演了一次极端的突发利空政策。
-仿真结果显示：
-- 大盘暴跌幅: {total_return:+.2f}%
-- 市场恐慌指数直达极值: {panic:.2f}
-- 触发了大量机构散户的羊群踩踏效应与量化群体的流动性枯竭。
-请基于以上数据，写一份约200字的「沙箱演练总结与高层内参建议」，语言要高度专业、宏大且富有警示意义。强调“数治观澜”多智能体沙箱对防范系统性金融风险的不可替代的战略价值。"""
-
-    router = ctrl.model_router
-    priority = ["deepseek-chat"]
-    if hasattr(router, 'has_zhipu') and router.has_zhipu:
-        priority.append("glm-4-flashx")
-        
-    def _sync_call():
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(
-                router.call_with_fallback(
-                    [{"role": "user", "content": prompt}],
-                    priority_models=priority,
-                    timeout_budget=60.0,
-                    fallback_response="由于算力限制，自动报告暂时无法生成，请稍后查阅。"
-                )
-            )
-        finally:
-            loop.close()
-
-    with st.spinner("📑 战略智库 AI 正在根据本次沙箱推演实时生成「全局总结内参报告」..."):
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_sync_call)
-                content, _, _ = future.result(timeout=70)
-                
-                html_report = f'''
-                <div style="background: rgba(88, 166, 255, 0.1); border: 1px solid #58a6ff; padding: 20px; border-radius: 8px; margin-top: 15px;">
-                    <h4 style="color: #58a6ff; margin-top:0;"><span style="font-size:1.2em;">📑</span> 数治观澜 · 决策内参</h4>
-                    <div style="font-size: 14px; line-height: 1.8; color: #c9d1d9; white-space: pre-wrap;">{content}</div>
-                </div>
-                '''
-                st.session_state[key] = html_report
-                if st.session_state.get('auto_play'):
-                    st.session_state.auto_play = False
-                st.rerun()
-        except Exception as e:
-            st.session_state[key] = f"<div style='color:#FF3B30;'>内参报告生成失败: {str(e)}</div>"
-            st.markdown(st.session_state[key], unsafe_allow_html=True)
 

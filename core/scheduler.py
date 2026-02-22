@@ -84,7 +84,7 @@ class SimulationController:
         # self.population 由 self.model.population 接管 (对于 Tier 2)
         
         # 量化群体管理器 (可选注入)
-        self.quant_manager = None
+        self.quant_manager = quant_manager
         
         # 智能体账户映射 (不再需要单独维护，Agent 自带 Portfolio)
         # 兼容旧代码访问 self.population.smart_agents

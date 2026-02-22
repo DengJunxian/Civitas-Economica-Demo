@@ -228,6 +228,7 @@ with st.sidebar:
     
     # --- API 密钥输入 ---
     api_key = st.text_input("DeepSeek API 密钥 *", type="password", 
+                            value="sk-ef4fd5a8ac9c4861aa812af3875652f7",
                             help="必填，用于驱动智能体思考")
     zhipu_key = st.text_input("智谱 API 密钥 (快速模式)", type="password",
                               value="4d963afd591d4c93940b08b06d766e91.bWaMIWJnuKhOUo7y",

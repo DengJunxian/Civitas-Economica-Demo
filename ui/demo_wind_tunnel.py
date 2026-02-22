@@ -235,15 +235,8 @@ def render_phase1(ctrl):
     policy_info = st.session_state.get('policy_analysis')
     policy_text = policy_info['text'] if policy_info else "等待注入突发利空政策..."
     
-    prompt = f"你是一名为大屏演示做现场解说的人工智能。刚刚注入了极端政策：{policy_text}。请用极具感染力、通俗易懂的大白话，撰写约80字的绝佳解说词。重点描述'屏幕左侧的DeepSeek多空辩论厅瞬间激活，多空大单玩家正激烈博弈并深挖流动性抽干风险，将大模型的幻觉在此刻绞杀于无形。'"
-    narration = generate_ai_narration(1, prompt, ctrl)
-    
-    st.markdown(f"""
-    <div style="background: rgba(255, 214, 10, 0.1); border-left: 4px solid #FFD60A; padding: 12px 15px; border-radius: 4px; margin-bottom: 15px;">
-        <span style="font-weight: bold; color: #FFD60A; font-size: 15px;">🎙️ AI 现场解说 (将冰冷辩论日志翻译为大白话)：</span>
-        <span style="color: #e0e0e0; font-size: 14px; line-height: 1.6;">{narration}</span>
-    </div>
-    """, unsafe_allow_html=True)
+    policy_info = st.session_state.get('policy_analysis')
+    policy_text = policy_info['text'] if policy_info else "等待注入突发利空政策..."
     
     col_input, col_log = st.columns([1, 2])
     
@@ -330,15 +323,7 @@ def render_phase1(ctrl):
 def render_phase2(ctrl):
     st.markdown("### 阶段二：社会图谱的恐慌与拓扑震荡")
     
-    prompt = "你是一名大屏演示AI解说员。此刻纯离线真实社交图谱中央代表'国家队'或'大V'的节点正在闪烁，随着网络传染，节点们疯狂拓扑互连（千军万马的恐慌正在波涌）。同时，一名重度散户大户的fMRI深度脑图正在被系统1和系统2双层解构，疯狂输出逃顶、踩踏、流动性干涸等极悲观认知。请用极具爆发力的大白话撰写约80字的现场直击解说词。"
-    narration = generate_ai_narration(2, prompt, ctrl)
-    
-    st.markdown(f"""
-    <div style="background: rgba(255, 59, 48, 0.1); border-left: 4px solid #FF3B30; padding: 12px 15px; border-radius: 4px; margin-bottom: 15px;">
-        <span style="font-weight: bold; color: #FF3B30; font-size: 15px;">🎙️ AI 现场解说：</span>
-        <span style="color: #e0e0e0; font-size: 14px; line-height: 1.6;">{narration}</span>
-    </div>
-    """, unsafe_allow_html=True)
+    # 此处已移除AI解说功能
     
     col_graph, col_fmri = st.columns([2, 1])
     
@@ -395,6 +380,8 @@ def render_phase2(ctrl):
                 # Fallback to CDN if the file is missing for any reason
                 script_tag = '<script src="https://fastly.jsdelivr.net/npm/force-graph@1.43.5/dist/force-graph.min.js"></script>'
                 
+            graph_json = json.dumps({"nodes": nodes_data, "links": links_data})
+            
             html_code = '<!DOCTYPE html>\n<html>\n<head>\n'
             html_code += '  <style> body { margin: 0; background-color: rgba(0,0,0,0); overflow: hidden; } </style>\n'
             html_code += f'  {script_tag}\n</head>\n<body>\n'
@@ -580,15 +567,7 @@ def render_phase2(ctrl):
 def render_phase3(ctrl):
     st.markdown("### 阶段三：订单撮合与宏观崩盘涌现")
     
-    prompt = "你在播报大屏演示阶段三。群体恐慌终于全面反馈在最底层的物理交易引擎中：订单簿红色的买盘像冰山般融化（断层滑坡/流动性枯竭），绿色的带压力的卖单铺天盖地而来。同时在左下角的量化监控网也全部最高烈度预警狂闪陷于抛压。在三大合力绞杀之下，右下角的真实K线毫无预兆砸出一根触及熔断红线的巨型瀑布阴线！请用极其震撼、绝望的播音腔写出80字的大白话实况解说。"
-    narration = generate_ai_narration(3, prompt, ctrl)
-    
-    st.markdown(f"""
-    <div style="background: rgba(138, 43, 226, 0.1); border-left: 4px solid #8A2BE2; padding: 12px 15px; border-radius: 4px; margin-bottom: 15px;">
-        <span style="font-weight: bold; color: #8A2BE2; font-size: 15px;">🎙️ AI 现场解说：</span>
-        <span style="color: #e0e0e0; font-size: 14px; line-height: 1.6;">{narration}</span>
-    </div>
-    """, unsafe_allow_html=True)
+    # 此处已移除AI解说功能
     
     col_lob, col_kline = st.columns([1.2, 2])
     
@@ -648,46 +627,35 @@ def render_phase3(ctrl):
                      bg_color = "rgba(255, 59, 48, 0.15)"
                      border_color = "#FF3B30"
                      title = "🚨 系统性抛售共识形成！"
+                     desc_text = "穿透式监控网络显示，高频动量追踪与事件驱动策略已全面触发无差别止损指令，当前群体性流出压力指数飙升至99.8%，机器资金正在无情抽离并形成合力单边绞杀，踩踏式滑坡动能极速累积中！"
+                     text_color = "#FF8888"
                  elif risk_info['risk_level'] == 'medium':
                      bg_color = "rgba(255, 149, 0, 0.15)"
                      border_color = "#FF9500"
-                     title = "⚠️ 部分群体出现异动"
+                     title = "⚠️ 局部抛压涌现"
+                     desc_text = "风险平价与动量派别开始逐步平仓，部分高流动性标的遭受异常减持，策略容忍度逼近临界点，相关数据引擎异动频率增加，可能正在酝酿连锁反应。"
+                     text_color = "#FFCC88"
                  else:
                      bg_color = "rgba(52, 199, 89, 0.1)"
                      border_color = "#34C759"
                      title = "✅ 量化群体暂无异常抛压"
+                     desc_text = "全网动量追踪、均值回归及风险平价策略等主要量化子群体的波动率均处于安全水位（近期峰谷差 < 1.02%），主力资金流转呈平稳交投状态，未捕获到极端抛售指令，机器交易盘面结构健康。"
+                     text_color = "#88FF88"
                      
                  html_quant = f"""
-                 <div style="background: {bg_color}; padding: 12px; border: 1px solid {border_color}; border-radius: 8px; font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 13px;">
-                     <div style="font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid {border_color}; padding-bottom: 4px; color: {border_color};">
+                 <div style="background: {bg_color}; padding: 15px; border: 1px solid {border_color}; border-radius: 8px; font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 14px; box-shadow: 0 0 10px {bg_color};">
+                     <div style="font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid {border_color}; padding-bottom: 6px; color: {border_color}; font-size: 16px;">
                          {title}
+                     </div>
+                     <div style="color: {text_color}; line-height: 1.6; letter-spacing: 0.5px;">
+                         {desc_text}
                      </div>
                  """
                  
-                 for gid, group in qm.groups.items():
-                     action = group.collective_action or "HOLD"
-                     pressure = group.sell_pressure * 100
-                     if action in ["SELL", "PANIC_SELL"]:
-                         color = "#FF3B30"
-                         action_str = f"抛售 (压:{pressure:.1f}%)"
-                     elif action == "BUY":
-                         color = "#34C759"
-                         action_str = "吸筹"
-                     else:
-                         color = "#888"
-                         action_str = "观望"
-                         
+                 if risk_info['warning'] and risk_info['risk_level'] in ['critical', 'high']:
                      html_quant += f"""
-                     <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                         <span style="color: #c9d1d9;">[{group.strategy_name}]</span>
-                         <span style="color: {color}; font-weight: bold;">{action_str}</span>
-                     </div>
-                     """
-                     
-                 if risk_info['warning']:
-                     html_quant += f"""
-                     <div style="margin-top: 8px; padding-top: 6px; border-top: 1px dotted {border_color}; color: {border_color}; font-size: 12px;">
-                         {risk_info['warning']}
+                     <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dotted {border_color}; color: #FF3B30; font-size: 13px; font-weight: bold;">
+                         ⚠️ 追加警告：{risk_info['warning']}
                      </div>
                      """
                  html_quant += "</div>"

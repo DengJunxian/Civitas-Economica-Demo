@@ -133,17 +133,38 @@ def render_demo_tab():
                 from agents.debate_brain import DebateBrain, DebateRecord, DebateMessage, DebateRole
                 from agents.brain import DeepSeekBrain, ThoughtRecord
                 
-                # 伪造一条立即显现的模拟辩论
-                fake_debate = DebateRecord(
+                # 伪造三条极其硬核炫酷的模拟辩论
+                fake_debate_1 = DebateRecord(
                     topic=policy_text,
                     debate_rounds=[
-                        DebateMessage(role=DebateRole.BULL, content="[防幻觉风控机制触发] 极度危险！政策已完全切断做多路径，切勿盲目补仓！", emotion_score=-0.5),
-                        DebateMessage(role=DebateRole.BEAR, content="[流动性干涸预警] 严重同意！量化与融券流动性瞬间被无情抽干，史诗级踩踏不可避免，立刻全盘清仓逃顶！", emotion_score=-0.99),
+                        DebateMessage(role=DebateRole.BULL, content="[反抽系统激活] 此类阻断型利空或触发超卖！能否试探性建仓低估值底仓？", emotion_score=0.1),
+                        DebateMessage(role=DebateRole.BEAR, content="[极点切断警告] 完全错误！融券+量化做空链条断裂导致的是【绝对多头斩仓】，现在入场等于接空中飞刀！", emotion_score=-0.99),
+                        DebateMessage(role=DebateRole.BULL, content="[策略妥协] 收到回撤警告，撤销买入指令包，降低多头因子暴露敞口。", emotion_score=-0.4),
                     ],
-                    final_decision={"action": "PANIC_SELL", "qty": 1.0, "reason": "【防幻觉检验通过】流动性抽干风险全面确立，一致性看空。"},
+                    final_decision={"action": "PANIC_SELL", "qty": 1.0, "reason": "【防幻觉风控红灯】拒绝一切多头逻辑，底线击穿"},
+                    timestamp=time.time() - 2.5
+                )
+                fake_debate_2 = DebateRecord(
+                    topic=policy_text,
+                    debate_rounds=[
+                        DebateMessage(role=DebateRole.BULL, content="[微观流测算] 散户资金流似乎仍在净流入，有“散户护盘”迹象？", emotion_score=0.3),
+                        DebateMessage(role=DebateRole.BEAR, content="[致命幻觉证伪] 那是滞后的诱多挂单！大单资金(OBV)正以历史前0.1%的流速疯狂抽离，散户即将被绞杀！", emotion_score=-0.95),
+                    ],
+                    final_decision={"action": "PANIC_SELL", "qty": 1.0, "reason": "【防幻觉风控红灯】识别到致命诱多陷阱，加速抛售"},
+                    timestamp=time.time() - 1.2
+                )
+                fake_debate_3 = DebateRecord(
+                    topic=policy_text,
+                    debate_rounds=[
+                        DebateMessage(role=DebateRole.BEAR, content="[核按钮前瞻] 场外衍生品爆仓预警已响！雪球产品随时敲入！必须现价即刻全仓按核按钮！", emotion_score=-0.98),
+                        DebateMessage(role=DebateRole.BULL, content="[恐慌顺从] 认输！均线系统全部成死叉废线，多头逻辑池完全清空，跟随抛售！", emotion_score=-0.88),
+                    ],
+                    final_decision={"action": "PANIC_SELL", "qty": 1.0, "reason": "【防幻觉风控绿灯】空头共识100%达成，触发融断级熔断操作"},
                     timestamp=time.time()
                 )
-                DebateBrain.debate_history["Debate_0"] = [fake_debate]
+                DebateBrain.debate_history["Debate_1"] = [fake_debate_1]
+                DebateBrain.debate_history["Debate_2"] = [fake_debate_2]
+                DebateBrain.debate_history["Debate_3"] = [fake_debate_3]
                 
                 # 伪造一条极端恐慌的散户 fMRI 思维链
                 fake_thought = ThoughtRecord(
@@ -245,41 +266,47 @@ def render_phase1(ctrl):
                     debate_agents.append(aid)
         
         if debate_agents:
-            # 找到最新的辩论记录
-            latest_debate = None
+            recent_debates = []
             for agent in debate_agents:
                 if hasattr(DebateBrain, 'debate_history') and agent in DebateBrain.debate_history:
                     debates = DebateBrain.debate_history[agent]
-                    if debates and (not latest_debate or debates[-1].timestamp > latest_debate.timestamp):
-                         latest_debate = debates[-1]
+                    if debates:
+                        recent_debates.append((agent, debates[-1]))
             
-            if latest_debate:
-                html_logs = f"""
-                <div style="background-color: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; height: 300px; overflow-y: scroll; font-family: 'Consolas', monospace; font-size: 13px; color: #c9d1d9;">
-                    <div style="color: #4DA6FF;">[{datetime.fromtimestamp(latest_debate.timestamp).strftime('%H:%M:%S')}] Policy stream received. Awakening Debate Room...</div>
-                """
-                
-                for msg in latest_debate.debate_rounds:
-                    if msg.role == DebateRole.BULL:
-                        color = "#00ff88"
-                        role_name = "牛牛 (看多派)"
-                    elif msg.role == DebateRole.BEAR:
-                        color = "#ff4444"
-                        role_name = "空空 (看空派)"
-                    else:
-                        color = "#4DA6FF"
-                        role_name = "风控经理"
-                        
-                    html_logs += f'<div style="color: {color}; margin-top: 8px;">[Agent: {role_name}] (Mood: {msg.emotion_score:+.2f}) {msg.content}</div>'
-                
-                html_logs += f"""
-                    <br>
-                    <div style="background: rgba(255, 59, 48, 0.1); border: 1px solid #FF3B30; padding: 8px; color: #FF3B30; font-weight: bold;">
-                        🎯 委员会共识达成: 决定行动 {latest_debate.final_decision.get('action', 'HOLD')}
-                    </div>
-                </div>
-                """
-                st.markdown(html_logs, unsafe_allow_html=True)
+            recent_debates.sort(key=lambda x: x[1].timestamp, reverse=True)
+            top_debates = recent_debates[:3]
+            
+            if top_debates:
+                st.markdown("<div style='display:flex; gap:10px; width:100%;'>", unsafe_allow_html=True)
+                cols_debate = st.columns(3)
+                for i, (agent_id, latest_debate) in enumerate(top_debates):
+                    with cols_debate[i]:
+                        html_logs = f"""
+                        <div style="background-color: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 10px; height: 320px; overflow-y: scroll; font-family: 'Consolas', monospace; font-size: 12px; color: #c9d1d9; box-shadow: inset 0 0 10px rgba(0,0,0,0.5);">
+                            <div style="color: #4DA6FF; border-bottom: 1px solid #30363d; padding-bottom: 5px; margin-bottom: 5px;">
+                                🛡️ 防线节点 {i+1} | {agent_id} <br>[{datetime.fromtimestamp(latest_debate.timestamp).strftime('%H:%M:%S')}]
+                            </div>
+                        """
+                        for msg in latest_debate.debate_rounds:
+                            if msg.role == DebateRole.BULL:
+                                color = "#00ff88"
+                                role_name = "看多派引擎"
+                            elif msg.role == DebateRole.BEAR:
+                                color = "#ff4444"
+                                role_name = "看空派引擎"
+                            else:
+                                color = "#4DA6FF"
+                                role_name = "风控经理"
+                            html_logs += f'<div style="color: {color}; margin-top: 5px; line-height: 1.3;"><b>[{role_name}</b> {msg.emotion_score:+.2f}]<br>{msg.content}</div>'
+                        html_logs += f"""
+                            <div style="margin-top: 10px; background: rgba(255, 59, 48, 0.15); border-left: 3px solid #FF3B30; padding: 5px; color: #FF3B30; font-weight: bold; font-size: 11px;">
+                                🎯 终局裁决: {latest_debate.final_decision.get('action', 'HOLD')}<br>
+                                💡 归因: {latest_debate.final_decision.get('reason', '')}
+                            </div>
+                        </div>
+                        """
+                        st.markdown(html_logs, unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
             else:
                 members_str = ", ".join(debate_agents)
                 html = f"""
@@ -349,80 +376,136 @@ def render_phase2(ctrl):
                     "target": str(v)
                 })
                 
-            # 使用 streamlit-echarts 替代 force-graph
-            from streamlit_echarts import st_echarts
-            
-            echarts_nodes = []
-            for n in nodes_data:
-                echarts_nodes.append({
-                    "id": n["id"],
-                    "name": n["id"][:6],
-                    "symbolSize": 25 if n["isCenter"] else 10,
-                    "itemStyle": {
-                        "color": "#ff4444" if n["isCenter"] else "#00d4ff"
-                    },
-                    "label": {
-                        "show": n["isCenter"],
-                        "color": "#fff"
+            import streamlit.components.v1 as components
+            # 采用纯 HTML Canvas 高效渲染的炫酷恐慌蔓延网络 (无需任何额外依赖)
+            html_canvas = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body { margin: 0; background-color: transparent; overflow: hidden; }
+                    canvas { display: block; width: 100%; height: 500px; }
+                </style>
+            </head>
+            <body>
+                <canvas id="networkCanvas"></canvas>
+                <script>
+                    const canvas = document.getElementById('networkCanvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    canvas.width = window.innerWidth || 600;
+                    canvas.height = 500;
+                    
+                    const numNodes = 350;
+                    const nodes = [];
+                    const maxDistance = 70;
+                    
+                    // Center node (Fear Source)
+                    nodes.push({
+                        x: canvas.width / 2,
+                        y: canvas.height / 2,
+                        vx: 0,                   
+                        vy: 0,                   
+                        radius: 12,
+                        color: '#ff0000',
+                        infected: true,
+                        isCenter: true
+                    });
+                    
+                    // Normal nodes
+                    for(let i=1; i<numNodes; i++) {
+                        nodes.push({
+                            x: Math.random() * canvas.width,
+                            y: Math.random() * canvas.height,
+                            vx: (Math.random() - 0.5) * 1.5,
+                            vy: (Math.random() - 0.5) * 1.5,
+                            radius: Math.random() * 2 + 1.5,
+                            color: '#00d4ff',
+                            infected: false,
+                            isCenter: false
+                        });
                     }
-                })
-                
-            echarts_links = []
-            for l in links_data:
-                echarts_links.append({
-                    "source": l["source"],
-                    "target": l["target"],
-                    "lineStyle": {
-                        "width": 1,
-                        "curveness": 0.1,
-                        "opacity": 0.5
-                    }
-                })
-                
-            # 模拟传染动画效果，随机将一些节点变成红色
-            if st.session_state.get('auto_play', False):
-                import random
-                infected_count = max(5, int(len(echarts_nodes) * 0.3))
-                infected_indices = random.sample(range(len(echarts_nodes)), min(infected_count, len(echarts_nodes)))
-                for idx in infected_indices:
-                    if not echarts_nodes[idx]["isCenter"]:
-                        echarts_nodes[idx]["itemStyle"]["color"] = "#ff4444"
-                        echarts_nodes[idx]["symbolSize"] = 12
-
-            option = {
-                "backgroundColor": "transparent",
-                "tooltip": {
-                    "formatter": "{b}"
-                },
-                "animationDurationUpdate": 1500,
-                "animationEasingUpdate": "quinticInOut",
-                "series": [
-                    {
-                        "type": "graph",
-                        "layout": "force",
-                        "force": {
-                            "repulsion": 50,
-                            "gravity": 0.1,
-                            "edgeLength": 20
-                        },
-                        "roam": True,
-                        "data": echarts_nodes,
-                        "links": echarts_links,
-                        "lineStyle": {
-                            "color": "source",
-                            "curveness": 0.3
-                        },
-                        "emphasis": {
-                            "focus": "adjacency",
-                            "lineStyle": {
-                                "width": 5
+                    
+                    function draw() {
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        
+                        // Update positions
+                        for(let i=1; i<nodes.length; i++) {
+                            let n = nodes[i];
+                            n.x += n.vx;
+                            n.y += n.vy;
+                            if(n.x < 0 || n.x > canvas.width) n.vx *= -1;
+                            if(n.y < 0 || n.y > canvas.height) n.vy *= -1;
+                        }
+                        
+                        // Connections & Infection
+                        ctx.lineWidth = 0.8;
+                        for(let i=0; i<nodes.length; i++) {
+                            for(let j=i+1; j<nodes.length; j++) {
+                                let n1 = nodes[i];
+                                let n2 = nodes[j];
+                                let dx = n1.x - n2.x;
+                                let dy = n1.y - n2.y;
+                                let dist = Math.sqrt(dx*dx + dy*dy);
+                                
+                                if(dist < maxDistance) {
+                                    // Infection logic
+                                    if(n1.infected && !n2.infected && Math.random() < 0.05) {
+                                        n2.infected = true;
+                                        n2.color = '#ff4444';
+                                        n2.radius *= 1.5;
+                                    } else if (n2.infected && !n1.infected && Math.random() < 0.05) {
+                                        n1.infected = true;
+                                        n1.color = '#ff4444';
+                                        n1.radius *= 1.5;
+                                    }
+                                    
+                                    ctx.beginPath();
+                                    ctx.moveTo(n1.x, n1.y);
+                                    ctx.lineTo(n2.x, n2.y);
+                                    let alpha = 1 - (dist/maxDistance);
+                                    if(n1.infected && n2.infected) {
+                                        ctx.strokeStyle = `rgba(255, 68, 68, ${alpha})`;
+                                    } else {
+                                        ctx.strokeStyle = `rgba(0, 212, 255, ${alpha * 0.3})`;
+                                    }
+                                    ctx.stroke();
+                                }
                             }
                         }
+                        
+                        // Draw Nodes
+                        for(let i=0; i<nodes.length; i++) {
+                            let n = nodes[i];
+                            ctx.beginPath();
+                            ctx.arc(n.x, n.y, n.radius, 0, Math.PI*2);
+                            ctx.fillStyle = n.color;
+                            ctx.fill();
+                            
+                            // Pulse effects
+                            if(n.isCenter) {
+                                ctx.beginPath();
+                                ctx.arc(n.x, n.y, n.radius + Math.sin(Date.now() / 150) * 8 + 8, 0, Math.PI*2);
+                                ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+                                ctx.lineWidth = 2;
+                                ctx.stroke();
+                            } else if (n.infected) {
+                                ctx.beginPath();
+                                ctx.arc(n.x, n.y, n.radius + Math.random() * 3, 0, Math.PI*2);
+                                ctx.strokeStyle = 'rgba(255, 68, 68, 0.4)';
+                                ctx.lineWidth = 1;
+                                ctx.stroke();
+                            }
+                        }
+                        
+                        requestAnimationFrame(draw);
                     }
-                ]
-            }
-            
-            st_echarts(options=option, height="500px", key="social_graph")
+                    draw();
+                </script>
+            </body>
+            </html>
+            """
+            components.html(html_canvas, height=520)
             
         except Exception as e:
             st.error(f"图谱渲染失败: {str(e)}")

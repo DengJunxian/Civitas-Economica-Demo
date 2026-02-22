@@ -61,31 +61,10 @@ def render_demo_tab():
         
     # Control Panel
     st.markdown("#### 面板控制 (Control Panel)")
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1, col2 = st.columns([5, 1])
     with col1:
-        if st.button("⏹️ 重置演示", use_container_width=True):
-            st.session_state.demo_phase = 0
-            st.session_state.auto_play = False
-            st.rerun()
-    with col2:
-        if st.button("1️⃣ 政策与辩论", use_container_width=True):
-            st.session_state.demo_phase = 1
-            st.session_state.auto_play = False
-            st.rerun()
-    with col3:
-        if st.button("2️⃣ 网络传染", use_container_width=True):
-            st.session_state.demo_phase = 2
-            st.session_state.auto_play = False
-            st.rerun()
-    with col4:
-        if st.button("3️⃣ 撮合与崩盘", use_container_width=True):
-            st.session_state.demo_phase = 3
-            st.session_state.auto_play = False
-            st.rerun()
-    with col5:
-        # 移除了"完整展示"（原本是跳转到Phase 4 报告）
         st.write("")
-    with col6:
+    with col2:
         if st.button("🚀 自动推演", use_container_width=True, type="primary"):
             st.session_state.demo_phase = 1
             st.session_state.auto_play = True
@@ -370,154 +349,80 @@ def render_phase2(ctrl):
                     "target": str(v)
                 })
                 
-            import os
-            js_path = os.path.join(os.path.dirname(__file__), "force-graph.min.js")
-            if os.path.exists(js_path):
-                with open(js_path, "r", encoding="utf-8") as f:
-                    force_graph_js = f.read()
-                script_tag = f"<script>{force_graph_js}</script>"
-            else:
-                # Fallback to CDN if the file is missing for any reason
-                script_tag = '<script src="https://fastly.jsdelivr.net/npm/force-graph@1.43.5/dist/force-graph.min.js"></script>'
+            # 使用 streamlit-echarts 替代 force-graph
+            from streamlit_echarts import st_echarts
+            
+            echarts_nodes = []
+            for n in nodes_data:
+                echarts_nodes.append({
+                    "id": n["id"],
+                    "name": n["id"][:6],
+                    "symbolSize": 25 if n["isCenter"] else 10,
+                    "itemStyle": {
+                        "color": "#ff4444" if n["isCenter"] else "#00d4ff"
+                    },
+                    "label": {
+                        "show": n["isCenter"],
+                        "color": "#fff"
+                    }
+                })
                 
-            graph_json = json.dumps({"nodes": nodes_data, "links": links_data})
+            echarts_links = []
+            for l in links_data:
+                echarts_links.append({
+                    "source": l["source"],
+                    "target": l["target"],
+                    "lineStyle": {
+                        "width": 1,
+                        "curveness": 0.1,
+                        "opacity": 0.5
+                    }
+                })
+                
+            # 模拟传染动画效果，随机将一些节点变成红色
+            if st.session_state.get('auto_play', False):
+                import random
+                infected_count = max(5, int(len(echarts_nodes) * 0.3))
+                infected_indices = random.sample(range(len(echarts_nodes)), min(infected_count, len(echarts_nodes)))
+                for idx in infected_indices:
+                    if not echarts_nodes[idx]["isCenter"]:
+                        echarts_nodes[idx]["itemStyle"]["color"] = "#ff4444"
+                        echarts_nodes[idx]["symbolSize"] = 12
+
+            option = {
+                "backgroundColor": "transparent",
+                "tooltip": {
+                    "formatter": "{b}"
+                },
+                "animationDurationUpdate": 1500,
+                "animationEasingUpdate": "quinticInOut",
+                "series": [
+                    {
+                        "type": "graph",
+                        "layout": "force",
+                        "force": {
+                            "repulsion": 50,
+                            "gravity": 0.1,
+                            "edgeLength": 20
+                        },
+                        "roam": True,
+                        "data": echarts_nodes,
+                        "links": echarts_links,
+                        "lineStyle": {
+                            "color": "source",
+                            "curveness": 0.3
+                        },
+                        "emphasis": {
+                            "focus": "adjacency",
+                            "lineStyle": {
+                                "width": 5
+                            }
+                        }
+                    }
+                ]
+            }
             
-            html_code = '<!DOCTYPE html>\n<html>\n<head>\n'
-            html_code += '  <style> body { margin: 0; background-color: rgba(0,0,0,0); overflow: hidden; } </style>\n'
-            html_code += f'  {script_tag}\n</head>\n<body>\n'
-            html_code += '  <div id="graph" style="width: 100%; height: 500px;"></div>\n'
-            html_code += f'''  <script>
-    const graphData = {graph_json};
-    const centerNodeId = "{str(center_node)}";
-    
-    // Initialize nodes
-    graphData.nodes.forEach(node => {{
-        node.color = '#00d4ff'; // Blue
-        node.size = node.isCenter ? 12 : 2.5;
-        node.infected = false;
-    }});
-
-    const Graph = ForceGraph()(document.getElementById('graph'))
-      .graphData(graphData)
-      .nodeId('id')
-      .nodeColor(n => n.color)
-      .nodeVal(n => n.size)
-      .linkColor(() => 'rgba(150, 150, 150, 0.3)')
-      .linkWidth(0.5)
-      .linkDirectionalParticles(link => link.particleCount || 0)
-      .linkDirectionalParticleSpeed(0.012)
-      .linkDirectionalParticleWidth(2.5)
-      .linkDirectionalParticleColor(() => '#ff4444')
-      .backgroundColor('rgba(0,0,0,0)')
-      .nodeCanvasObject((node, ctx, globalScale) => {{
-          // Draw node
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, node.size, 0, 2 * Math.PI, false);
-          ctx.fillStyle = node.color;
-          ctx.fill();
-          
-          // Draw tooltip if hovered
-          if (node === Graph.hoverNode()) {{
-              const label = node.isCenter ? "国家队/大V核心枢纽 (闪烁光源)" : "System 2 认知崩溃，发生网络拓扑传染！";
-              const fontSize = (node.isCenter ? 14 : 12) / globalScale;
-              ctx.font = node.isCenter ? `bold ${{fontSize}}px Sans-Serif` : `${{fontSize}}px Sans-Serif`;
-              const textWidth = ctx.measureText(label).width;
-              const bckgDimensions = [textWidth, fontSize].map(n => n + fontSize * 0.4); 
-
-              ctx.fillStyle = 'rgba(22, 27, 34, 0.9)'; // Dark GitHub-like bg
-              ctx.fillRect(node.x - bckgDimensions[0] / 2, node.y - bckgDimensions[1] - node.size - 4, ...bckgDimensions);
-              ctx.strokeStyle = '#ff4444';
-              ctx.lineWidth = 1 / globalScale;
-              ctx.strokeRect(node.x - bckgDimensions[0] / 2, node.y - bckgDimensions[1] - node.size - 4, ...bckgDimensions);
-
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'middle';
-              ctx.fillStyle = '#ff4444';
-              ctx.fillText(label, node.x, node.y - bckgDimensions[1]/2 - node.size - 4);
-          }}
-      }})
-      .onNodeHover(node => {{
-          document.getElementById('graph').style.cursor = node ? 'pointer' : null;
-      }});
-
-    // Setup initial camera
-    setTimeout(() => {{
-        Graph.zoomToFit(400, 20);
-    }}, 500);
-
-    // Animation logic
-    setTimeout(() => {{
-        // 1. Center node turns red
-        const centerNode = graphData.nodes.find(n => n.id === centerNodeId);
-        if (centerNode) {{
-            centerNode.color = '#ff4444';
-            centerNode.infected = true;
-            Graph.nodeColor(Graph.nodeColor());
-            
-            // Generate BFS distances for infection propagation
-            const distances = {{}};
-            distances[centerNodeId] = 0;
-            
-            const adj = {{}};
-            graphData.nodes.forEach(n => adj[n.id] = []);
-            graphData.links.forEach(l => {{
-                // force-graph mutates strings to object handles
-                const u = typeof l.source === 'object' ? l.source.id : l.source;
-                const v = typeof l.target === 'object' ? l.target.id : l.target;
-                adj[u].push(v);
-                adj[v].push(u);
-            }});
-            
-            const queue = [centerNodeId];
-            while(queue.length > 0) {{
-                const u = queue.shift();
-                adj[u].forEach(v => {{
-                    if (distances[v] === undefined) {{
-                        distances[v] = distances[u] + 1;
-                        queue.push(v);
-                    }}
-                }});
-            }}
-            
-            // Start ripple effect based on distance
-            const baseDelay = 600; // Infection spread speed
-            graphData.nodes.forEach(n => {{
-                const dist = distances[n.id];
-                if (dist !== undefined) {{
-                    setTimeout(() => {{
-                        if (n.id !== centerNodeId) {{
-                            n.color = '#ff4444';
-                            n.infected = true;
-                            Graph.nodeColor(Graph.nodeColor());
-                        }}
-                        
-                        // Emit particles to further uninfected neighbors visually
-                        const myLinks = graphData.links.filter(l => 
-                           ((typeof l.source === 'object' ? l.source.id : l.source) === n.id || 
-                            (typeof l.target === 'object' ? l.target.id : l.target) === n.id)
-                        );
-                        myLinks.forEach(l => l.particleCount = 1);
-                        Graph.linkDirectionalParticles(Graph.linkDirectionalParticles());
-                        
-                        // Pulse effect
-                        const originalSize = n.size;
-                        n.size = originalSize * 1.8;
-                        Graph.nodeVal(Graph.nodeVal());
-                        setTimeout(() => {{
-                             n.size = originalSize;
-                             Graph.nodeVal(Graph.nodeVal());
-                        }}, 200);
-
-                    }}, dist * baseDelay);
-                }}
-            }});
-        }}
-    }}, 2000);
-  </script>
-</body>
-</html>
-'''
-            components.html(html_code, height=520)
+            st_echarts(options=option, height="500px", key="social_graph")
             
         except Exception as e:
             st.error(f"图谱渲染失败: {str(e)}")

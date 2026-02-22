@@ -171,9 +171,13 @@ class DeepSeekReasoner(BaseReasoner):
             messages=messages,
             priority_models=priority
         )
+        if not reasoning:
+            reasoning = re.sub(r'```json.*?```', '', content, flags=re.DOTALL).strip()
+            if not reasoning:
+                reasoning = content
         
         decision = self._parse_response(content)
-        return ReasoningResult(decision, content, reasoning or "", model)
+        return ReasoningResult(decision, content, reasoning, model)
         
     def derive_decision(self, market_state: Dict, account_state: Dict) -> ReasoningResult:
         """同步获取决策 (不推荐，仅兼容)"""

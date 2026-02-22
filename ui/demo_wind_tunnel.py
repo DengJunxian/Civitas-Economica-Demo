@@ -149,6 +149,35 @@ def render_demo_tab():
                 "timestamp": datetime.now().strftime("%H:%M:%S")
             }
             
+            # --- 立即注入预演的思维链与辩论记录，确保UI随时有数据呈现 ---
+            try:
+                from agents.debate_brain import DebateBrain, DebateRecord, DebateMessage, DebateRole
+                from agents.brain import DeepSeekBrain, ThoughtRecord
+                
+                # 伪造一条立即显现的模拟辩论
+                fake_debate = DebateRecord(
+                    topic=policy_text,
+                    debate_rounds=[
+                        DebateMessage(role=DebateRole.BULL, content="该政策短期冲击极大，但长期有助于市场规范，应当分批建仓。", emotion_score=-0.2),
+                        DebateMessage(role=DebateRole.BEAR, content="量化流动性瞬间抽干，踩踏效应必然发生！系统性风险极高，必须立刻清仓！", emotion_score=-0.9),
+                    ],
+                    final_decision={"action": "PANIC_SELL", "qty": 1.0, "reason": "系统性流动性危机"},
+                    timestamp=time.time()
+                )
+                DebateBrain.debate_history["Debate_0"] = [fake_debate]
+                
+                # 伪造一条极端恐慌的散户 fMRI 思维链
+                fake_thought = ThoughtRecord(
+                    market_context="【紧急突发】政策暴击",
+                    reasoning_content="[System 1 警报] 恐慌蔓延！\\n[System 2 分析] 一、当前盘面：量化被禁，融券爆仓风险急剧上升，买盘深度干涸。\\n二、情绪传导：社交网络大V全线倒戈看空，散户恐慌抛压形成共识。\\n三、策略执行：心理防线已被彻底击穿，不计成本挂跌停价出逃。",
+                    decision={"action": "PANIC_SELL", "qty": 1.0},
+                    emotion_score=-0.95,
+                    timestamp=time.time()
+                )
+                DeepSeekBrain.thought_history["0"] = [fake_thought]
+            except Exception as e:
+                pass
+                
             st.rerun()
             
     st.markdown("---")
@@ -356,18 +385,21 @@ def render_phase2(ctrl):
                     "target": str(v)
                 })
                 
-            graph_json = json.dumps({"nodes": nodes_data, "links": links_data})
-            
-            html_code = f'''
-<!DOCTYPE html>
-<html>
-<head>
-  <style> body {{ margin: 0; background-color: rgba(0,0,0,0); overflow: hidden; }} </style>
-  <script src="https://fastly.jsdelivr.net/npm/force-graph@1.43.5/dist/force-graph.min.js"></script>
-</head>
-<body>
-  <div id="graph" style="width: 100%; height: 500px;"></div>
-  <script>
+            import os
+            js_path = os.path.join(os.path.dirname(__file__), "force-graph.min.js")
+            if os.path.exists(js_path):
+                with open(js_path, "r", encoding="utf-8") as f:
+                    force_graph_js = f.read()
+                script_tag = f"<script>{force_graph_js}</script>"
+            else:
+                # Fallback to CDN if the file is missing for any reason
+                script_tag = '<script src="https://fastly.jsdelivr.net/npm/force-graph@1.43.5/dist/force-graph.min.js"></script>'
+                
+            html_code = '<!DOCTYPE html>\n<html>\n<head>\n'
+            html_code += '  <style> body { margin: 0; background-color: rgba(0,0,0,0); overflow: hidden; } </style>\n'
+            html_code += f'  {script_tag}\n</head>\n<body>\n'
+            html_code += '  <div id="graph" style="width: 100%; height: 500px;"></div>\n'
+            html_code += f'''  <script>
     const graphData = {graph_json};
     const centerNodeId = "{str(center_node)}";
     

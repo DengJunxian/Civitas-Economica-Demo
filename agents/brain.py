@@ -496,6 +496,13 @@ JSON 格式示例：
         # 判断逻辑异常降级
         decision_json = self._extract_json(content_raw)
         
+        # 处理空推理内容
+        if not reasoning:
+            # 去除 JSON 部分，剩余内容作为思维链
+            reasoning = re.sub(r'```json.*?```', '', content_raw, flags=re.DOTALL).strip()
+            if not reasoning:
+                reasoning = content_raw
+        
         # 5. 情绪分析
         emotion_score = self._analyze_emotion(reasoning, decision_json)
         
@@ -599,7 +606,10 @@ JSON 格式示例：
         
         # 处理空推理内容
         if not reasoning:
-            reasoning = "（使用对话模型，无推理过程）"
+            # 去除 JSON 部分，剩余内容作为思维链
+            reasoning = re.sub(r'```json.*?```', '', content, flags=re.DOTALL).strip()
+            if not reasoning:
+                reasoning = content
         
         # 情绪分析 (结合自身情绪状态)
         emotion_score = self._analyze_emotion(reasoning, decision_json)

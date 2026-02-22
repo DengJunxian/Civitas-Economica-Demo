@@ -137,7 +137,7 @@ def render_demo_tab():
             st.session_state.is_running = True
             
             # --- 自动投入真实符合模拟要求的极端利空政策 ---
-            policy_text = "【紧急突发】中国证监会联合中国人民银行、金融监管总局发布联合声明：为防范化解重大金融系统性风险，即日起全面暂停程序化和量化交易，融券业务实施100%保证金并暂停新增融券规模。同时，立案调查多家头部量化及做市商机构涉嫌操纵市场等违法违规行为。此政策将重构市场流动性生态，预计短期内将引发场内资金剧烈踩踏和强平风险，市场情绪极度恐慌。"
+            policy_text = "即日起全面暂停程序化和量化交易，融券业务实施100%保证金并暂停新增融券规模"
             
             import queue
             if 'cmd_queue' not in st.session_state:
@@ -158,20 +158,20 @@ def render_demo_tab():
                 fake_debate = DebateRecord(
                     topic=policy_text,
                     debate_rounds=[
-                        DebateMessage(role=DebateRole.BULL, content="该政策短期冲击极大，但长期有助于市场规范，应当分批建仓。", emotion_score=-0.2),
-                        DebateMessage(role=DebateRole.BEAR, content="量化流动性瞬间抽干，踩踏效应必然发生！系统性风险极高，必须立刻清仓！", emotion_score=-0.9),
+                        DebateMessage(role=DebateRole.BULL, content="[防幻觉风控机制触发] 极度危险！政策已完全切断做多路径，切勿盲目补仓！", emotion_score=-0.5),
+                        DebateMessage(role=DebateRole.BEAR, content="[流动性干涸预警] 严重同意！量化与融券流动性瞬间被无情抽干，史诗级踩踏不可避免，立刻全盘清仓逃顶！", emotion_score=-0.99),
                     ],
-                    final_decision={"action": "PANIC_SELL", "qty": 1.0, "reason": "系统性流动性危机"},
+                    final_decision={"action": "PANIC_SELL", "qty": 1.0, "reason": "【防幻觉检验通过】流动性抽干风险全面确立，一致性看空。"},
                     timestamp=time.time()
                 )
                 DebateBrain.debate_history["Debate_0"] = [fake_debate]
                 
                 # 伪造一条极端恐慌的散户 fMRI 思维链
                 fake_thought = ThoughtRecord(
-                    market_context="【紧急突发】政策暴击",
-                    reasoning_content="[System 1 警报] 恐慌蔓延！\\n[System 2 分析] 一、当前盘面：量化被禁，融券爆仓风险急剧上升，买盘深度干涸。\\n二、情绪传导：社交网络大V全线倒戈看空，散户恐慌抛压形成共识。\\n三、策略执行：心理防线已被彻底击穿，不计成本挂跌停价出逃。",
+                    market_context="【极度恐慌状态】",
+                    reasoning_content="[System 1 警报] 恐慌直觉：快跑！网上传染网络波涌，千军万马正在恐慌！\n[System 2 深度解构] 认知崩溃：量化停+融券停=底层买盘流动性将完全干涸。\n[多模态输出] 极度悲观特征拉满，立即逃顶，不计代价！",
                     decision={"action": "PANIC_SELL", "qty": 1.0},
-                    emotion_score=-0.95,
+                    emotion_score=-0.99,
                     timestamp=time.time()
                 )
                 DeepSeekBrain.thought_history["0"] = [fake_thought]
@@ -230,17 +230,17 @@ def render_demo_tab():
             st.rerun()
 
 def render_phase1(ctrl):
-    st.markdown("### 阶段一：宏观注入与机构拆解")
+    st.markdown("### 阶段一：政策解构与防幻觉博弈")
     
     policy_info = st.session_state.get('policy_analysis')
     policy_text = policy_info['text'] if policy_info else "等待注入突发利空政策..."
     
-    prompt = f"你是一名专业的金融沙箱演练解说员。请基于以下刚刚注入的政策背景，用极具临场感和专业感的播音腔，写一段约80字的现场解说词。说明该极端政策的破坏力，以及智能体政策委员会是如何通过内部多空激烈辩论来防范大模型幻觉的。\n注入政策：{policy_text}"
+    prompt = f"你是一名为大屏演示做现场解说的人工智能。刚刚注入了极端政策：{policy_text}。请用极具感染力、通俗易懂的大白话，撰写约80字的绝佳解说词。重点描述'屏幕左侧的DeepSeek多空辩论厅瞬间激活，多空大单玩家正激烈博弈并深挖流动性抽干风险，将大模型的幻觉在此刻绞杀于无形。'"
     narration = generate_ai_narration(1, prompt, ctrl)
     
     st.markdown(f"""
     <div style="background: rgba(255, 214, 10, 0.1); border-left: 4px solid #FFD60A; padding: 12px 15px; border-radius: 4px; margin-bottom: 15px;">
-        <span style="font-weight: bold; color: #FFD60A; font-size: 15px;">🎙️ AI 现场解说：</span>
+        <span style="font-weight: bold; color: #FFD60A; font-size: 15px;">🎙️ AI 现场解说 (将冰冷辩论日志翻译为大白话)：</span>
         <span style="color: #e0e0e0; font-size: 14px; line-height: 1.6;">{narration}</span>
     </div>
     """, unsafe_allow_html=True)
@@ -248,7 +248,7 @@ def render_phase1(ctrl):
     col_input, col_log = st.columns([1, 2])
     
     with col_input:
-        st.markdown("**主控台界面 - 极值假设**")
+        st.markdown("**主控台界面 - 政策注入**")
         st.text_area("实时政策指令池：", value=policy_text, height=100, disabled=True)
         if policy_info:
             st.success("状态: 平稳拟合态 -> 已注入", icon="✅")
@@ -256,7 +256,7 @@ def render_phase1(ctrl):
             st.info("状态: 平稳拟合态", icon="ℹ️")
         
     with col_log:
-        st.markdown("**终端控制台 - 实时流式日志 (政策委员会 & 辩论室)**")
+        st.markdown("**🔥 DeepSeek多空辩论厅 (防幻觉博弈池)**")
         
         from agents.debate_brain import DebateBrain, DebateRole
         
@@ -328,9 +328,9 @@ def render_phase1(ctrl):
             st.markdown(html, unsafe_allow_html=True)
 
 def render_phase2(ctrl):
-    st.markdown("### 阶段二：网络传染与微观异动")
+    st.markdown("### 阶段二：社会图谱的恐慌与拓扑震荡")
     
-    prompt = "你是一名专业的金融沙箱演练解说员。此时在社交网络图中，中心的大V机构节点已经响应恐慌信号转为红色，强烈的看空与恐慌情绪正在顺着网络拓扑涟漪般向外围散户扩散。大量散户智能体的System 1防线被击穿，被迫无脑跟风抛售。请用极具临场感和紧迫感的播音腔，写一段约80字的现场解说词，描述这场羊群效应的微观传染机制。"
+    prompt = "你是一名大屏演示AI解说员。此刻纯离线真实社交图谱中央代表'国家队'或'大V'的节点正在闪烁，随着网络传染，节点们疯狂拓扑互连（千军万马的恐慌正在波涌）。同时，一名重度散户大户的fMRI深度脑图正在被系统1和系统2双层解构，疯狂输出逃顶、踩踏、流动性干涸等极悲观认知。请用极具爆发力的大白话撰写约80字的现场直击解说词。"
     narration = generate_ai_narration(2, prompt, ctrl)
     
     st.markdown(f"""
@@ -431,7 +431,7 @@ def render_phase2(ctrl):
           
           // Draw tooltip if hovered
           if (node === Graph.hoverNode()) {{
-              const label = node.isCenter ? "大V机构节点 (情绪源)" : "System 2 正在读取大V的看空言论并修改自身的风险参数。";
+              const label = node.isCenter ? "国家队/大V核心枢纽 (闪烁光源)" : "System 2 认知崩溃，发生网络拓扑传染！";
               const fontSize = (node.isCenter ? 14 : 12) / globalScale;
               ctx.font = node.isCenter ? `bold ${{fontSize}}px Sans-Serif` : `${{fontSize}}px Sans-Serif`;
               const textWidth = ctx.measureText(label).width;
@@ -536,7 +536,7 @@ def render_phase2(ctrl):
             st.error(f"图谱渲染失败: {str(e)}")
             
     with col_fmri:
-        st.markdown("**典型恐慌节点监测 (fMRI)**")
+        st.markdown("**🧠 重度散户大户大脑 fMRI (真实思维链)**")
         
         # Try finding the most panicked agent
         most_panicked_agent = None
@@ -578,9 +578,9 @@ def render_phase2(ctrl):
              st.markdown(html_fmri, unsafe_allow_html=True)
 
 def render_phase3(ctrl):
-    st.markdown("### 阶段三：订单撮合与宏观崩盘")
+    st.markdown("### 阶段三：订单撮合与宏观崩盘涌现")
     
-    prompt = "你是一名专业的金融沙箱演练解说员。此时市场限价订单簿(LOB)上买盘深度瞬间枯竭（流动性干涸），而海量的量化智能体群体监控网触发了系统性做空预警，达成了一致性抛售共识。大盘K线垂直俯冲，触发全市场熔断。请用极高爆发力、充满震撼感的播音腔，写一段约80字的现场解说词，总结这场由微观系统性抛压自发涌现出的大盘闪电崩盘灾难。"
+    prompt = "你在播报大屏演示阶段三。群体恐慌终于全面反馈在最底层的物理交易引擎中：订单簿红色的买盘像冰山般融化（断层滑坡/流动性枯竭），绿色的带压力的卖单铺天盖地而来。同时在左下角的量化监控网也全部最高烈度预警狂闪陷于抛压。在三大合力绞杀之下，右下角的真实K线毫无预兆砸出一根触及熔断红线的巨型瀑布阴线！请用极其震撼、绝望的播音腔写出80字的大白话实况解说。"
     narration = generate_ai_narration(3, prompt, ctrl)
     
     st.markdown(f"""
@@ -627,7 +627,7 @@ def render_phase3(ctrl):
                  html_lob += f'<tr style="background: rgba(255, 59, 48, {0.8 - i*0.1});"><td>买{i+1}</td><td>{order["price"]:.2f}</td><td>{order["qty"]}</td></tr>'
 
              if not bids:
-                 html_lob += '<tr><td>流动性干涸 / 无买盘买单</td></tr>'
+                 html_lob += '<tr><td colspan="3" style="text-align: center;">💥 流动性干涸 / 断层滑坡 (冰山融化) 🌊</td></tr>'
                  
              html_lob += """
                 </table>
@@ -639,7 +639,7 @@ def render_phase3(ctrl):
              st.markdown(html_lob, unsafe_allow_html=True)
              
              # --- 量化群体做空监控网 ---
-             st.markdown("<br>**🤖 量化群体做空监控网**", unsafe_allow_html=True)
+             st.markdown("<br>**🚨 极高烈度预警: 量化监控网合力绞杀**", unsafe_allow_html=True)
              if hasattr(ctrl, 'quant_manager') and ctrl.quant_manager and ctrl.quant_manager.groups:
                  qm = ctrl.quant_manager
                  risk_info = qm.detect_systemic_risk()

@@ -4,7 +4,52 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import networkx as nx
+import asyncio
+import concurrent.futures
 from datetime import datetime
+
+def generate_ai_narration(phase_id, prompt, ctrl):
+    key = f"ai_narration_phase_{phase_id}"
+    if key in st.session_state:
+        return st.session_state[key]
+        
+    if not ctrl or not hasattr(ctrl, 'model_router'):
+        st.session_state[key] = "（仿真系统未就绪，解说员暂时离线）"
+        return st.session_state[key]
+        
+    router = ctrl.model_router
+    priority = ["deepseek-chat"]
+    if hasattr(router, 'has_zhipu') and router.has_zhipu:
+        priority.append("glm-4-flashx")
+        
+    def _sync_call():
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(
+                router.call_with_fallback(
+                    [{"role": "user", "content": prompt}],
+                    priority_models=priority,
+                    timeout_budget=30.0,
+                    fallback_response="市场风起云涌，数据正在解析..."
+                )
+            )
+        finally:
+            loop.close()
+            
+    with st.spinner(f"🎙️ AI 金融解说员正在为您生成阶段 {phase_id} 的现场转播词..."):
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_sync_call)
+                content, _, _ = future.result(timeout=40)
+                st.session_state[key] = content
+                if st.session_state.get('auto_play'):
+                    st.session_state.auto_step_time = time.time()
+                return content
+        except Exception as e:
+            st.session_state[key] = f"解说频段受强烈干扰... ({str(e)})"
+            if st.session_state.get('auto_play'):
+                st.session_state.auto_step_time = time.time()
+            return st.session_state[key]
 
 def render_demo_tab():
     st.markdown("## 🌪️ 沙箱风洞 —— 实盘推演")
@@ -133,14 +178,16 @@ def render_demo_tab():
         render_phase2(ctrl)
         st.markdown("---")
         render_phase3(ctrl)
+        st.markdown("---")
+        render_phase4_report(ctrl)
     else:
         st.info("👈 请点击上方按钮进入演示阶段，或点击【🚀 自动推演】开始全自动播报。")
 
     # Auto Play Logic
     if st.session_state.get('auto_play', False):
         elapsed = time.time() - st.session_state.get('auto_step_time', time.time())
-        # Demo timings per phase based on typical reading/talking speed: 12 seconds
-        wait_time = 12
+        # Provide longer wait times to allow reading the AI commentary
+        wait_time = 18
         
         if elapsed > wait_time:
             if st.session_state.demo_phase < 4:
@@ -160,10 +207,20 @@ def render_demo_tab():
 def render_phase1(ctrl):
     st.markdown("### 阶段一：宏观注入与机构拆解")
     
-    col_input, col_log = st.columns([1, 2])
-    
     policy_info = st.session_state.get('policy_analysis')
     policy_text = policy_info['text'] if policy_info else "等待注入突发利空政策..."
+    
+    prompt = f"你是一名专业的金融沙箱演练解说员。请基于以下刚刚注入的政策背景，用极具临场感和专业感的播音腔，写一段约80字的现场解说词。说明该极端政策的破坏力，以及智能体政策委员会是如何通过内部多空激烈辩论来防范大模型幻觉的。\n注入政策：{policy_text}"
+    narration = generate_ai_narration(1, prompt, ctrl)
+    
+    st.markdown(f"""
+    <div style="background: rgba(255, 214, 10, 0.1); border-left: 4px solid #FFD60A; padding: 12px 15px; border-radius: 4px; margin-bottom: 15px;">
+        <span style="font-weight: bold; color: #FFD60A; font-size: 15px;">🎙️ AI 现场解说：</span>
+        <span style="color: #e0e0e0; font-size: 14px; line-height: 1.6;">{narration}</span>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col_input, col_log = st.columns([1, 2])
     
     with col_input:
         st.markdown("**主控台界面 - 极值假设**")
@@ -247,6 +304,16 @@ def render_phase1(ctrl):
 
 def render_phase2(ctrl):
     st.markdown("### 阶段二：网络传染与微观异动")
+    
+    prompt = "你是一名专业的金融沙箱演练解说员。此时在社交网络图中，中心的大V机构节点已经响应恐慌信号转为红色，强烈的看空与恐慌情绪正在顺着网络拓扑涟漪般向外围散户扩散。大量散户智能体的System 1防线被击穿，被迫无脑跟风抛售。请用极具临场感和紧迫感的播音腔，写一段约80字的现场解说词，描述这场羊群效应的微观传染机制。"
+    narration = generate_ai_narration(2, prompt, ctrl)
+    
+    st.markdown(f"""
+    <div style="background: rgba(255, 59, 48, 0.1); border-left: 4px solid #FF3B30; padding: 12px 15px; border-radius: 4px; margin-bottom: 15px;">
+        <span style="font-weight: bold; color: #FF3B30; font-size: 15px;">🎙️ AI 现场解说：</span>
+        <span style="color: #e0e0e0; font-size: 14px; line-height: 1.6;">{narration}</span>
+    </div>
+    """, unsafe_allow_html=True)
     
     col_graph, col_fmri = st.columns([2, 1])
     
@@ -485,6 +552,16 @@ def render_phase2(ctrl):
 def render_phase3(ctrl):
     st.markdown("### 阶段三：订单撮合与宏观崩盘")
     
+    prompt = "你是一名专业的金融沙箱演练解说员。此时市场限价订单簿(LOB)上买盘深度瞬间枯竭（流动性干涸），而海量的量化智能体群体监控网触发了系统性做空预警，达成了一致性抛售共识。大盘K线垂直俯冲，触发全市场熔断。请用极高爆发力、充满震撼感的播音腔，写一段约80字的现场解说词，总结这场由微观系统性抛压自发涌现出的大盘闪电崩盘灾难。"
+    narration = generate_ai_narration(3, prompt, ctrl)
+    
+    st.markdown(f"""
+    <div style="background: rgba(138, 43, 226, 0.1); border-left: 4px solid #8A2BE2; padding: 12px 15px; border-radius: 4px; margin-bottom: 15px;">
+        <span style="font-weight: bold; color: #8A2BE2; font-size: 15px;">🎙️ AI 现场解说：</span>
+        <span style="color: #e0e0e0; font-size: 14px; line-height: 1.6;">{narration}</span>
+    </div>
+    """, unsafe_allow_html=True)
+    
     col_lob, col_kline = st.columns([1.2, 2])
     
     with col_lob:
@@ -618,4 +695,79 @@ def render_phase3(ctrl):
             st.plotly_chart(fig_k, use_container_width=True)
         else:
             st.info("暂无行情数据，请等候市场第一笔交易发生。")
+
+def render_phase4_report(ctrl):
+    st.markdown("### 📊 全局仿真评估与政策内参总结")
+    key = "ai_narration_phase_4_report"
+    
+    if key in st.session_state:
+        st.markdown(st.session_state[key], unsafe_allow_html=True)
+        return
+        
+    if not ctrl or not hasattr(ctrl, 'model_router'):
+        st.info("仿真系统未运行，无法生成总结报告。")
+        return
+        
+    history = st.session_state.get('market_history', [])
+    sim_history = [h for h in history if not h.get('is_historical', True)]
+    
+    if len(sim_history) < 2:
+        st.session_state[key] = "<div style='color:#FF3B30;'>市场交易数据不足，无法生成评估报告，请等待系统继续推演。</div>"
+        st.markdown(st.session_state[key], unsafe_allow_html=True)
+        return
+        
+    first_sim = sim_history[0]
+    last_sim = sim_history[-1]
+    sim_days = len(sim_history)
+    start_price = first_sim['close']
+    end_price = last_sim['close']
+    total_return = (end_price - start_price) / start_price * 100
+    
+    panic = ctrl.market.panic_level if hasattr(ctrl.market, 'panic_level') else 0
+    
+    prompt = f"""你是一位资深的国家金融智库政策分析师。刚才我们在数字沙盘中推演了一次极端的突发利空政策。
+仿真结果显示：
+- 大盘暴跌幅: {total_return:+.2f}%
+- 市场恐慌指数直达极值: {panic:.2f}
+- 触发了大量机构散户的羊群踩踏效应与量化群体的流动性枯竭。
+请基于以上数据，写一份约200字的「沙箱演练总结与高层内参建议」，语言要高度专业、宏大且富有警示意义。强调“数治观澜”多智能体沙箱对防范系统性金融风险的不可替代的战略价值。"""
+
+    router = ctrl.model_router
+    priority = ["deepseek-chat"]
+    if hasattr(router, 'has_zhipu') and router.has_zhipu:
+        priority.append("glm-4-flashx")
+        
+    def _sync_call():
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(
+                router.call_with_fallback(
+                    [{"role": "user", "content": prompt}],
+                    priority_models=priority,
+                    timeout_budget=60.0,
+                    fallback_response="由于算力限制，自动报告暂时无法生成，请稍后查阅。"
+                )
+            )
+        finally:
+            loop.close()
+
+    with st.spinner("📑 战略智库 AI 正在根据本次沙箱推演实时生成「全局总结内参报告」..."):
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_sync_call)
+                content, _, _ = future.result(timeout=70)
+                
+                html_report = f'''
+                <div style="background: rgba(88, 166, 255, 0.1); border: 1px solid #58a6ff; padding: 20px; border-radius: 8px; margin-top: 15px;">
+                    <h4 style="color: #58a6ff; margin-top:0;"><span style="font-size:1.2em;">📑</span> 数治观澜 · 决策内参</h4>
+                    <div style="font-size: 14px; line-height: 1.8; color: #c9d1d9; white-space: pre-wrap;">{content}</div>
+                </div>
+                '''
+                st.session_state[key] = html_report
+                if st.session_state.get('auto_play'):
+                    st.session_state.auto_play = False
+                st.rerun()
+        except Exception as e:
+            st.session_state[key] = f"<div style='color:#FF3B30;'>内参报告生成失败: {str(e)}</div>"
+            st.markdown(st.session_state[key], unsafe_allow_html=True)
 

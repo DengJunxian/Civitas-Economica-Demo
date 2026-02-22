@@ -363,7 +363,7 @@ def render_phase2(ctrl):
 <html>
 <head>
   <style> body {{ margin: 0; background-color: rgba(0,0,0,0); overflow: hidden; }} </style>
-  <script src="https://cdn.bootcdn.net/ajax/libs/force-graph/1.43.5/force-graph.min.js"></script>
+  <script src="https://fastly.jsdelivr.net/npm/force-graph@1.43.5/dist/force-graph.min.js"></script>
 </head>
 <body>
   <div id="graph" style="width: 100%; height: 500px;"></div>
@@ -626,7 +626,7 @@ def render_phase3(ctrl):
                      title = "✅ 量化群体暂无异常抛压"
                      
                  html_quant = f"""
-                 <div style="background: {bg_color}; padding: 12px; border: 1px solid {border_color}; border-radius: 8px; font-family: monospace; font-size: 13px;">
+                 <div style="background: {bg_color}; padding: 12px; border: 1px solid {border_color}; border-radius: 8px; font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 13px;">
                      <div style="font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid {border_color}; padding-bottom: 4px; color: {border_color};">
                          {title}
                      </div>
@@ -637,13 +637,13 @@ def render_phase3(ctrl):
                      pressure = group.sell_pressure * 100
                      if action in ["SELL", "PANIC_SELL"]:
                          color = "#FF3B30"
-                         action_str = f"抛售 ↘ (压:{pressure:.1f}%)"
+                         action_str = f"抛售 (压:{pressure:.1f}%)"
                      elif action == "BUY":
                          color = "#34C759"
-                         action_str = "吸筹 ↗"
+                         action_str = "吸筹"
                      else:
                          color = "#888"
-                         action_str = "观望 ~"
+                         action_str = "观望"
                          
                      html_quant += f"""
                      <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">

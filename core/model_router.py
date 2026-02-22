@@ -164,12 +164,12 @@ class ModelRouter:
     
     def get_model_priority(self, mode: str) -> List[str]:
         """
-        获取模型优先级列表：始终优先 deepseek-reasoner，降级至 glm-4-flashx 或 deepseek-chat
+        获取模型优先级列表：始终优先 deepseek-chat，降级至 glm-4-flashx
         """
-        base_priority = ["deepseek-reasoner", "glm-4-flashx", "deepseek-chat"]
+        base_priority = ["deepseek-chat", "glm-4-flashx"]
         
         if mode == "FAST":
-            base_priority = ["glm-4-flashx", "deepseek-chat", "deepseek-reasoner"]
+            base_priority = ["glm-4-flashx", "deepseek-chat"]
             
         return [m for m in base_priority if m in self.available_models]
     
@@ -291,7 +291,7 @@ class ModelRouter:
             asyncio.set_event_loop(loop)
             
         if not priority_models:
-            priority_models = ["deepseek-reasoner", "glm-4-flashx", "deepseek-chat"]
+            priority_models = ["deepseek-chat", "glm-4-flashx"]
             
         return loop.run_until_complete(
             self.call_with_fallback(messages, priority_models, timeout_budget, fallback_response)

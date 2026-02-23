@@ -50,7 +50,7 @@ class SimConfig:
     # 智谱 GLM API (快速模式专用)
     ZHIPU_API_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
     ZHIPU_API_KEY: Optional[str] = field(
-        default_factory=lambda: os.environ.get("ZHIPU_API_KEY", "")
+        default_factory=lambda: os.environ.get("ZHIPU_API_KEY", "4d963afd591d4c93940b08b06d766e91.bWaMIWJnuKhOUo7y")
     )
     
     # --- 模型配置 ---

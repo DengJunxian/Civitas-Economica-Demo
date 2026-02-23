@@ -78,8 +78,8 @@ def render_demo_tab():
                 from core.regulatory_sandbox import RegulatoryModule
                 from core.scheduler import SimulationController
                 
-                deepseek_key = GLOBAL_CONFIG.DEEPSEEK_API_KEY or "sk-ef4fd5a8ac9c4861aa812af3875652f7"
-                zhipu_key = GLOBAL_CONFIG.ZHIPU_API_KEY or "4d963afd591d4c93940b08b06d766e91.bWaMIWJnuKhOUo7y"
+                deepseek_key = GLOBAL_CONFIG.DEEPSEEK_API_KEY or ""
+                zhipu_key = GLOBAL_CONFIG.ZHIPU_API_KEY or ""
                 
                 # 激活量化群体
                 if st.session_state.get('quant_manager') is None:

@@ -326,6 +326,12 @@ def render_phase1(ctrl):
             """
             st.markdown(html, unsafe_allow_html=True)
 
+    st.markdown("""
+    <div style="background: rgba(45, 212, 191, 0.1); border: 1px solid #2dd4bf; padding: 15px; border-radius: 8px; margin-top: 20px;">
+        <b style="color: #2dd4bf;">🎯 阶段一结论：</b> 政策注入后，多空双方并未出现瞬间一致，而是经历了剧烈的对抗。关键在于 **防幻觉机制** 剔除了缺乏逻辑支撑的盲目乐观，为后续的一致性下跌打下了心理基础。
+    </div>
+    """, unsafe_allow_html=True)
+
 def render_phase2(ctrl):
     st.markdown("### 阶段二：社会图谱的恐慌与拓扑震荡")
     
@@ -552,6 +558,12 @@ def render_phase2(ctrl):
             """
              st.markdown(html_fmri, unsafe_allow_html=True)
 
+    st.markdown("""
+    <div style="background: rgba(168, 85, 247, 0.1); border: 1px solid #a855f7; padding: 15px; border-radius: 8px; margin-top: 20px;">
+        <b style="color: #a855f7;">🎯 阶段二结论：</b> 恐慌不再是孤立的心理活动，而是演变为 **图谱上的波动**。从关键节点的“认知沦陷”开始，负面情绪通过拓扑连接快速同步，导致市场进入“羊群行为”的临界点。
+    </div>
+    """, unsafe_allow_html=True)
+
 def render_phase3(ctrl):
     st.markdown("### 阶段三：订单撮合与宏观崩盘涌现")
     
@@ -679,4 +691,10 @@ def render_phase3(ctrl):
             st.plotly_chart(fig_k, use_container_width=True)
         else:
             st.info("暂无行情数据，请等候市场第一笔交易发生。")
+
+    st.markdown("""
+    <div style="background: rgba(244, 63, 94, 0.1); border: 1px solid #f43f5e; padding: 15px; border-radius: 8px; margin-top: 20px;">
+        <b style="color: #f43f5e;">🎯 阶段三结论：</b> 当认知共识与社交传染汇聚到订单簿时，**流动性瞬间枯竭**。买盘消失导致的“非连续性暴跌”是政策风险在微观撮合层面的终极体现，揭示了量化共振后的系统性脆弱。
+    </div>
+    """, unsafe_allow_html=True)
 

@@ -622,7 +622,8 @@ if st.session_state.backtest_mode:
     tab1, tab2 = st.tabs(["📊 回测结果", "🧠 Agent fMRI"])
     tab_demo = tab_debate = tab_reg = tab_behavior = tab_quant = None
 else:
-    tab_demo, tab1, tab2, tab_debate, tab_reg, tab_behavior, tab_quant = st.tabs([
+    tab_guide, tab_demo, tab1, tab2, tab_debate, tab_reg, tab_behavior, tab_quant = st.tabs([
+        "🏠 系统导览",
         "🌪️ 沙箱风洞",
         "📈 市场走势", 
         "🧠 Agent fMRI", 
@@ -687,6 +688,58 @@ if st.session_state.backtest_mode:
 
 else:
     # 实时仿真模式
+    with tab_guide:
+        st.markdown("## 🏠 系统导览与核心结论")
+        
+        # 核心结论区
+        if 'last_report' in st.session_state:
+            with st.container():
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 20px; border-radius: 12px; border: 1px solid #3b82f6; margin-bottom: 20px;">
+                    <h3 style="color: #60a5fa; margin-top: 0;">🎯 最新推演结论 (Key Takeaway)</h3>
+                    <div style="color: #e2e8f0; font-size: 15px; line-height: 1.6;">
+                """, unsafe_allow_html=True)
+                st.write(st.session_state.last_report[:500] + "..." if len(st.session_state.last_report) > 500 else st.session_state.last_report)
+                st.markdown("</div></div>", unsafe_allow_html=True)
+        else:
+            st.info("💡 尚未生成政策评估报告。请在左侧注入政策并运行仿真，完成后点击「生成报告」以获取核心结论。")
+
+        # 功能模块导览
+        st.markdown("### 🛠️ 仿真功能说明")
+        col_g1, col_g2 = st.columns(2)
+        
+        with col_g1:
+            st.markdown("""
+            <div class="agent-card">
+                <h4 style="color: #4DA6FF;">🌪️ 沙箱风洞</h4>
+                <p style="font-size: 0.9em; color: #888;">全自动的极端行情演练场。通过“政策输入-认知博弈-情绪传染-订单涌现”的完整链路，展示政策对市场的穿透式影响。</p>
+            </div>
+            <div class="agent-card">
+                <h4 style="color: #4DA6FF;">📈 市场走势</h4>
+                <p style="font-size: 0.9em; color: #888;">实时观测指数波动、K线走势及全市场成交数据。这是仿真系统最直观的宏观结果呈现。</p>
+            </div>
+            <div class="agent-card">
+                <h4 style="color: #4DA6FF;">🧠 Agent fMRI</h4>
+                <p style="font-size: 0.9em; color: #888;">深入智能体“大脑”。实时展示散户与机构在面临市场变化时的思维链（CoT）及情绪因子波动。</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col_g2:
+            st.markdown("""
+            <div class="agent-card">
+                <h4 style="color: #4DA6FF;">⚔️ 辩论室</h4>
+                <p style="font-size: 0.9em; color: #888;">防幻觉博弈池。展示多空双方引擎如何通过辩论对抗，最终形成具有逻辑支撑的交易决策。</p>
+            </div>
+            <div class="agent-card">
+                <h4 style="color: #4DA6FF;">🏛️ 监管沙盒</h4>
+                <p style="font-size: 0.9em; color: #888;">推演监管干预效果。可实时调整印花税、熔断阈值等参数，观测政府干预对市场情绪的回填作用。</p>
+            </div>
+            <div class="agent-card">
+                <h4 style="color: #4DA6FF;">🤖 量化群体</h4>
+                <p style="font-size: 0.9em; color: #888;">基于算法的特殊群体。监控动量、均值回归等策略在极端行情下的“合力绞杀”或流动性提供行为。</p>
+            </div>
+            """, unsafe_allow_html=True)
+
     with tab_demo:
         render_demo_tab()
         
@@ -769,6 +822,14 @@ else:
             
             # 1. K线图 (东方财富风格)
             st.subheader("📈 市场走势")
+            
+            st.markdown("""
+            <div style="background: rgba(77, 166, 255, 0.1); border-left: 4px solid #4DA6FF; padding: 10px; margin-bottom: 20px;">
+                <p style="margin: 0; font-size: 0.9em; color: #e0e0e0;">
+                    <b>🔍 核心观察点：</b> 关注价格波动与成交量的共振。在政策注入后，观察是否存在非线性的剧烈跳空或流动性断层。
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
             
             # 周期选择器
             period_col, _ = st.columns([1, 4])
@@ -1141,6 +1202,13 @@ else:
 # --- Agent fMRI 标签页 ---
 with tab2:
     st.subheader("🧠 Agent 心理核磁共振 (fMRI)")
+    st.markdown("""
+    <div style="background: rgba(168, 85, 247, 0.1); border-left: 4px solid #a855f7; padding: 10px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.9em; color: #e0e0e0;">
+            <b>🔍 核心观察点：</b> 观察智能体在面临亏损时的“认知失调”现象。当情绪分数剧烈下降时，智能体通常会从理性的 System 2 转向恐慌驱动的 System 1。
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
     st.caption("点击任意 Agent 查看其完整思维链")
 
     if ctrl:
@@ -1234,6 +1302,13 @@ if not st.session_state.backtest_mode:
     # --- 辩论室标签页 ---
     with tab_debate:
         st.subheader("⚔️ Agent 内心辩论室")
+        st.markdown("""
+        <div style="background: rgba(45, 212, 191, 0.1); border-left: 4px solid #2dd4bf; padding: 10px; margin-bottom: 20px;">
+            <p style="margin: 0; font-size: 0.9em; color: #e0e0e0;">
+                <b>🔍 核心观察点：</b> 辩论室揭示了自洽决策的形成过程。关注空头（Bear）与多头（Bull）如何通过事实交换达成最终共识，这对防止单一维度的“幻觉”决策至关重要。
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
         st.markdown("*观察 Agent 的 Bull vs Bear 内心对抗过程*")
 
         if ctrl:
@@ -1333,6 +1408,13 @@ if not st.session_state.backtest_mode:
     # --- 监管沙盒标签页 ---
     with tab_reg:
         st.subheader("🏛️ 监管沙盒")
+        st.markdown("""
+        <div style="background: rgba(244, 63, 94, 0.1); border-left: 4px solid #f43f5e; padding: 10px; margin-bottom: 20px;">
+            <p style="margin: 0; font-size: 0.9em; color: #e0e0e0;">
+                <b>🔍 核心观察点：</b> 监管干预的滞后性与有效性。观察国家队入场释放的预期信号是否能有效遏制 CSAD（羊群效应）的持续走高。
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
         st.markdown("*模拟中国 A 股特色监管机制*")
 
         # 初始化监管模块（如果尚未初始化）
@@ -1501,6 +1583,13 @@ if not st.session_state.backtest_mode:
     # --- 行为金融标签页 ---
     with tab_behavior:
         st.subheader("📊 行为金融量化面板")
+        st.markdown("""
+        <div style="background: rgba(245, 158, 11, 0.1); border-left: 4px solid #f59e0b; padding: 10px; margin-bottom: 20px;">
+            <p style="margin: 0; font-size: 0.9em; color: #e0e0e0;">
+                <b>🔍 核心观察点：</b> 羊群效应强度。CSAD 值的显著偏离通常预示着市场进入了“无脑跟随”阶段，这往往是崩盘或报复性反弹的前兆。
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
         st.markdown("*用数学量化人性偏差*")
 
         col_b1, col_b2 = st.columns(2)
@@ -1584,6 +1673,13 @@ if not st.session_state.backtest_mode:
     # --- 量化群体标签页 ---
     with tab_quant:
         st.subheader("🤖 量化群体监控")
+        st.markdown("""
+        <div style="background: rgba(56, 189, 248, 0.1); border-left: 4px solid #38bdf8; padding: 10px; margin-bottom: 20px;">
+            <p style="margin: 0; font-size: 0.9em; color: #e0e0e0;">
+                <b>🔍 核心观察点：</b> 量化共识及其导致的流动性特征。高频止损策略的同步性会加剧市场的“核按钮”效应，导致价格非连续性暴跌。
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
 
         if st.session_state.quant_manager and st.session_state.quant_manager.groups:
             # 系统风险检测

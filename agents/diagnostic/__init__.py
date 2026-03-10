@@ -1,8 +1,11 @@
 # file: agents/diagnostic/__init__.py
 from .diagnostic_agent import DiagnosticAgent
-from .tools import get_diagnostic_tools
+from .report_agent import ReportAgent
+from .tools import get_diagnostic_tools, get_report_tools
 
 __all__ = [
     "DiagnosticAgent",
-    "get_diagnostic_tools"
+    "ReportAgent",
+    "get_diagnostic_tools",
+    "get_report_tools",
 ]

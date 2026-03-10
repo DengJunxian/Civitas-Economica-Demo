@@ -14,6 +14,7 @@ from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from openai import OpenAI, AsyncOpenAI, APIConnectionError, APITimeoutError, RateLimitError
+from core.llm_client import RobustLLMClient
 
 from config import GLOBAL_CONFIG
 
@@ -112,7 +113,7 @@ class ModelRouter:
         self.zhipu_key = zhipu_key
         
         # 初始化客户端
-        self.clients: Dict[str, AsyncOpenAI] = {}
+        self.clients: Dict[str, RobustLLMClient] = {}
         self._init_clients()
         
         # 统计信息
@@ -134,18 +135,22 @@ class ModelRouter:
         """初始化API客户端"""
         # DeepSeek 客户端（必需）
         if self.deepseek_key:
-            self.clients["deepseek"] = AsyncOpenAI(
-                api_key=self.deepseek_key,
-                base_url=GLOBAL_CONFIG.API_BASE_URL,
-                timeout=GLOBAL_CONFIG.API_TIMEOUT_REASONER
+            self.clients["deepseek"] = RobustLLMClient(
+                AsyncOpenAI(
+                    api_key=self.deepseek_key,
+                    base_url=GLOBAL_CONFIG.API_BASE_URL,
+                    timeout=GLOBAL_CONFIG.API_TIMEOUT_REASONER
+                )
             )
         
         # 智谱客户端（可选，快速模式专用）
         if self.zhipu_key:
-            self.clients["zhipu"] = AsyncOpenAI(
-                api_key=self.zhipu_key,
-                base_url=GLOBAL_CONFIG.ZHIPU_API_BASE_URL,
-                timeout=GLOBAL_CONFIG.API_TIMEOUT_FLASH
+            self.clients["zhipu"] = RobustLLMClient(
+                AsyncOpenAI(
+                    api_key=self.zhipu_key,
+                    base_url=GLOBAL_CONFIG.ZHIPU_API_BASE_URL,
+                    timeout=GLOBAL_CONFIG.API_TIMEOUT_FLASH
+                )
             )
     
     def _get_available_models(self) -> List[str]:
@@ -299,7 +304,7 @@ class ModelRouter:
     
     async def _call_model(
         self,
-        client: AsyncOpenAI,
+        client: RobustLLMClient,
         model_name: str,
         messages: List[Dict],
         timeout: float
@@ -310,22 +315,15 @@ class ModelRouter:
         Returns:
             (content, reasoning_content)
         """
-        response = await asyncio.wait_for(
-            client.chat.completions.create(
-                model=model_name,
+        return await asyncio.wait_for(
+            client.chat_completion(
+                model_name=model_name,
                 messages=messages,
-                temperature=0.6
+                temperature=0.6,
+                timeout=timeout,
             ),
-            timeout=timeout
+            timeout=timeout + 0.5,
         )
-        
-        message = response.choices[0].message
-        content = message.content or ""
-        
-        # 提取推理内容（如果有）
-        reasoning = getattr(message, 'reasoning_content', None)
-        
-        return content, reasoning
     
     def _update_stats(
         self, 

@@ -665,6 +665,8 @@ JSON 格式示例：
         请反思你的行为。如果是"高频(OTR High)"，请降低下单频率；如果是"价格异常"，请检查你的挂单价格是否合理。
         """
 
+        graph_context = market_state.get('graph_context', '')
+        
         return f"""
         【市场环境】
         - 价格: {market_state.get('price', 0):.2f}
@@ -686,7 +688,10 @@ JSON 格式示例：
         - 持仓市值: {account_state.get('market_value', 0):.2f}
         - 当前浮动盈亏: {account_state.get('pnl_pct', 0):.2%}
         
-        【闪回记忆】
+        【私有认知图谱及宏观共识】
+        {graph_context if graph_context else "尚未形成有效图谱记忆。"}
+        
+        【闪回记忆(Vector)】
         {lessons_text}
         
         请作为一名真实的投资者，基于你的人设、当前情绪和社交压力，做出交易决策。

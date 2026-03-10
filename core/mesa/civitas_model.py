@@ -51,7 +51,8 @@ class CivitasModel(Model):
         model_router: Optional[Any] = None,
         quant_manager: Optional[Any] = None,
         regulatory_module: Optional[Any] = None,
-        mode: str = "SMART"
+        mode: str = "SMART",
+        ipc_mode: bool = False
     ):
         """
         初始化模型
@@ -73,8 +74,17 @@ class CivitasModel(Model):
         super().__init__(seed=seed)
         
         self.mode = mode
+        self.ipc_mode = ipc_mode
         self.n_agents = n_agents
         self.shared_router = model_router
+        
+        # 如果开启了 IPC 并发，初始化服务端引擎节点
+        if self.ipc_mode:
+            from core.ipc.engine_server import IPCEngineServer
+            self.ipc_server = IPCEngineServer(pub_port=5555, pull_port=5556)
+        else:
+            self.ipc_server = None
+            
         self.quant_manager = quant_manager
         
         # 0. 初始化仿真时钟
@@ -406,40 +416,91 @@ class CivitasModel(Model):
         news = [market_state["news"]] if market_state["news"] else []
         
         # 阶段 2: Agent 并行决策 (Tier 1)
-        # Gather all agent.async_act coroutines
-        agent_tasks = []
-        active_agents = []
-        
-        for agent in self.agents:
-            if isinstance(agent, CivitasAgent):
-                agent_tasks.append(agent.async_act(snapshot, news))
-                active_agents.append(agent)
-        
-        # Concurrent execution
-        orders = await asyncio.gather(*agent_tasks, return_exceptions=True)
-        
-        # 阶段 3: 订单提交
-        smart_actions = []
-        for agent, order_or_err in zip(active_agents, orders):
-            if isinstance(order_or_err, Exception):
-                print(f"[Model Error] Agent {agent.unique_id} act failed: {order_or_err}")
-                smart_actions.append(0)
-                continue
-                
-            order = order_or_err
-            if order:
-                self.market_manager.submit_agent_order(order)
-                # Record action for Tier 2 sentiment
-                # Order side can be string or Enum
-                side_str = str(order.side).lower()
-                if "buy" in side_str: smart_actions.append(1)
-                elif "sell" in side_str: smart_actions.append(-1)
-                else: smart_actions.append(0)
-            else:
-                smart_actions.append(0)
-
-        # 更新 Smart Sentiment 指标
-        self.last_smart_sentiment = np.mean(smart_actions) if smart_actions else 0.0
+        if getattr(self, "ipc_mode", False) and self.ipc_server:
+            # === [分布式 IPC 网络并发模式] ===
+            from core.ipc.message_types import MarketStatePacket
+            
+            # 使用 EngineServer 广播状态
+            packet = MarketStatePacket(
+                step=self.steps,
+                timestamp=str(self.current_dt),
+                price=self.current_price,
+                trend=self.trend,
+                panic_level=self.panic_level,
+                csad=self.csad,
+                volatility=self.volatility,
+                recent_news=news
+            )
+            await self.ipc_server.broadcast_market_state(packet)
+            
+            # 挂起等待客户端汇聚订单 (默认最多等 3 秒或收齐 self.n_agents 个信号)
+            actions = await self.ipc_server.collect_agent_actions(collect_window=3.0, expected_count=self.n_agents)
+            
+            smart_actions = []
+            for action in actions:
+                if action.has_order and action.order:
+                    from core.market_engine import Order, OrderType
+                    try:
+                        o_type = getattr(OrderType, action.order.order_type.upper())
+                    except:
+                        o_type = OrderType.LIMIT
+                        
+                    order = Order(
+                        symbol=action.order.symbol,
+                        price=action.order.price,
+                        quantity=action.order.quantity,
+                        side=action.order.side,
+                        order_type=o_type,
+                        agent_id=action.agent_id,
+                        timestamp=str(self.current_dt)
+                    )
+                    self.market_manager.submit_agent_order(order)
+                    
+                    side_str = action.order.side.lower()
+                    if "buy" in side_str: smart_actions.append(1)
+                    elif "sell" in side_str: smart_actions.append(-1)
+                    else: smart_actions.append(0)
+                        
+                else:
+                    smart_actions.append(0)
+            
+            # 更新 Smart Sentiment 指标
+            self.last_smart_sentiment = np.mean(smart_actions) if smart_actions else 0.0
+            
+        else:
+            # === [单进程同步 Event Loop 模式] ===
+            agent_tasks = []
+            active_agents = []
+            
+            for agent in self.agents:
+                if isinstance(agent, CivitasAgent):
+                    agent_tasks.append(agent.async_act(snapshot, news))
+                    active_agents.append(agent)
+            
+            # Concurrent execution
+            orders = await asyncio.gather(*agent_tasks, return_exceptions=True)
+            
+            # 阶段 3: 订单提交
+            smart_actions = []
+            for agent, order_or_err in zip(active_agents, orders):
+                if isinstance(order_or_err, Exception):
+                    print(f"[Model Error] Agent {agent.unique_id} act failed: {order_or_err}")
+                    smart_actions.append(0)
+                    continue
+                    
+                order = order_or_err
+                if order:
+                    self.market_manager.submit_agent_order(order)
+                    # Record action for Tier 2 sentiment
+                    side_str = str(order.side).lower()
+                    if "buy" in side_str: smart_actions.append(1)
+                    elif "sell" in side_str: smart_actions.append(-1)
+                    else: smart_actions.append(0)
+                else:
+                    smart_actions.append(0)
+    
+            # 更新 Smart Sentiment 指标
+            self.last_smart_sentiment = np.mean(smart_actions) if smart_actions else 0.0
 
         # 阶段 5: 执行交易 (Tier 1 Advance)
         # Mesa's step/advance structure is less relevant here as we handled actions explicitly

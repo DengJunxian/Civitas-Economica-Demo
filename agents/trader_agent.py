@@ -23,6 +23,8 @@ from agents.brain import DeepSeekBrain
 from core.types import Order, OrderSide, OrderType, OrderStatus
 from agents.persona import Persona, RiskAppetite
 from core.society.network import SocialGraph, SentimentState
+from agents.cognition.graph_storage import GraphMemoryBank
+from agents.cognition.graph_builder import GraphExtractor
 
 class TraderAgent(BaseAgent):
     """
@@ -94,6 +96,10 @@ class TraderAgent(BaseAgent):
         self._last_news_count = 0
         self._last_social_sentiment = "neutral"
         self._fast_mode_consecutive_steps = 0
+        
+        # GraphRAG 记忆层
+        self.graph_memory = GraphMemoryBank(agent_id=self.agent_id)
+        self.graph_extractor = GraphExtractor(model_router=self.brain.model_router if hasattr(self, 'brain') else model_router)
         
         # Sync initial confidence
         self.brain.state.confidence = self.profile.get("confidence_level", 0.5) * 100
@@ -255,6 +261,23 @@ class TraderAgent(BaseAgent):
             "timestamp": snapshot.timestamp
         }
 
+    async def _async_extract_and_store(self, text: str, current_time: float, is_news: bool = False):
+        """后台异步抽取图谱节点，避免阻塞主交易循环"""
+        triplets = await self.graph_extractor.extract_graph(text)
+        if not triplets:
+            return
+            
+        topics = set()
+        for t in triplets:
+            self.graph_memory.add_triplet(t["subject"], t["predicate"], t["target"], t["weight"])
+            topics.add(t["subject"])
+            
+        # 如果是宏观新闻，生成短期胶囊缓存
+        if is_news and topics:
+            capsule_topic = list(topics)[0] # 取主要概念作为 topic
+            summary = f"[{capsule_topic}] 相关动态已发生: {text[:50]}..."
+            self.graph_memory.add_capsule(capsule_topic, summary, current_time, ttl_seconds=3600)
+
     async def reason_and_act(
         self,
         perceived_data: Dict[str, Any],
@@ -283,17 +306,42 @@ class TraderAgent(BaseAgent):
         snapshot: MarketSnapshot = perceived_data["snapshot"]
         news = perceived_data["news"]
         
-        # 1. Construct Market State
+        # 1. 检索 GraphRAG 记忆与知识胶囊
+        current_time = snapshot.timestamp
+        graph_context = ""
+        capsules = self.graph_memory.get_valid_capsules(current_time)
+        extracted_keywords = []
+        news_text = "; ".join(news) if news else ""
+        
+        if news_text:
+            # 简单的关键词提取逻辑用于查图
+            if "利率" in news_text or "降准" in news_text: extracted_keywords.append("利率")
+            if "流动性" in news_text: extracted_keywords.append("流动性")
+            if "政策" in news_text: extracted_keywords.append("政策")
+            if not extracted_keywords: extracted_keywords = ["市场", "风险"]
+        
+        if capsules:
+            graph_context = "【知识胶囊(宏观共识缓存)】\n" + "\n".join(capsules)
+        elif extracted_keywords:
+            subgraph = self.graph_memory.retrieve_subgraph(extracted_keywords, depth=2)
+            if subgraph:
+                graph_context = "【私有认知图谱关联】\n" + subgraph
+                
+        # 如果有新消息且没有命中缓存，后台启动提取以充实图谱
+        if news_text and not capsules:
+            asyncio.create_task(self._async_extract_and_store(news_text, current_time, is_news=True))
+            
+        # 2. Construct Market State
         market_state = {
             "price": snapshot.last_price,
             "trend": getattr(snapshot, "market_trend", "震荡"), 
             "panic_level": getattr(snapshot, "panic_level", 0.5), 
-            "news": "; ".join(news) if news else "无重大新闻",
+            "news": news_text if news_text else "无重大新闻",
             "last_rejection_reason": self.compliance_feedback[-1] if self.compliance_feedback else None,
-            # 政策感知
             "policy_description": getattr(snapshot, "policy_description", ""),
             "policy_tax_rate": getattr(snapshot, "policy_tax_rate", 0.0),
-            "policy_news": getattr(snapshot, "policy_news", "")
+            "policy_news": getattr(snapshot, "policy_news", ""),
+            "graph_context": graph_context
         }
         
         # Map numeric trend to string for Brain
@@ -465,6 +513,11 @@ class TraderAgent(BaseAgent):
              score = 1.0 if pnl > 0 else -1.0
              self.brain.memory.add_memory(content, score)
              
+             # 【GraphRAG 重构】重大爆仓/盈利提取概念写入图谱
+             extract_text = f"交易复盘: 进行了操作 {decision.get('action')}，导致 {pnl} 的盈亏结果。当时信心为 {self.brain.state.confidence}。请提取本次成败的关键因素概念。"
+             current_time = time.time()
+             asyncio.create_task(self._async_extract_and_store(extract_text, current_time, is_news=False))
+             
         # 3. 处理被风控拒绝的订单（监管认知）
         status = outcome.get("status")
         if status == "REJECTED" or status == OrderStatus.REJECTED:
@@ -477,6 +530,9 @@ class TraderAgent(BaseAgent):
              content = f"REGULATORY REJECTION! Order was rejected by Risk Control. Reason: {reason}. Action was: {decision.get('action')}"
              # Higher penalty than normal loss to ensure "respect" for regulation
              self.brain.memory.add_memory(content, -2.0)
+             
+             # 【GraphRAG 重构】监管教训提取
+             asyncio.create_task(self._async_extract_and_store(content, time.time(), is_news=False))
              
              # Also slightly decrease confidence
              self.brain.state.confidence *= 0.95

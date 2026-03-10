@@ -13,6 +13,8 @@ from agents.cognition.utility import ProspectTheory, calculate_prospect_value
 from agents.cognition.llm_brain import DeepSeekReasoner, ReasoningResult
 from agents.cognition.memory import TraumaMemory
 from agents.cognition.cognitive_agent import CognitiveAgent
+from agents.cognition.graph_storage import GraphMemoryBank, KnowledgeCapsule
+from agents.cognition.graph_builder import GraphExtractor
 
 __all__ = [
     "ProspectTheory",
@@ -21,4 +23,7 @@ __all__ = [
     "ReasoningResult",
     "TraumaMemory",
     "CognitiveAgent",
+    "GraphMemoryBank",
+    "KnowledgeCapsule",
+    "GraphExtractor"
 ]

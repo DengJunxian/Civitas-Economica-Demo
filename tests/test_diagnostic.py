@@ -6,10 +6,13 @@ from agents.diagnostic.tools import ProbeExecutor, get_diagnostic_tools
 
 def test_diagnostic_tools_schema():
     tools = get_diagnostic_tools()
-    assert len(tools) == 4
+    assert len(tools) == 7
     names = [t["function"]["name"] for t in tools]
     assert "get_agent_state" in names
     assert "query_agent_memory" in names
+    assert "search_agent_memory" in names
+    assert "query_lob_log" in names
+    assert "send_interview" in names
 
 def test_probe_executor_execution():
     # Mock some basic agents to test ProbeExecutor locally

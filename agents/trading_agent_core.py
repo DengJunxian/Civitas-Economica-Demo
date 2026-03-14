@@ -12,6 +12,8 @@ Civitas-Economica 核心交易智能体模块 (Trading Agent Module)
 import asyncio
 import json
 import logging
+import random
+import statistics
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -118,6 +120,15 @@ class TradeAction(BaseModel):
 # ----------------------------------------------------------------------------
 # 3. 核心实体类：TradingAgent
 # ----------------------------------------------------------------------------
+class TradeIntent(BaseModel):
+    """
+    LLM 仅输出的交易意图结构（意图与执行解耦）。
+    """
+    direction: str = Field(..., description="BUY / SELL / HOLD")
+    urgency: str = Field(..., description="Low / Medium / High")
+    reason: str = Field(..., description="意图产生的原因")
+
+
 class TradingAgent:
     """
     Civitas 经济体中的核心交易智能体。
@@ -165,6 +176,97 @@ class TradingAgent:
         decay_rate = GLOBAL_CONFIG.get("ebbinghaus_base_decay_rate", 0.1)
         return f"基于艾宾浩斯认知衰减 ({decay_rate})，之前记忆最深的损失：股票近期发生过大幅回撤。"
 
+    def _normalize_urgency(self, urgency: str) -> str:
+        """统一意图紧急度标签，降低 LLM 输出噪声对执行层的影响。"""
+        text = str(urgency or "").strip().lower()
+        if text in {"high", "urgent", "h"}:
+            return "High"
+        if text in {"medium", "mid", "m"}:
+            return "Medium"
+        if text in {"low", "l"}:
+            return "Low"
+        return "Medium"
+
+    def _coerce_legacy_intent(self, data: Dict[str, Any]) -> TradeIntent:
+        """
+        兼容旧版 LLM 输出（action/amount/target_price），转换为 TradeIntent。
+        """
+        direction = str(data.get("direction") or data.get("action", "HOLD")).upper()
+        urgency = str(data.get("urgency", "Medium"))
+        reason = str(data.get("reason") or data.get("reasoning_chain", "legacy output"))
+        return TradeIntent(direction=direction, urgency=urgency, reason=reason)
+
+    def _compute_reference_price(self, price_history: List[float], current_price: float, window: int = 20) -> float:
+        """
+        计算 FCN 模型中的“基本面价格”。
+        默认使用移动均线作为稳态基准，兼容 TwinMarket 的稳态锚定思想。
+        """
+        if not price_history:
+            return float(current_price)
+        history = [float(x) for x in price_history if x is not None]
+        if not history:
+            return float(current_price)
+        if len(history) >= window:
+            return float(statistics.mean(history[-window:]))
+        return float(statistics.mean(history))
+
+    def _intent_to_order(self, intent: TradeIntent, market_data: Dict[str, Any]) -> TradeAction:
+        """
+        FCN 规则模型：将“交易意图”映射为具体限价单。
+        论文映射（FCLAgent / TwinMarket）：
+        - 意图由 LLM 输出，执行由规则模型完成，避免数值计算误差。
+        """
+        direction = str(intent.direction or "HOLD").upper()
+        urgency = self._normalize_urgency(intent.urgency)
+        reason = intent.reason or "LLM intent"
+
+        current_price = float(market_data.get("current_price", 0.0) or 0.0)
+        price_history = market_data.get("price_history", []) or []
+        reference_price = self._compute_reference_price(price_history, current_price)
+
+        # Chartist 动量项（短期趋势）
+        momentum = 0.0
+        if len(price_history) >= 6:
+            recent = [float(x) for x in price_history[-6:] if x is not None]
+            if len(recent) >= 6 and statistics.mean(recent[:-1]) > 0:
+                momentum = (recent[-1] - statistics.mean(recent[:-1])) / statistics.mean(recent[:-1])
+
+        # Urgency 影响溢价与仓位比例
+        urgency_premium = {"High": 0.006, "Medium": 0.003, "Low": 0.001}.get(urgency, 0.003)
+        urgency_size = {"High": 1.5, "Medium": 1.0, "Low": 0.6}.get(urgency, 1.0)
+
+        # 微小噪声用于“噪声交易者”扰动
+        noise = random.normalvariate(0, max(0.01, reference_price * 0.002))
+
+        if direction == "BUY":
+            base_price = reference_price * (1 + urgency_premium + 0.5 * max(momentum, 0.0))
+            target_price = max(0.01, base_price + noise)
+            budget = self.cash * (0.05 + 0.2 * self.persona.risk_tolerance) * urgency_size
+            qty = int(budget / target_price) if target_price > 0 else 0
+        elif direction == "SELL":
+            base_price = reference_price * (1 - urgency_premium - 0.5 * max(-momentum, 0.0))
+            target_price = max(0.01, base_price + noise)
+            holding = int(self.portfolio.get(market_data.get("symbol", ""), 0) or 0)
+            qty = int(holding * (0.25 + 0.5 * self.persona.risk_tolerance) * urgency_size)
+        else:
+            target_price = 0.0
+            qty = 0
+
+        if qty <= 0:
+            return TradeAction(
+                action="HOLD",
+                amount=0.0,
+                target_price=None,
+                reasoning_chain=f"意图={direction}/{urgency}，但执行层未形成有效数量，降级 HOLD。原因：{reason}"
+            )
+
+        return TradeAction(
+            action=direction,
+            amount=float(qty),
+            target_price=float(target_price),
+            reasoning_chain=f"意图={direction}/{urgency}，FCN 映射执行。原因：{reason}"
+        )
+
     async def generate_trading_decision(self, market_data: Dict[str, Any], retrieved_context: str) -> TradeAction:
         """
         使用带有严格 Pydantic 输出解析的 LLM 模型来产生异步的交易指令。
@@ -210,14 +312,18 @@ class TradingAgent:
             # 模拟 LLM 经过输出解析器(OutputParser)后得到的数据提取过程
             # 现实操作中，这里是从 LLM 返回文本中提取出的 JSON/Dict
             simulated_response = {
-                "action": "BUY" if self.persona.risk_tolerance > 0.5 else "HOLD",
-                "amount": self.cash * 0.1,  # 使用10%仓位
-                "target_price": market_data.get("current_price", 10.0) * (1 - GLOBAL_CONFIG.get("market_slippage", 0.001)),
-                "reasoning_chain": f"作为 {self.persona.cognitive_bias.value} 倾向的参与者，我受限分析了上述行情，认为这符合策略。"
+                "direction": "BUY" if self.persona.risk_tolerance > 0.55 else "HOLD",
+                "urgency": "High" if self.persona.policy_sensitivity > 0.7 else "Medium",
+                "reason": f"受 {self.persona.cognitive_bias.value} 偏差影响的意图输出"
             }
             
             # 使用 Pydantic 的严密校验解析字典。若字段缺失或类别错误将抛出 ValidationError
-            action_decision = TradeAction(**simulated_response)
+            try:
+                intent = TradeIntent(**simulated_response)
+            except ValidationError:
+                intent = self._coerce_legacy_intent(simulated_response)
+
+            action_decision = self._intent_to_order(intent, market_data)
             
             logger.info(f"[{self.agent_id}] 决定执行: {action_decision.action} {action_decision.amount}")
             return action_decision

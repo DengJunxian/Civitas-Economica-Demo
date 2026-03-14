@@ -14,6 +14,7 @@ TraderAgent 实现 — 基于认知闭环的交易智能体
 
 import asyncio
 import json
+import os
 import random
 import time
 from typing import Dict, List, Optional, Any, Tuple
@@ -22,10 +23,14 @@ import numpy as np
 from agents.base_agent import BaseAgent, MarketSnapshot
 from agents.brain import DeepSeekBrain
 from core.types import Order, OrderSide, OrderType, OrderStatus
+from core.behavioral_finance import predict_next_return
 from agents.persona import Persona, RiskAppetite
 from core.society.network import SocialGraph, SentimentState
 from agents.cognition.graph_storage import GraphMemoryBank
 from agents.cognition.graph_builder import GraphExtractor
+from agents.roles.news_analyst import NewsAnalyst
+from agents.roles.quant_analyst import QuantAnalyst
+from agents.roles.risk_analyst import RiskAnalyst
 
 class TraderAgent(BaseAgent):
     """
@@ -41,7 +46,10 @@ class TraderAgent(BaseAgent):
         model_router: Optional[Any] = None, # Support Router
         persona: Optional[Persona] = None,
         use_llm: bool = True,
-        model_priority: Optional[List[str]] = None
+        model_priority: Optional[List[str]] = None,
+        news_config: Optional[Dict[str, Any]] = None,
+        news_max_articles: int = 5,
+        ram_cooldown_steps: int = 3
     ):
         super().__init__(agent_id, cash_balance, portfolio, psychology_profile)
         
@@ -104,6 +112,25 @@ class TraderAgent(BaseAgent):
         
         # Sync initial confidence
         self.brain.state.confidence = self.profile.get("confidence_level", 0.5) * 100
+
+        # === Phase 1: Analyst Roles ===
+        self.news_analyst = NewsAnalyst(config_paths=news_config, max_articles=news_max_articles)
+        self.quant_analyst = QuantAnalyst()
+        self.risk_analyst = RiskAnalyst()
+
+        # === Risk Alert Meeting (RAM) State ===
+        self._portfolio_value_history: List[float] = []
+        self._last_cvar: Optional[float] = None
+        self._ram_until_step: int = 0
+        self._ram_last_trigger: str = ""
+        self._ram_cooldown_steps: int = max(1, int(ram_cooldown_steps))
+
+        # Phase 4: Wind-Tunnel + Beliefs
+        self._price_history: List[float] = []
+        self._wind_tunnel_confidence: float = 0.5
+        self._wind_tunnel_records: List[Dict[str, Any]] = []
+        self._recent_trade_outcomes: List[Dict[str, Any]] = []
+        self._last_belief_reflection_step: int = 0
 
     def _map_persona_to_risk_aversion(self) -> float:
         mapping = {
@@ -183,6 +210,13 @@ class TraderAgent(BaseAgent):
             risk_tilt=self._risk_tilt_from_persona(),
             historical_risk_bias=float(confidence_bias) * 0.3,
         )
+        self.social_graph.update_holdings(self.social_node_id, self.portfolio)
+        self.social_graph.update_bdi_profile(
+            self.social_node_id,
+            beliefs=dominant if dominant else default_focus[:3],
+            desires=focus_topics,
+            intentions=[getattr(self, "emotional_state", "Neutral")],
+        )
 
     async def perceive(
         self,
@@ -201,6 +235,15 @@ class TraderAgent(BaseAgent):
         pnl = portfolio_value - initial
         pnl_pct = pnl / initial if initial > 0 else 0
 
+        if portfolio_value:
+            self._portfolio_value_history.append(portfolio_value)
+            if len(self._portfolio_value_history) > 200:
+                self._portfolio_value_history = self._portfolio_value_history[-200:]
+
+        self._price_history.append(market_snapshot.last_price)
+        if len(self._price_history) > 200:
+            self._price_history = self._price_history[-200:]
+
         return {
             "snapshot": market_snapshot,
             "news": observed_news,
@@ -218,7 +261,17 @@ class TraderAgent(BaseAgent):
         推理阶段: 调用 DeepSeek Brain (Enhanced with Emotion & Social)
         """
         # 计算当前情绪状态
+        # Phase 1: Analyst Reports
+        analyst_reports = self._collect_analyst_reports(perceived_data)
+        perceived_data["analyst_reports"] = analyst_reports
+
         self.update_emotional_state(perceived_data)
+
+        # RAM 触发判定（先于常规决策）
+        self._update_ram_state(
+            analyst_reports.get("risk", {}),
+            getattr(self, "emotional_state", "Neutral")
+        )
         
         # 获取社交信号
         social_signal = self.perceive_social_signal(perceived_data)
@@ -341,6 +394,170 @@ class TraderAgent(BaseAgent):
             summary = f"[{capsule_topic}] 相关动态已发生: {text[:50]}..."
             self.graph_memory.add_capsule(capsule_topic, summary, current_time, ttl_seconds=3600)
 
+    def _collect_analyst_reports(self, perceived_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        收集三名分析师的 JSON 输出，并对失败调用进行容错降级。
+        该机制对应 FINCON/QuantAgents 的“角色解耦 + 分工协作”范式。
+        """
+        reports: Dict[str, Any] = {}
+        snapshot: MarketSnapshot = perceived_data.get("snapshot")
+
+        try:
+            reports["news"] = self.news_analyst.analyze()
+        except Exception as exc:
+            reports["news"] = {
+                "analyst": "NewsAnalyst",
+                "status": "error",
+                "error": str(exc),
+                "events": [],
+                "sentiment_score": 0.0,
+                "sentiment_label": "中性",
+            }
+
+        try:
+            reports["quant"] = self.quant_analyst.analyze(snapshot)
+        except Exception as exc:
+            reports["quant"] = {
+                "analyst": "QuantAnalyst",
+                "status": "error",
+                "error": str(exc),
+                "csad": 0.0,
+                "momentum": 0.0,
+                "herding_intensity": 0.0,
+            }
+
+        try:
+            reports["risk"] = self.risk_analyst.analyze(self._portfolio_value_history)
+        except Exception as exc:
+            reports["risk"] = {
+                "analyst": "RiskAnalyst",
+                "status": "error",
+                "error": str(exc),
+                "cvar": 0.0,
+                "max_drawdown": 0.0,
+            }
+
+        return reports
+
+    def _update_ram_state(self, risk_report: Dict[str, Any], emotional_state: str) -> None:
+        """
+        更新 Risk Alert Meeting (RAM) 状态。
+        触发条件：CVaR 显著恶化或情绪进入 Fearful。
+        对应 FINCON 风控会议机制：在情节内强制避险。
+        """
+        cvar = float(risk_report.get("cvar", 0.0) or 0.0)
+        cvar_drop = None
+        trigger_reason = ""
+
+        if self._last_cvar is not None:
+            cvar_drop = cvar - self._last_cvar
+            if cvar_drop < -abs(self._last_cvar) * 0.5 and cvar < 0:
+                trigger_reason = f"CVaR 陡降: {self._last_cvar:.4f} -> {cvar:.4f}"
+
+        if emotional_state == "Fearful":
+            trigger_reason = trigger_reason or "情绪 Fearful 触发风控会议"
+
+        if trigger_reason:
+            self._ram_until_step = max(self._ram_until_step, self._step_count + self._ram_cooldown_steps)
+            self._ram_last_trigger = trigger_reason
+
+        self._last_cvar = cvar
+        if cvar_drop is not None:
+            risk_report["cvar_drop"] = cvar_drop
+        risk_report["ram_active"] = self._ram_until_step >= self._step_count
+        risk_report["ram_trigger_reason"] = self._ram_last_trigger
+
+    def _beliefs_file_path(self) -> str:
+        base_dir = os.path.join("data", "beliefs")
+        os.makedirs(base_dir, exist_ok=True)
+        return os.path.join(base_dir, f"beliefs_{self.agent_id}.json")
+
+    def _persist_beliefs(self, new_beliefs: List[str]) -> None:
+        """将交易信仰持久化写入文件，供 System Prompt 长期强化。"""
+        path = self._beliefs_file_path()
+        beliefs = []
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    beliefs = data.get("beliefs", [])
+            except Exception:
+                beliefs = []
+        for b in new_beliefs:
+            b = str(b).strip()
+            if b and b not in beliefs:
+                beliefs.append(b)
+        beliefs = beliefs[-10:]
+        payload = {
+            "agent_id": self.agent_id,
+            "updated_at": time.time(),
+            "beliefs": beliefs,
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _reflect_and_persist_beliefs(self) -> None:
+        """
+        文本梯度下降：让 LLM 从连续盈亏中提炼抽象交易信仰，并写入系统提示。
+        对应 FINCON/QuantAgents 中的“概念化语言强化”。
+        """
+        if not self._recent_trade_outcomes:
+            return
+        if self._step_count - self._last_belief_reflection_step < 5:
+            return
+
+        recent = self._recent_trade_outcomes[-8:]
+        prompt = {
+            "recent_trades": recent,
+            "instruction": "提炼3条高度抽象的交易信仰(Investment Beliefs)，输出JSON数组"
+        }
+        messages = [
+            {"role": "system", "content": "你是资深量化与行为金融分析师。只输出JSON数组，不要包含其他文本。"},
+            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)}
+        ]
+
+        beliefs: List[str] = []
+        try:
+            if self.brain.model_router:
+                content, _, _ = self.brain.model_router.sync_call_with_fallback(
+                    messages=messages,
+                    priority_models=["deepseek-chat", "glm-4-flashx"],
+                    timeout_budget=20.0
+                )
+                parsed = json.loads(content)
+                if isinstance(parsed, list):
+                    beliefs = [str(x) for x in parsed if str(x).strip()]
+        except Exception:
+            beliefs = []
+
+        if not beliefs:
+            # 兜底规则
+            if self.brain.state.consecutive_losses >= 3:
+                beliefs = ["震荡市中高频追涨导致摩擦成本过高，应降低交易频率"]
+            elif self.brain.state.consecutive_wins >= 3:
+                beliefs = ["趋势市中顺势而为可提高胜率，但需控制回撤"]
+            else:
+                beliefs = ["在高不确定性环境中保持仓位纪律优于频繁试错"]
+
+        self._persist_beliefs(beliefs)
+        self._last_belief_reflection_step = self._step_count
+
+    def _wind_tunnel_predict(self) -> Dict[str, Any]:
+        """
+        内部模拟风洞：基于历史价格预测次日走势，作为下单前的拦截信号。
+        """
+        pred_return = predict_next_return(self._price_history)
+        if pred_return is None:
+            return {"valid": False}
+        return {
+            "valid": True,
+            "predicted_return": pred_return,
+            "confidence": self._wind_tunnel_confidence
+        }
+
     async def reason_and_act(
         self,
         perceived_data: Dict[str, Any],
@@ -353,7 +570,33 @@ class TraderAgent(BaseAgent):
         
         采用快慢思考双层架构 (System 1/2)
         """
-        # 0. System 1 (Rule-based) Enforcement
+        # 0. Risk Alert Meeting (RAM) override
+        snapshot: MarketSnapshot = perceived_data["snapshot"]
+        if self._ram_until_step >= self._step_count:
+            holding = self.portfolio.get(snapshot.symbol, 0)
+            if holding > 0:
+                return {
+                    "decision": {
+                        "action": "SELL",
+                        "qty": holding,
+                        "price": round(snapshot.last_price * 0.98, 2)
+                    },
+                    "reasoning": f"[RAM] 风控会议触发，强制避险清仓。原因：{self._ram_last_trigger}",
+                    "symbol": snapshot.symbol,
+                    "timestamp": snapshot.timestamp,
+                    "analyst_reports": perceived_data.get("analyst_reports", {}),
+                    "risk_mode": "RAM"
+                }
+            return {
+                "decision": {"action": "HOLD"},
+                "reasoning": f"[RAM] 风控会议触发，当前无持仓，保持观望。原因：{self._ram_last_trigger}",
+                "symbol": snapshot.symbol,
+                "timestamp": snapshot.timestamp,
+                "analyst_reports": perceived_data.get("analyst_reports", {}),
+                "risk_mode": "RAM"
+            }
+
+        # 1. System 1 (Rule-based) Enforcement
         # 如果被标记为非 LLM Agent，强制使用快思考 (模拟计算模式)
         if not self.use_llm:
             return self._fast_think(perceived_data, emotional_state, social_signal)
@@ -407,7 +650,8 @@ class TraderAgent(BaseAgent):
             "policy_description": getattr(snapshot, "policy_description", ""),
             "policy_tax_rate": getattr(snapshot, "policy_tax_rate", 0.0),
             "policy_news": getattr(snapshot, "policy_news", ""),
-            "graph_context": graph_context
+            "graph_context": graph_context,
+            "analyst_reports": perceived_data.get("analyst_reports", {})
         }
         
         # Map numeric trend to string for Brain
@@ -527,6 +771,17 @@ class TraderAgent(BaseAgent):
             
         if qty <= 0:
             return None
+
+        # Phase 4: Wind-Tunnel 拦截
+        wind_report = self._wind_tunnel_predict()
+        decision["wind_tunnel"] = wind_report
+        if wind_report.get("valid"):
+            pred = float(wind_report.get("predicted_return", 0.0))
+            conf = float(wind_report.get("confidence", 0.5))
+            if action == "BUY" and pred < -0.005 and conf > 0.6:
+                return None
+            if action == "SELL" and pred > 0.005 and conf > 0.6:
+                return None
             
         # 资金/持仓 预检查 (虽然 OrderBook 也会查，但 Agent 应有自我认知)
         if side == OrderSide.BUY:
@@ -583,6 +838,42 @@ class TraderAgent(BaseAgent):
              extract_text = f"交易复盘: 进行了操作 {decision.get('action')}，导致 {pnl} 的盈亏结果。当时信心为 {self.brain.state.confidence}。请提取本次成败的关键因素概念。"
              current_time = time.time()
              asyncio.create_task(self._async_extract_and_store(extract_text, current_time, is_news=False))
+
+        # Phase 4: Wind-Tunnel reward update
+        wind = decision.get("wind_tunnel", {})
+        if wind.get("valid"):
+            pred = float(wind.get("predicted_return", 0.0))
+            actual = 0.0
+            if len(self._price_history) >= 2:
+                prev = self._price_history[-2]
+                curr = self._price_history[-1]
+                actual = (curr - prev) / prev if prev > 0 else 0.0
+            if (pred * actual) > 0 and pnl > 0:
+                self._wind_tunnel_confidence = min(1.0, self._wind_tunnel_confidence + 0.05)
+            else:
+                self._wind_tunnel_confidence = max(0.1, self._wind_tunnel_confidence - 0.02)
+            self._wind_tunnel_records.append({
+                "pred": pred,
+                "actual": actual,
+                "pnl": pnl,
+                "confidence": self._wind_tunnel_confidence,
+                "step": self._step_count
+            })
+            if len(self._wind_tunnel_records) > 50:
+                self._wind_tunnel_records = self._wind_tunnel_records[-50:]
+
+        # Phase 4: Text-based Gradient Descent (Investment Beliefs)
+        self._recent_trade_outcomes.append({
+            "decision": decision,
+            "pnl": pnl,
+            "status": outcome.get("status", "UNKNOWN"),
+            "timestamp": time.time()
+        })
+        if len(self._recent_trade_outcomes) > 20:
+            self._recent_trade_outcomes = self._recent_trade_outcomes[-20:]
+
+        if self.brain.state.consecutive_losses >= 3 or self.brain.state.consecutive_wins >= 3:
+            self._reflect_and_persist_beliefs()
              
         # 3. 处理被风控拒绝的订单（监管认知）
         status = outcome.get("status")

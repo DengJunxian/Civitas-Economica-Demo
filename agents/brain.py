@@ -1,6 +1,7 @@
 # file: agents/brain.py
 
 import json
+import os
 import re
 import time
 import numpy as np
@@ -338,6 +339,19 @@ class DeepSeekBrain:
         区分机构 (Institution) 和散户 (Retail) 的 CoT 深度
         """
         agent_type = self.persona.get("agent_type", "retail")
+
+        beliefs_block = ""
+        beliefs_path = os.path.join("data", "beliefs", f"beliefs_{self.agent_id}.json")
+        if os.path.exists(beliefs_path):
+            try:
+                with open(beliefs_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    beliefs = data.get("beliefs", [])
+                if beliefs:
+                    beliefs_text = "\n".join([f"- {b}" for b in beliefs])
+                    beliefs_block = f"\n【交易信仰(长期强化)】\n{beliefs_text}\n"
+            except Exception:
+                beliefs_block = ""
         
         if agent_type == "institution":
             # ===== 机构投资者 Prompt: 强调逻辑、理性、结构化 CoT =====
@@ -367,7 +381,7 @@ class DeepSeekBrain:
     "qty": 0,
     "confidence": 0.0
 }}
-"""
+""" + beliefs_block
         
         # ===== 散户投资者 Prompt: 强调情绪、前景理论、非理性 =====
         loss_aversion = self.persona.get('loss_aversion', 2.25)
@@ -407,7 +421,7 @@ JSON 格式示例：
     "qty": 100,
     "confidence": 0.8
 }}
-"""
+""" + beliefs_block
 
 
     def _analyze_emotion(self, reasoning: str, decision: Dict) -> float:

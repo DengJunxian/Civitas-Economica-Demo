@@ -336,6 +336,29 @@ def overconfidence_score(
     return np.clip(overconfidence * 10, 0, 1)
 
 
+def predict_next_return(
+    prices: List[float],
+    short_window: int = 5,
+    long_window: int = 20
+) -> Optional[float]:
+    """
+    行为金融风洞预测：基于历史价格序列预测次日收益。
+    结合动量与均值回归的简化模型，用于“内部模拟风洞”拦截。
+    """
+    if prices is None or len(prices) < max(short_window, long_window) + 1:
+        return None
+    series = np.array([float(x) for x in prices if x is not None])
+    if len(series) < max(short_window, long_window) + 1:
+        return None
+
+    short_ma = np.mean(series[-short_window:])
+    long_ma = np.mean(series[-long_window:])
+    momentum = (short_ma - long_ma) / long_ma if long_ma != 0 else 0.0
+    reversion = (series[-1] - long_ma) / long_ma if long_ma != 0 else 0.0
+    predicted = 0.6 * momentum - 0.4 * reversion
+    return float(np.clip(predicted, -0.05, 0.05))
+
+
 # ========== 心理账户 (Mental Accounting) ==========
 
 @dataclass

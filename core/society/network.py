@@ -56,6 +56,14 @@ class AgentNode:
     feed_capacity: int = 3
     source_exposure_count: Dict[int, int] = field(default_factory=dict)
 
+    # BDI 抽象（beliefs/desires/intentions）
+    beliefs: List[str] = field(default_factory=list)
+    desires: List[str] = field(default_factory=list)
+    intentions: List[str] = field(default_factory=list)
+
+    # 持仓组合，用于 Jaccard 相似度与动态边权
+    holdings: Dict[str, int] = field(default_factory=dict)
+
 
 class SocialGraph:
     """
@@ -88,6 +96,8 @@ class SocialGraph:
         self.k = k
         self.p = p
         self.graph = nx.watts_strogatz_graph(n_agents, k, p, seed=seed)
+        for u, v in self.graph.edges():
+            self.graph[u][v]["weight"] = 1.0
         self.agents: Dict[int, AgentNode] = {}
         self.tick = 0
         self._init_agents(seed=seed)
@@ -145,6 +155,98 @@ class SocialGraph:
 
         if historical_risk_bias is not None:
             node.historical_risk_bias = float(np.clip(historical_risk_bias, -1.0, 1.0))
+
+    def update_bdi_profile(
+        self,
+        node_id: int,
+        *,
+        beliefs: Optional[List[str]] = None,
+        desires: Optional[List[str]] = None,
+        intentions: Optional[List[str]] = None,
+    ) -> None:
+        """
+        更新节点的 BDI 抽象状态，用于后续的意图传播与群体行为分析。
+        """
+        node = self.agents.get(node_id)
+        if node is None:
+            return
+        if beliefs is not None:
+            node.beliefs = [str(x).strip() for x in beliefs if str(x).strip()]
+        if desires is not None:
+            node.desires = [str(x).strip() for x in desires if str(x).strip()]
+        if intentions is not None:
+            node.intentions = [str(x).strip() for x in intentions if str(x).strip()]
+
+    def update_holdings(self, node_id: int, holdings: Dict[str, int]) -> None:
+        """
+        更新节点持仓，用于 Jaccard 相似度和动态边权计算。
+        """
+        node = self.agents.get(node_id)
+        if node is None:
+            return
+        cleaned = {str(k): int(v) for k, v in (holdings or {}).items() if int(v) != 0}
+        node.holdings = cleaned
+
+    def _portfolio_jaccard(self, a_node_id: int, b_node_id: int) -> float:
+        """
+        计算两节点持仓组合的 Jaccard 相似度。
+        """
+        a = self.agents.get(a_node_id)
+        b = self.agents.get(b_node_id)
+        if a is None or b is None:
+            return 0.0
+        a_set = {k for k, v in a.holdings.items() if v != 0}
+        b_set = {k for k, v in b.holdings.items() if v != 0}
+        if not a_set and not b_set:
+            return 0.0
+        return len(a_set & b_set) / max(1, len(a_set | b_set))
+
+    def update_edge_weights_by_portfolio(
+        self,
+        *,
+        weight_floor: float = 0.2,
+        weight_ceiling: float = 2.0,
+        smoothing: float = 0.3,
+    ) -> None:
+        """
+        基于持仓 Jaccard 相似度更新网络连边权重，提升相似持仓间的信息传播概率。
+        """
+        for u, v in self.graph.edges():
+            sim = self._portfolio_jaccard(u, v)
+            target = 1.0 + sim
+            old = float(self.graph[u][v].get("weight", 1.0))
+            new_weight = old * (1 - smoothing) + target * smoothing
+            new_weight = float(np.clip(new_weight, weight_floor, weight_ceiling))
+            self.graph[u][v]["weight"] = new_weight
+
+    def get_edge_weight(self, u: int, v: int) -> float:
+        return float(self.graph[u][v].get("weight", 1.0))
+
+    def get_bearish_ratio_weighted(self, node_id: int) -> float:
+        neighbors = self.get_neighbors(node_id)
+        if not neighbors:
+            return 0.0
+        total_w = 0.0
+        bearish_w = 0.0
+        for n in neighbors:
+            w = self.get_edge_weight(node_id, n)
+            total_w += w
+            if self.agents[n].sentiment_state == SentimentState.INFECTED:
+                bearish_w += w
+        return bearish_w / total_w if total_w > 0 else 0.0
+
+    def get_bullish_ratio_weighted(self, node_id: int) -> float:
+        neighbors = self.get_neighbors(node_id)
+        if not neighbors:
+            return 0.0
+        total_w = 0.0
+        bullish_w = 0.0
+        for n in neighbors:
+            w = self.get_edge_weight(node_id, n)
+            total_w += w
+            if self.agents[n].sentiment_state == SentimentState.BULLISH:
+                bullish_w += w
+        return bullish_w / total_w if total_w > 0 else 0.0
 
     def get_neighbors(self, node_id: int) -> List[int]:
         return list(self.graph.neighbors(node_id))
@@ -371,7 +473,7 @@ class InformationDiffusion:
             for n in neighbors
             if self.graph.agents[n].sentiment_state == SentimentState.INFECTED
         ]
-        infected_ratio = len(infected_neighbors) / len(neighbors)
+        infected_ratio = self.graph.get_bearish_ratio_weighted(target_node_id)
         if not infected_neighbors:
             return {
                 "pressure": 0.0,
@@ -402,6 +504,7 @@ class InformationDiffusion:
 
     def update_sentiment_propagation(self) -> Dict:
         self.graph.tick += 1
+        self.graph.update_edge_weights_by_portfolio()
         new_infected = 0
         new_recovered = 0
         new_susceptible = 0
@@ -486,7 +589,7 @@ class InformationDiffusion:
         旧版只看“感染邻居比例”，新版叠加语义感染压力，反映茧房放大效应。
         """
         for node_id, agent in self.graph.agents.items():
-            bearish_ratio = self.graph.get_bearish_ratio(node_id)
+            bearish_ratio = self.graph.get_bearish_ratio_weighted(node_id)
             semantic_pressure = self.compute_infection_signal(node_id)["pressure"]
             herding_factor = 1 + self.lambda_amplifier * (0.6 * bearish_ratio + 0.4 * semantic_pressure)
             new_lambda = agent.base_lambda * herding_factor

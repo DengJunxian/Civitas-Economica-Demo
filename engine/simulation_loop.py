@@ -11,10 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import random
 import uuid
 from typing import Any, Dict, List, Optional
 
-from agents.trading_agent_core import GLOBAL_CONFIG, TradingAgent
+import numpy as np
+
+from agents.trading_agent_core import GLOBAL_CONFIG, TradingAgent, Persona
 from engine.market_match import calculate_new_price
 from policy.policy_engine import PolicyEngine
 from simulation_runner import BufferedIntent, SimulationRunner
@@ -43,14 +47,31 @@ class MarketEnvironment:
         use_isolated_matching: bool = True,
         simulation_runner: Optional[SimulationRunner] = None,
         runner_symbol: str = "A_SHARE_IDX",
+        steps_per_day: int = 10,
+        evolution_interval_days: int = 5,
+        bankruptcy_threshold: float = 0.1,
+        low_return_threshold: float = -0.2,
+        mutation_rate: float = 0.2,
+        mutation_scale: float = 0.15,
     ):
         self.agents = agents
         self.simulation_time = 0
         self.current_price = float(GLOBAL_CONFIG.get("initial_market_price", 100.0))
+        self.price_history: List[float] = [self.current_price]
         self.policy_engine = PolicyEngine()
         self.use_isolated_matching = use_isolated_matching
         self.runner_symbol = runner_symbol
         self.last_step_report: Dict[str, Any] = {}
+        self.steps_per_day = max(1, int(steps_per_day))
+        self.evolution_interval_days = max(1, int(evolution_interval_days))
+        self.bankruptcy_threshold = float(bankruptcy_threshold)
+        self.low_return_threshold = float(low_return_threshold)
+        self.mutation_rate = float(mutation_rate)
+        self.mutation_scale = float(mutation_scale)
+        self._day_count = 0
+        self._initial_cash: Dict[str, float] = {}
+        self._wealth_history: Dict[str, List[float]] = {}
+        self._policy_shocks: List[str] = []
 
         self._owns_runner = simulation_runner is None
         self.simulation_runner = simulation_runner or SimulationRunner(
@@ -83,6 +104,19 @@ class MarketEnvironment:
         except Exception:
             pass
 
+    def schedule_policy_shock(self, policy_text: str) -> None:
+        """
+        提供给外部系统的“宏观扰动注入”接口。
+        对应 FinEvo 的 Perturbation：定期向系统注入黑天鹅冲击。
+        """
+        if policy_text:
+            self._policy_shocks.append(str(policy_text))
+
+    def _consume_policy_shock(self) -> Optional[str]:
+        if not self._policy_shocks:
+            return None
+        return self._policy_shocks.pop(0)
+
     async def simulation_step(self) -> Dict[str, Any]:
         """
         执行单个仿真步。
@@ -92,7 +126,7 @@ class MarketEnvironment:
         self.simulation_time += 1
         logger.info("--- Start simulation tick %s ---", self.simulation_time)
 
-        new_policy = self.policy_engine.emit_policy(self.simulation_time)
+        new_policy = self._consume_policy_shock() or self.policy_engine.emit_policy(self.simulation_time)
         if new_policy:
             logger.warning("[Policy Broadcast] %s", new_policy)
             for agent in self.agents:
@@ -114,6 +148,8 @@ class MarketEnvironment:
             "tick": self.simulation_time,
             "current_price": self.current_price,
             "latest_broadcast": new_policy if new_policy else "market_stable",
+            "price_history": list(self.price_history),
+            "symbol": self.runner_symbol,
         }
 
         async def process_agent(agent: TradingAgent):
@@ -186,6 +222,10 @@ class MarketEnvironment:
         else:
             self.current_price = calculate_new_price(buy_volume, sell_volume, self.current_price)
 
+        self.price_history.append(self.current_price)
+        if len(self.price_history) > 500:
+            self.price_history = self.price_history[-500:]
+
         price_change = ((self.current_price - old_price) / old_price) * 100 if old_price > 0 else 0.0
         logger.info(
             "[Macro State] Tick %s settled | BuyVol=%.2f | SellVol=%.2f | NewPrice=%.2f (%+.2f%%)",
@@ -207,5 +247,100 @@ class MarketEnvironment:
             "trade_count": trade_count,
             "buffered_intents": buffered_intents,
         }
+
+        self._update_wealth_history()
+
+        if self.simulation_time % self.steps_per_day == 0:
+            self._day_count += 1
+            if self._day_count % self.evolution_interval_days == 0:
+                evo_report = self._evolution_step()
+                self.last_step_report["evolution"] = evo_report
+
         return dict(self.last_step_report)
 
+    def _update_wealth_history(self) -> None:
+        """记录每个 Agent 的财富轨迹（现金 + 持仓市值）。"""
+        for agent in self.agents:
+            if agent.agent_id not in self._initial_cash:
+                self._initial_cash[agent.agent_id] = float(getattr(agent, "cash", 0.0))
+            cash = float(getattr(agent, "cash", 0.0))
+            portfolio = getattr(agent, "portfolio", {}) or {}
+            holding = float(sum(qty for qty in portfolio.values()))
+            wealth = cash + holding * self.current_price
+            history = self._wealth_history.setdefault(agent.agent_id, [])
+            history.append(wealth)
+            max_len = self.steps_per_day * self.evolution_interval_days * 2
+            if len(history) > max_len:
+                self._wealth_history[agent.agent_id] = history[-max_len:]
+
+    def _evolution_step(self) -> Dict[str, Any]:
+        """
+        FinEvo 演化步骤：选择（Selection）/ 创新（Innovation）/ 扰动（Perturbation）。
+        """
+        if not self.agents:
+            return {"status": "skipped", "reason": "no_agents"}
+
+        to_remove: List[TradingAgent] = []
+        returns: Dict[str, float] = {}
+        freed_capital = 0.0
+
+        for agent in self.agents:
+            agent_id = agent.agent_id
+            history = self._wealth_history.get(agent_id, [])
+            initial_cash = self._initial_cash.get(agent_id, float(getattr(agent, "cash", 0.0)))
+            if not history or initial_cash <= 0:
+                returns[agent_id] = 0.0
+                continue
+
+            window = min(len(history), self.steps_per_day * self.evolution_interval_days)
+            start_val = history[-window]
+            end_val = history[-1]
+            ret = (end_val / start_val - 1.0) if start_val > 0 else 0.0
+            returns[agent_id] = ret
+
+            if end_val <= initial_cash * self.bankruptcy_threshold or ret < self.low_return_threshold:
+                to_remove.append(agent)
+                freed_capital += max(0.0, end_val)
+
+        survivors = [a for a in self.agents if a not in to_remove]
+        self.agents = survivors
+
+        top_agents = sorted(survivors, key=lambda a: returns.get(a.agent_id, 0.0), reverse=True)
+        if freed_capital > 0 and top_agents:
+            scores = [max(returns.get(a.agent_id, 0.0), -0.5) for a in top_agents]
+            exps = [math.exp(s) for s in scores]
+            total = sum(exps) if exps else 1.0
+            for agent, weight in zip(top_agents, exps):
+                grant = freed_capital * (weight / total)
+                agent.cash = float(getattr(agent, "cash", 0.0)) + grant
+
+        mutants: List[TradingAgent] = []
+        if to_remove and top_agents:
+            n_mutants = max(1, int(len(to_remove) * self.mutation_rate))
+            budget = freed_capital * 0.2 if freed_capital > 0 else 0.0
+            per_capital = budget / n_mutants if n_mutants > 0 else 0.0
+
+            for _ in range(n_mutants):
+                parent = random.choice(top_agents)
+                parent_persona = parent.persona
+                new_risk = float(np.clip(parent_persona.risk_tolerance + random.uniform(-self.mutation_scale, self.mutation_scale), 0.0, 1.0))
+                new_persona = Persona(
+                    risk_tolerance=new_risk,
+                    cognitive_bias=parent_persona.cognitive_bias,
+                    investment_horizon=parent_persona.investment_horizon,
+                    policy_sensitivity=parent_persona.policy_sensitivity,
+                )
+                new_agent = TradingAgent(agent_id=f"Mutant_{uuid.uuid4().hex[:8]}", persona=new_persona)
+                new_agent.cash = max(0.0, per_capital)
+                mutants.append(new_agent)
+
+        if mutants:
+            self.agents.extend(mutants)
+
+        return {
+            "status": "ok",
+            "removed": [a.agent_id for a in to_remove],
+            "mutants": [a.agent_id for a in mutants],
+            "freed_capital": freed_capital,
+            "survivors": len(self.agents),
+        }

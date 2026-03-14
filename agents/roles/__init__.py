@@ -19,6 +19,9 @@ from agents.roles.analyst import (
     SignalType,
     tool,
 )
+from agents.roles.news_analyst import NewsAnalyst
+from agents.roles.quant_analyst import QuantAnalyst
+from agents.roles.risk_analyst import RiskAnalyst
 from agents.roles.national_team import NationalTeamAgent
 
 __all__ = [
@@ -30,4 +33,7 @@ __all__ = [
     "SignalType",
     "tool",
     "NationalTeamAgent",
+    "NewsAnalyst",
+    "QuantAnalyst",
+    "RiskAnalyst",
 ]

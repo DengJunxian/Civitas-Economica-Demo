@@ -20,6 +20,11 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional
 import time
+import os
+import json
+
+if os.environ.get("CIVITAS_DASHBOARD_EMBED") == "1":
+    st.set_page_config = lambda *args, **kwargs: None
 
 
 # ==========================================
@@ -370,6 +375,185 @@ def render_agent_distribution(agents_data: Dict) -> None:
 # ==========================================
 # 主页面
 # ==========================================
+
+def _iter_agent_cores(ctrl):
+    if not ctrl or not hasattr(ctrl, "model") or not hasattr(ctrl.model, "agents"):
+        return []
+    try:
+        agents = list(ctrl.model.agents)
+    except Exception:
+        return []
+    rows = []
+    for agent in agents:
+        core = getattr(agent, "core", None)
+        if core is None:
+            continue
+        rows.append((agent, core))
+    return rows
+
+
+def _read_beliefs(agent_id: str) -> Dict:
+    path = os.path.join("data", "beliefs", f"beliefs_{agent_id}.json")
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def render_manager_analyst_panel(ctrl) -> None:
+    st.subheader("Manager/Analyst Status")
+    rows = _iter_agent_cores(ctrl)
+    if not rows:
+        st.info("No active agents.")
+        return
+
+    step = getattr(getattr(ctrl, "model", None), "steps", 0)
+    ram_active = 0
+    fearful = 0
+    table = []
+    for agent, core in rows:
+        emotional = getattr(core, "emotional_state", "Unknown")
+        if emotional == "Fearful":
+            fearful += 1
+        ram_until = int(getattr(core, "_ram_until_step", 0) or 0)
+        ram_on = step <= ram_until
+        if ram_on:
+            ram_active += 1
+        table.append({
+            "agent_id": getattr(core, "agent_id", getattr(agent, "id", "unknown")),
+            "emotion": emotional,
+            "ram_active": ram_on,
+            "ram_trigger": getattr(core, "_ram_last_trigger", ""),
+            "last_cvar": getattr(core, "_last_cvar", None),
+        })
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Agents", len(rows))
+    with c2:
+        st.metric("RAM Active", ram_active)
+    with c3:
+        st.metric("Fearful", fearful)
+    st.dataframe(pd.DataFrame(table), use_container_width=True)
+
+
+def render_intent_mapping_panel(ctrl) -> None:
+    st.subheader("Intent -> Order Mapping (FCN)")
+    rows = _iter_agent_cores(ctrl)
+    if not rows:
+        st.info("No active agents.")
+        return
+
+    table = []
+    for agent, core in rows:
+        action = None
+        qty = None
+        price = None
+        pending = getattr(agent, "pending_action", None)
+        if isinstance(pending, dict):
+            action = pending.get("action")
+            qty = pending.get("quantity")
+            price = pending.get("price")
+        table.append({
+            "agent_id": getattr(core, "agent_id", getattr(agent, "id", "unknown")),
+            "last_action": action or "HOLD",
+            "quantity": qty or 0,
+            "limit_price": price or 0.0,
+        })
+    st.dataframe(pd.DataFrame(table), use_container_width=True)
+
+
+def render_social_network_panel(ctrl) -> None:
+    st.subheader("Social Graph (BDI + Weights)")
+    if not ctrl or not hasattr(ctrl, "model"):
+        st.info("Simulation not running.")
+        return
+
+    graph = getattr(ctrl.model, "social_graph", None)
+    diffusion = getattr(ctrl.model, "diffusion", None)
+    if graph is None or diffusion is None:
+        st.info("Social graph not available.")
+        return
+
+    weights = [float(data.get("weight", 1.0)) for _, _, data in graph.graph.edges(data=True)]
+    avg_weight = float(np.mean(weights)) if weights else 0.0
+
+    pressure = []
+    similarity = []
+    sample_nodes = list(graph.agents.keys())[:50]
+    for node_id in sample_nodes:
+        diag = diffusion.compute_infection_signal(node_id)
+        pressure.append(diag.get("pressure", 0.0))
+        similarity.append(diag.get("avg_similarity", 0.0))
+
+    stats = graph.get_network_stats()
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Avg Edge Weight", f"{avg_weight:.2f}")
+    with c2:
+        st.metric("Avg Semantic Sim", f"{(np.mean(similarity) if similarity else 0.0):.2f}")
+    with c3:
+        st.metric("Avg Pressure", f"{(np.mean(pressure) if pressure else 0.0):.2f}")
+
+    st.json({
+        "nodes": stats.get("total_nodes"),
+        "avg_degree": stats.get("avg_degree"),
+        "clustering": stats.get("clustering_coefficient"),
+        "sentiment": stats.get("sentiment_distribution"),
+    })
+
+
+def render_evolution_panel(ctrl, cadence: str = "day") -> None:
+    st.subheader("Evolution Cycle")
+    st.write(f"Cadence: {cadence}")
+    if not ctrl or not hasattr(ctrl, "model"):
+        st.info("Simulation not running.")
+        return
+    st.info("Evolution is executed in the simulation loop backend. Use cadence controls to align UI with backend settings.")
+
+
+def render_wind_tunnel_panel(ctrl) -> None:
+    st.subheader("Wind-Tunnel Forecasts")
+    rows = _iter_agent_cores(ctrl)
+    if not rows:
+        st.info("No active agents.")
+        return
+    agent_ids = [getattr(core, "agent_id", getattr(agent, "id", "unknown")) for agent, core in rows]
+    selected = st.selectbox("Agent", agent_ids, key="wind_tunnel_agent")
+    core = None
+    for agent, c in rows:
+        if getattr(c, "agent_id", getattr(agent, "id", "")) == selected:
+            core = c
+            break
+    if core is None:
+        st.info("Agent not found.")
+        return
+    records = getattr(core, "_wind_tunnel_records", [])
+    if not records:
+        st.info("No wind-tunnel records yet.")
+        return
+    df = pd.DataFrame(records)
+    st.line_chart(df.set_index("step")[["confidence"]])
+    st.dataframe(df.tail(10), use_container_width=True)
+
+
+def render_belief_panel(ctrl) -> None:
+    st.subheader("Investment Beliefs")
+    rows = _iter_agent_cores(ctrl)
+    if not rows:
+        st.info("No active agents.")
+        return
+    agent_ids = [getattr(core, "agent_id", getattr(agent, "id", "unknown")) for agent, core in rows]
+    selected = st.selectbox("Agent", agent_ids, key="belief_agent")
+    payload = _read_beliefs(selected)
+    if not payload:
+        st.info("No persisted beliefs for this agent.")
+        return
+    st.json(payload)
+
 
 def main():
     """主页面"""

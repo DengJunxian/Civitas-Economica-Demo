@@ -16,6 +16,7 @@ import numpy as np
 import plotly.graph_objects as go
 import time
 import nest_asyncio
+import os
 
 # --- 1. 页面配置 (必须是第一个 Streamlit 命令) ---
 # --- 1. 页面配置 ---
@@ -48,6 +49,8 @@ from core.regulatory_sandbox import (
 from core.policy_committee import PolicyCommittee
 
 # 引入UI组件
+os.environ["CIVITAS_DASHBOARD_EMBED"] = "1"
+from ui import dashboard as dashboard_ui
 from ui.demo_wind_tunnel import render_demo_tab
 
 # --- 1. 页面配置 ---
@@ -169,6 +172,8 @@ if 'simulation_mode' not in st.session_state:
     st.session_state.simulation_mode = "SMART"
 if 'day_cycle_paused' not in st.session_state:
     st.session_state.day_cycle_paused = False
+if 'evolution_cadence' not in st.session_state:
+    st.session_state.evolution_cadence = "day"
 if 'regulatory_module' not in st.session_state:
     from core.regulatory_sandbox import RegulatoryModule
     st.session_state.regulatory_module = RegulatoryModule()
@@ -355,6 +360,15 @@ with st.sidebar:
     st.divider()
     
     # --- 状态指示器 ---
+    st.subheader("Dashboard Panels")
+    st.session_state.evolution_cadence = st.selectbox(
+        "Evolution cadence",
+        ["day", "week"],
+        index=0 if st.session_state.evolution_cadence == "day" else 1
+    )
+
+    st.divider()
+
     status_color = "#34C759" if st.session_state.is_running else ("#FFD60A" if st.session_state.get('day_cycle_paused') else "#8E8E93")
     status_text = "🟢 仿真运行中" if st.session_state.is_running else ("🟡 仿真已暂停" if st.session_state.get('day_cycle_paused') else "⚪ 待启动")
     
@@ -620,13 +634,14 @@ with st.sidebar:
 # 创建标签页
 if st.session_state.backtest_mode:
     tab1, tab2 = st.tabs(["📊 回测结果", "🧠 Agent fMRI"])
-    tab_demo = tab_debate = tab_reg = tab_behavior = tab_quant = None
+    tab_demo = tab_feature = tab_debate = tab_reg = tab_behavior = tab_quant = None
 else:
-    tab_guide, tab_demo, tab1, tab2, tab_debate, tab_reg, tab_behavior, tab_quant = st.tabs([
+    tab_guide, tab_demo, tab1, tab2, tab_feature, tab_debate, tab_reg, tab_behavior, tab_quant = st.tabs([
         "🏠 系统导览",
         "🌪️ 沙箱风洞",
         "📈 市场走势", 
         "🧠 Agent fMRI", 
+        "🧩 功能面板",
         "⚔️ 辩论室",
         "🏛️ 监管沙盒",
         "📊 行为金融",
@@ -742,6 +757,19 @@ else:
 
     with tab_demo:
         render_demo_tab()
+        
+    with tab_feature:
+        dashboard_ui.render_manager_analyst_panel(ctrl)
+        st.markdown("---")
+        dashboard_ui.render_intent_mapping_panel(ctrl)
+        st.markdown("---")
+        dashboard_ui.render_social_network_panel(ctrl)
+        st.markdown("---")
+        dashboard_ui.render_evolution_panel(ctrl, st.session_state.evolution_cadence)
+        st.markdown("---")
+        dashboard_ui.render_wind_tunnel_panel(ctrl)
+        st.markdown("---")
+        dashboard_ui.render_belief_panel(ctrl)
         
     with tab1:
         # K线图全宽显示

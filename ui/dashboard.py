@@ -432,11 +432,11 @@ def render_manager_analyst_panel(ctrl) -> None:
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric("Agents", len(rows))
+        st.metric("智能体数", len(rows))
     with c2:
-        st.metric("RAM Active", ram_active)
+        st.metric("RAM 触发", ram_active)
     with c3:
-        st.metric("Fearful", fearful)
+        st.metric("恐惧情绪", fearful)
     st.dataframe(pd.DataFrame(table), use_container_width=True)
 
 
@@ -508,7 +508,8 @@ def render_social_network_panel(ctrl) -> None:
 
 def render_evolution_panel(ctrl, cadence: str = "day") -> None:
     st.subheader("演化周期")
-    st.write(f"触发节奏: {cadence}")
+    cadence_label = "按日" if cadence == "day" else "按周"
+    st.write(f"触发节奏: {cadence_label}")
     if not ctrl or not hasattr(ctrl, "model"):
         st.info("仿真尚未启动。")
         return

@@ -364,7 +364,8 @@ with st.sidebar:
     st.session_state.evolution_cadence = st.selectbox(
         "演化触发节奏",
         ["day", "week"],
-        index=0 if st.session_state.evolution_cadence == "day" else 1
+        index=0 if st.session_state.evolution_cadence == "day" else 1,
+        format_func=lambda x: "按日" if x == "day" else "按周"
     )
 
     st.divider()

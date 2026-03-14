@@ -125,3 +125,40 @@ class GraphMemoryBank:
             triplets.append(f"({u} -> {predicate} -> {v})")
             
         return "; ".join(triplets)
+
+    def get_dominant_narratives(self, top_k: int = 5) -> List[str]:
+        """
+        提取 GraphRAG 中当前最“主导”的叙事概念。
+
+        实现思路：
+        1. 以节点的加权入/出度近似“叙事重要性”；
+        2. 将知识胶囊 topic 作为额外先验加分；
+        3. 返回 top-k 主题词，供社交传播层做语义相似度计算。
+        """
+        if self.graph.number_of_nodes() == 0:
+            return list(self.capsules.keys())[:top_k]
+
+        scores: Dict[str, float] = {}
+        for node in self.graph.nodes:
+            node_str = str(node).strip()
+            if not node_str:
+                continue
+            scores[node_str] = 0.0
+
+        for u, v, data in self.graph.edges(data=True):
+            weight = float(data.get("weight", 1.0))
+            su = str(u).strip()
+            sv = str(v).strip()
+            if su:
+                scores[su] = scores.get(su, 0.0) + weight
+            if sv:
+                scores[sv] = scores.get(sv, 0.0) + weight
+
+        # 知识胶囊 topic 视为“近期高优先级叙事”，给固定加分
+        for topic in self.capsules.keys():
+            topic_str = str(topic).strip()
+            if topic_str:
+                scores[topic_str] = scores.get(topic_str, 0.0) + 1.0
+
+        ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        return [name for name, _ in ranked[:top_k]]

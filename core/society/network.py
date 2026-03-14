@@ -1,496 +1,528 @@
-# file: core/society/network.py
 """
-社会网络拓扑与情绪传播模块
+社会网络拓扑与语义驱动情绪传染模型。
 
-使用 NetworkX 构建小世界网络 (Watts-Strogatz)，
-并实现 SIR 模型的情绪传播动态。
-
-核心功能:
-1. SocialGraph: 小世界网络拓扑
-2. InformationDiffusion: SIR 情绪传播引擎
-3. 动态 λ 调整: 基于邻居情绪的羊群效应
-
-参考:
-- Watts-Strogatz (1998): 小世界网络
-- Shiller (2000): Irrational Exuberance (羊群行为)
-- SIR Model: 传染病学传播模型
-
-作者: Civitas Economica Team
+本模块实现从“纯拓扑概率传播”升级为：
+1. 语义驱动感染：感染概率与双方主导叙事余弦相似度挂钩；
+2. 轻量推荐分发：邻居信息先经过 Hot Score 排序后再进入感染计算；
+3. 信息茧房/回音壁：历史曝光会提升后续同源信息权重，形成强化回路。
 """
 
+from __future__ import annotations
+
+import hashlib
 import random
-import numpy as np
-import networkx as nx
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
 from enum import Enum
+from typing import Dict, List, Optional, Tuple
 
+import networkx as nx
+import numpy as np
 
-# ==========================================
-# 数据结构
-# ==========================================
 
 class SentimentState(str, Enum):
-    """
-    情绪状态 (SIR 模型)
-    
-    S - Susceptible: 易感/中性，可能被感染看空
-    I - Infected: 感染/看空，会传播悲观情绪
-    R - Recovered: 恢复/免疫，暂时不受影响
-    B - Bullish: 看多 (扩展状态)
-    """
-    SUSCEPTIBLE = "S"  # 中性
-    INFECTED = "I"     # 看空
-    RECOVERED = "R"    # 免疫
-    BULLISH = "B"      # 看多
+    """SIRS + Bullish 扩展状态。"""
+
+    SUSCEPTIBLE = "S"
+    INFECTED = "I"
+    RECOVERED = "R"
+    BULLISH = "B"
 
 
 @dataclass
 class AgentNode:
     """
-    社会网络中的 Agent 节点
-    
-    存储 Agent 的社会属性和动态状态。
+    社交网络中的智能体节点。
+
+    语义相关字段说明：
+    - dominant_narratives: 来自 GraphRAG 的主导叙事概念
+    - focus_topics: 该节点偏好接收的话题（推荐过滤）
+    - source_exposure_count: 历史曝光计数（形成回音壁）
     """
+
     node_id: int
     agent_id: str = ""
-    
-    # 情绪状态
     sentiment_state: SentimentState = SentimentState.SUSCEPTIBLE
-    
-    # 前景理论参数 (可动态调整)
-    base_lambda: float = 2.25     # 基础损失厌恶系数
-    lambda_coeff: float = 2.25    # 当前损失厌恶系数
-    
-    # 社会属性
-    conformity: float = 0.5       # 从众性 [0, 1]，越高越容易被影响
-    influence: float = 0.5        # 影响力 [0, 1]，越高越能影响他人
-    
-    # 状态持续时间
-    state_duration: int = 0       # 当前状态持续的 tick 数
-    
-    # 历史
+    base_lambda: float = 2.25
+    lambda_coeff: float = 2.25
+    conformity: float = 0.5
+    influence: float = 0.5
+    state_duration: int = 0
     sentiment_history: List[SentimentState] = field(default_factory=list)
 
+    dominant_narratives: List[str] = field(default_factory=list)
+    focus_topics: List[str] = field(default_factory=list)
+    risk_tilt: float = 0.0
+    historical_risk_bias: float = 0.0
+    feed_capacity: int = 3
+    source_exposure_count: Dict[int, int] = field(default_factory=dict)
 
-# ==========================================
-# 社会网络图
-# ==========================================
 
 class SocialGraph:
     """
-    小世界社会网络
-    
-    使用 Watts-Strogatz 模型构建 Agent 之间的社交连接。
-    
-    特性:
-    - 高聚类系数 (朋友的朋友也是朋友)
-    - 短平均路径长度 (六度分隔)
-    
-    Attributes:
-        graph: NetworkX 图对象
-        agents: Agent 节点字典
+    小世界社交网络 (Watts-Strogatz)。
     """
-    
+
+    _DEFAULT_TOPIC_POOL = [
+        "流动性",
+        "降准",
+        "通胀",
+        "地产",
+        "科技成长",
+        "监管趋严",
+        "风险偏好",
+        "外资流向",
+        "财政刺激",
+        "消费复苏",
+        "地缘风险",
+        "AI产业",
+    ]
+
     def __init__(
         self,
         n_agents: int = 1000,
         k: int = 6,
         p: float = 0.3,
-        seed: int = None
+        seed: int | None = None,
     ):
-        """
-        创建小世界网络
-        
-        Args:
-            n_agents: Agent 数量
-            k: 每个节点的初始邻居数 (必须为偶数)
-            p: 重连概率 (p=0 为规则网络, p=1 为随机网络)
-            seed: 随机种子
-        """
         self.n_agents = n_agents
         self.k = k
         self.p = p
-        
-        # 创建 Watts-Strogatz 小世界网络
         self.graph = nx.watts_strogatz_graph(n_agents, k, p, seed=seed)
-        
-        # 初始化 Agent 节点
         self.agents: Dict[int, AgentNode] = {}
-        self._init_agents()
-        
-        # 统计信息
         self.tick = 0
-    
-    def _init_agents(self) -> None:
-        """初始化 Agent 节点，设置异质性属性"""
+        self._init_agents(seed=seed)
+
+    def _init_agents(self, seed: int | None = None) -> None:
+        rng = np.random.default_rng(seed)
         for node_id in self.graph.nodes():
-            # 从众性：正态分布，大部分人中等从众
-            conformity = np.clip(np.random.normal(0.5, 0.15), 0.1, 0.9)
-            
-            # 影响力：幂律分布，少数人有高影响力
-            influence = min(0.9, np.random.pareto(2) * 0.2)
-            
-            # 损失厌恶系数：正态分布
-            base_lambda = np.clip(np.random.normal(2.25, 0.5), 1.0, 4.0)
-            
+            conformity = float(np.clip(rng.normal(0.5, 0.15), 0.1, 0.95))
+            influence = float(min(0.95, rng.pareto(2.0) * 0.2))
+            base_lambda = float(np.clip(rng.normal(2.25, 0.5), 1.0, 4.0))
+            focus_count = int(rng.integers(2, 5))
+            dominant_count = int(rng.integers(1, 4))
+            focus_topics = random.sample(self._DEFAULT_TOPIC_POOL, k=focus_count)
+            dominant = random.sample(focus_topics + self._DEFAULT_TOPIC_POOL, k=dominant_count)
             self.agents[node_id] = AgentNode(
                 node_id=node_id,
                 agent_id=f"agent_{node_id}",
                 conformity=conformity,
                 influence=influence,
                 base_lambda=base_lambda,
-                lambda_coeff=base_lambda
+                lambda_coeff=base_lambda,
+                dominant_narratives=list(dict.fromkeys(dominant)),
+                focus_topics=list(dict.fromkeys(focus_topics)),
+                risk_tilt=float(np.clip(rng.normal(0.0, 0.4), -1.0, 1.0)),
+                historical_risk_bias=0.0,
+                feed_capacity=int(rng.integers(2, 5)),
             )
-    
+
+    def update_semantic_profile(
+        self,
+        node_id: int,
+        *,
+        dominant_narratives: Optional[List[str]] = None,
+        focus_topics: Optional[List[str]] = None,
+        risk_tilt: Optional[float] = None,
+        historical_risk_bias: Optional[float] = None,
+    ) -> None:
+        """更新节点的语义画像（由外层 Agent/GraphRAG 同步）。"""
+        node = self.agents.get(node_id)
+        if node is None:
+            return
+
+        if dominant_narratives is not None:
+            cleaned = [str(x).strip() for x in dominant_narratives if str(x).strip()]
+            if cleaned:
+                node.dominant_narratives = list(dict.fromkeys(cleaned))
+
+        if focus_topics is not None:
+            cleaned = [str(x).strip() for x in focus_topics if str(x).strip()]
+            if cleaned:
+                node.focus_topics = list(dict.fromkeys(cleaned))
+
+        if risk_tilt is not None:
+            node.risk_tilt = float(np.clip(risk_tilt, -1.0, 1.0))
+
+        if historical_risk_bias is not None:
+            node.historical_risk_bias = float(np.clip(historical_risk_bias, -1.0, 1.0))
+
     def get_neighbors(self, node_id: int) -> List[int]:
-        """获取邻居节点 ID"""
         return list(self.graph.neighbors(node_id))
-    
+
     def get_neighbor_sentiments(self, node_id: int) -> Dict[SentimentState, int]:
-        """统计邻居的情绪分布"""
         neighbors = self.get_neighbors(node_id)
         counts = {state: 0 for state in SentimentState}
-        
         for n in neighbors:
-            state = self.agents[n].sentiment_state
-            counts[state] += 1
-        
+            counts[self.agents[n].sentiment_state] += 1
         return counts
-    
+
     def get_bearish_ratio(self, node_id: int) -> float:
-        """计算邻居中看空者的比例"""
         neighbors = self.get_neighbors(node_id)
         if not neighbors:
             return 0.0
-        
-        bearish_count = sum(
-            1 for n in neighbors
-            if self.agents[n].sentiment_state == SentimentState.INFECTED
-        )
-        return bearish_count / len(neighbors)
-    
+        bearish = sum(1 for n in neighbors if self.agents[n].sentiment_state == SentimentState.INFECTED)
+        return bearish / len(neighbors)
+
     def get_bullish_ratio(self, node_id: int) -> float:
-        """计算邻居中看多者的比例"""
         neighbors = self.get_neighbors(node_id)
         if not neighbors:
             return 0.0
-        
-        bullish_count = sum(
-            1 for n in neighbors
-            if self.agents[n].sentiment_state == SentimentState.BULLISH
-        )
-        return bullish_count / len(neighbors)
-    
+        bullish = sum(1 for n in neighbors if self.agents[n].sentiment_state == SentimentState.BULLISH)
+        return bullish / len(neighbors)
+
+    @staticmethod
+    def _topic_vector(topics: List[str], dim: int = 64) -> np.ndarray:
+        """将主题列表映射为固定维度向量，用于轻量余弦相似度。"""
+        vec = np.zeros(dim, dtype=float)
+        if not topics:
+            return vec
+        for topic in topics:
+            key = str(topic).strip().lower()
+            if not key:
+                continue
+            digest = hashlib.md5(key.encode("utf-8")).hexdigest()
+            idx = int(digest, 16) % dim
+            vec[idx] += 1.0
+        norm = np.linalg.norm(vec)
+        if norm > 0:
+            vec /= norm
+        return vec
+
+    def get_narrative_similarity(self, a_node_id: int, b_node_id: int) -> float:
+        """
+        计算两节点主导叙事余弦相似度，返回 [0, 1]。
+        """
+        a = self.agents.get(a_node_id)
+        b = self.agents.get(b_node_id)
+        if a is None or b is None:
+            return 0.0
+        # 语义相似度以“主导叙事”为核心，同时引入关注主题作为补充上下文，
+        # 可降低冷启动阶段因图谱稀疏导致的全零相似。
+        a_topics = list(dict.fromkeys(a.dominant_narratives + a.focus_topics))
+        b_topics = list(dict.fromkeys(b.dominant_narratives + b.focus_topics))
+        va = self._topic_vector(a_topics)
+        vb = self._topic_vector(b_topics)
+        if float(np.linalg.norm(va)) == 0 or float(np.linalg.norm(vb)) == 0:
+            return 0.0
+        sim = float(np.dot(va, vb))
+        return float(np.clip(sim, 0.0, 1.0))
+
     def generate_social_summary(self, node_id: int) -> str:
-        """
-        生成朋友圈舆情摘要
-        
-        用于注入 LLM Prompt，模拟社交媒体对投资决策的影响。
-        
-        Returns:
-            描述朋友圈情绪的中文字符串
-        """
         sentiments = self.get_neighbor_sentiments(node_id)
-        neighbors = self.get_neighbors(node_id)
-        total = len(neighbors) if neighbors else 1
-        
-        bearish = sentiments.get(SentimentState.INFECTED, 0)
-        bullish = sentiments.get(SentimentState.BULLISH, 0)
-        neutral = sentiments.get(SentimentState.SUSCEPTIBLE, 0)
-        
-        parts = []
+        total = max(1, len(self.get_neighbors(node_id)))
+        bearish = sentiments[SentimentState.INFECTED]
+        bullish = sentiments[SentimentState.BULLISH]
+        neutral = sentiments[SentimentState.SUSCEPTIBLE]
+
         if bearish > total * 0.5:
-            parts.append(f"你的{bearish}个朋友中超过半数在看空！群里弥漫着悲观情绪。")
-        elif bearish > total * 0.3:
-            parts.append(f"朋友圈开始出现恐慌情绪，{bearish}人发帖说要割肉。")
-        
+            return f"你关注的账户中有{bearish}个处于强烈悲观，负面叙事正在扩散。"
         if bullish > total * 0.5:
-            parts.append(f"你的{bullish}个朋友都在喊加仓！群里非常亢奋。")
-        elif bullish > total * 0.3:
-            parts.append(f"有{bullish}个朋友分享了盈利截图，气氛偏乐观。")
-        
-        if not parts:
-            parts.append(f"朋友圈比较平静，{neutral}人在观望中。")
-        
-        return " ".join(parts)
-    
+            return f"你关注的账户中有{bullish}个明显看多，乐观叙事占据上风。"
+        if bearish > bullish:
+            return f"社交圈偏谨慎，悲观信号({bearish})多于乐观信号({bullish})。"
+        if bullish > bearish:
+            return f"社交圈偏积极，乐观信号({bullish})多于悲观信号({bearish})。"
+        return f"社交圈整体中性，观望账户约{neutral}个。"
+
     def get_most_influential_node(self) -> Optional[int]:
-        """
-        获取影响力最高的节点 ID (网络枢纽)
-        
-        Returns:
-            影响力最高节点的 ID，若网络为空则返回 None
-        """
         if not self.agents:
             return None
         return max(self.agents.items(), key=lambda x: x[1].influence)[0]
 
     def get_network_stats(self) -> Dict:
-        """获取网络统计信息"""
         states = [a.sentiment_state for a in self.agents.values()]
-        
         return {
             "total_nodes": self.n_agents,
-            "avg_degree": sum(dict(self.graph.degree()).values()) / self.n_agents,
+            "avg_degree": sum(dict(self.graph.degree()).values()) / max(1, self.n_agents),
             "clustering_coefficient": nx.average_clustering(self.graph),
             "sentiment_distribution": {
                 "susceptible": sum(1 for s in states if s == SentimentState.SUSCEPTIBLE),
                 "infected": sum(1 for s in states if s == SentimentState.INFECTED),
                 "recovered": sum(1 for s in states if s == SentimentState.RECOVERED),
-                "bullish": sum(1 for s in states if s == SentimentState.BULLISH)
+                "bullish": sum(1 for s in states if s == SentimentState.BULLISH),
             },
-            "avg_lambda": np.mean([a.lambda_coeff for a in self.agents.values()])
+            "avg_lambda": float(np.mean([a.lambda_coeff for a in self.agents.values()])),
         }
 
 
-# ==========================================
-# SIR 情绪传播引擎
-# ==========================================
+class LightweightRecSys:
+    """
+    轻量推荐模块：根据 Hot Score 为目标节点挑选信息源。
+
+    评分项（全部归一化到 0~1）：
+    - 语义相似度 semantic_similarity
+    - 主题匹配 topic_match（关注列表 vs 对方叙事）
+    - 风偏亲和 risk_affinity（历史风险偏好接近度）
+    - 影响力 influence_factor
+    - 回音壁强化 echo_boost（历史曝光次数）
+    """
+
+    def __init__(
+        self,
+        w_semantic: float = 0.35,
+        w_topic: float = 0.25,
+        w_risk: float = 0.15,
+        w_influence: float = 0.15,
+        w_echo: float = 0.10,
+    ):
+        self.w_semantic = w_semantic
+        self.w_topic = w_topic
+        self.w_risk = w_risk
+        self.w_influence = w_influence
+        self.w_echo = w_echo
+
+    @staticmethod
+    def _jaccard(a: List[str], b: List[str]) -> float:
+        sa = {x.strip().lower() for x in a if str(x).strip()}
+        sb = {x.strip().lower() for x in b if str(x).strip()}
+        if not sa and not sb:
+            return 0.0
+        return len(sa & sb) / max(1, len(sa | sb))
+
+    def hot_score(
+        self,
+        target: AgentNode,
+        source: AgentNode,
+        semantic_similarity: float,
+    ) -> float:
+        topic_match = self._jaccard(target.focus_topics, source.dominant_narratives)
+        target_risk = float(np.clip(target.risk_tilt + target.historical_risk_bias, -1.0, 1.0))
+        source_risk = float(np.clip(source.risk_tilt + source.historical_risk_bias, -1.0, 1.0))
+        risk_affinity = 1.0 - min(1.0, abs(target_risk - source_risk))
+        influence_factor = float(np.clip(source.influence, 0.0, 1.0))
+        echo_boost = min(1.0, target.source_exposure_count.get(source.node_id, 0) / 5.0)
+
+        score = (
+            self.w_semantic * semantic_similarity
+            + self.w_topic * topic_match
+            + self.w_risk * risk_affinity
+            + self.w_influence * influence_factor
+            + self.w_echo * echo_boost
+        )
+        return float(np.clip(score, 0.0, 1.0))
+
 
 class InformationDiffusion:
     """
-    信息/情绪传播引擎 (SIR 模型)
-    
-    模拟看空情绪在社交网络中的传播：
-    
-    传播机制:
-    1. S → I: 中性 Agent 被看空邻居"感染"
-       概率 = β * (看空邻居比例) * (从众性)
-       
-    2. I → R: 看空 Agent "恢复"中性
-       概率 = γ
-       
-    3. R → S: 免疫 Agent 再次变得易感
-       概率 = δ (损失免疫力)
-    
-    羊群效应:
-    - 当邻居看空比例高时，动态增加 λ (损失厌恶)
-    - 模拟恐慌情绪的自我强化
+    语义驱动 SIRS 情绪传播引擎。
     """
-    
+
     def __init__(
         self,
         social_graph: SocialGraph,
-        beta: float = 0.3,      # 感染概率
-        gamma: float = 0.1,     # 恢复概率
-        delta: float = 0.05,    # 免疫衰减概率
-        lambda_amplifier: float = 0.5  # λ 放大系数
+        beta: float = 0.3,
+        gamma: float = 0.1,
+        delta: float = 0.05,
+        lambda_amplifier: float = 0.5,
+        recsys: Optional[LightweightRecSys] = None,
     ):
-        """
-        初始化传播引擎
-        
-        Args:
-            social_graph: 社会网络
-            beta: 基础感染概率
-            gamma: 恢复概率
-            delta: 免疫衰减概率
-            lambda_amplifier: λ 放大系数 (羊群效应强度)
-        """
         self.graph = social_graph
         self.beta = beta
         self.gamma = gamma
         self.delta = delta
         self.lambda_amplifier = lambda_amplifier
-        
-        # 历史记录
+        self.recsys = recsys or LightweightRecSys()
         self.history: List[Dict] = []
-    
+
+    def _rank_semantic_feed(self, target: AgentNode, infected_neighbors: List[AgentNode]) -> List[Tuple[AgentNode, float, float]]:
+        """
+        针对目标节点做推荐排序，返回 (源节点, hot_score, semantic_similarity)。
+
+        这里是“信息分发层”，目标是替代“所有邻居等权注入”的旧逻辑。
+        """
+        ranked: List[Tuple[AgentNode, float, float]] = []
+        for source in infected_neighbors:
+            sim = self.graph.get_narrative_similarity(target.node_id, source.node_id)
+            hot = self.recsys.hot_score(target, source, sim)
+            ranked.append((source, hot, sim))
+
+        ranked.sort(key=lambda x: x[1], reverse=True)
+        feed_cap = max(1, target.feed_capacity)
+        chosen = ranked[:feed_cap]
+
+        # 历史曝光计数用于回音壁强化：高分内容更容易被持续看见
+        for source, _, _ in chosen:
+            target.source_exposure_count[source.node_id] = target.source_exposure_count.get(source.node_id, 0) + 1
+
+        return chosen
+
+    def compute_infection_signal(self, target_node_id: int) -> Dict[str, float]:
+        """
+        计算目标节点在当前时刻的“有效感染信号”。
+
+        返回：
+        - pressure: 语义+推荐加权后的感染压力
+        - avg_hot_score: 推荐热度均值
+        - avg_similarity: 语义相似均值
+        - infected_neighbor_ratio: 拓扑层感染邻居比例
+        """
+        target = self.graph.agents[target_node_id]
+        neighbors = self.graph.get_neighbors(target_node_id)
+        if not neighbors:
+            return {
+                "pressure": 0.0,
+                "avg_hot_score": 0.0,
+                "avg_similarity": 0.0,
+                "infected_neighbor_ratio": 0.0,
+            }
+
+        infected_neighbors = [
+            self.graph.agents[n]
+            for n in neighbors
+            if self.graph.agents[n].sentiment_state == SentimentState.INFECTED
+        ]
+        infected_ratio = len(infected_neighbors) / len(neighbors)
+        if not infected_neighbors:
+            return {
+                "pressure": 0.0,
+                "avg_hot_score": 0.0,
+                "avg_similarity": 0.0,
+                "infected_neighbor_ratio": infected_ratio,
+            }
+
+        feed = self._rank_semantic_feed(target, infected_neighbors)
+        hot_scores = [item[1] for item in feed]
+        similarities = [item[2] for item in feed]
+        # 核心感染强度：必须同时满足“语义匹配”和“推荐命中”
+        contributions = [hot * sim for (_, hot, sim) in feed]
+        base_pressure = float(np.mean(contributions)) if contributions else 0.0
+
+        # 再乘上拓扑感染密度，避免单点异常信息过强
+        semantic_pressure = base_pressure * (0.5 + 0.5 * infected_ratio)
+        # 将拓扑感染密度作为弱先验注入，避免语义冷启动时期传播几乎停滞。
+        pressure = semantic_pressure + 0.35 * infected_ratio
+        pressure = float(np.clip(pressure, 0.0, 1.0))
+
+        return {
+            "pressure": pressure,
+            "avg_hot_score": float(np.mean(hot_scores)) if hot_scores else 0.0,
+            "avg_similarity": float(np.mean(similarities)) if similarities else 0.0,
+            "infected_neighbor_ratio": infected_ratio,
+        }
+
     def update_sentiment_propagation(self) -> Dict:
-        """
-        执行一轮情绪传播更新
-        
-        Returns:
-            本轮传播统计
-        """
         self.graph.tick += 1
-        
-        # 统计变化
         new_infected = 0
         new_recovered = 0
         new_susceptible = 0
-        
-        # 收集状态变化 (避免在迭代中修改)
+        semantic_sims: List[float] = []
+        hot_scores: List[float] = []
         state_changes: List[Tuple[int, SentimentState]] = []
-        
+
         for node_id, agent in self.graph.agents.items():
-            new_state = self._update_single_agent(agent)
-            
+            new_state, diagnostics = self._update_single_agent(agent)
+            if diagnostics is not None:
+                semantic_sims.append(diagnostics["avg_similarity"])
+                hot_scores.append(diagnostics["avg_hot_score"])
+
             if new_state != agent.sentiment_state:
                 state_changes.append((node_id, new_state))
-                
                 if new_state == SentimentState.INFECTED:
                     new_infected += 1
                 elif new_state == SentimentState.RECOVERED:
                     new_recovered += 1
                 elif new_state == SentimentState.SUSCEPTIBLE:
                     new_susceptible += 1
-        
-        # 应用状态变化
+
         for node_id, new_state in state_changes:
             agent = self.graph.agents[node_id]
             agent.sentiment_history.append(agent.sentiment_state)
             agent.sentiment_state = new_state
             agent.state_duration = 0
-        
-        # 更新持续时间
+
         for agent in self.graph.agents.values():
             agent.state_duration += 1
-        
-        # 更新 Lambda (羊群效应)
+
         self._update_lambda_by_herding()
-        
-        # 记录历史
+        dist = self.graph.get_network_stats()["sentiment_distribution"]
         stats = {
             "tick": self.graph.tick,
             "new_infected": new_infected,
             "new_recovered": new_recovered,
             "new_susceptible": new_susceptible,
-            **self.graph.get_network_stats()["sentiment_distribution"]
+            "avg_semantic_similarity": float(np.mean(semantic_sims)) if semantic_sims else 0.0,
+            "avg_hot_score": float(np.mean(hot_scores)) if hot_scores else 0.0,
+            **dist,
         }
         self.history.append(stats)
-        
         return stats
-    
-    def _update_single_agent(self, agent: AgentNode) -> SentimentState:
-        """
-        更新单个 Agent 的情绪状态
-        
-        基于 SIR 模型的状态转换规则。
-        """
-        current_state = agent.sentiment_state
-        
-        if current_state == SentimentState.SUSCEPTIBLE:
-            # S → I: 可能被感染
-            bearish_ratio = self.graph.get_bearish_ratio(agent.node_id)
-            
-            # 感染概率 = β * 看空比例 * 从众性
-            infection_prob = self.beta * bearish_ratio * agent.conformity
-            
+
+    def _update_single_agent(self, agent: AgentNode) -> Tuple[SentimentState, Optional[Dict[str, float]]]:
+        state = agent.sentiment_state
+        diagnostics: Optional[Dict[str, float]] = None
+
+        if state == SentimentState.SUSCEPTIBLE:
+            diagnostics = self.compute_infection_signal(agent.node_id)
+            infection_prob = float(np.clip(self.beta * diagnostics["pressure"] * agent.conformity, 0.0, 1.0))
             if random.random() < infection_prob:
-                return SentimentState.INFECTED
-        
-        elif current_state == SentimentState.INFECTED:
-            # I → R: 可能恢复
-            # 考虑状态持续时间 (恐慌持续越久越容易恢复)
-            recovery_prob = self.gamma * (1 + agent.state_duration * 0.1)
-            
+                return SentimentState.INFECTED, diagnostics
+            return state, diagnostics
+
+        if state == SentimentState.INFECTED:
+            # 感染者恢复概率随持续时间上升，但在强回音壁中会被抑制
+            diagnostics = self.compute_infection_signal(agent.node_id)
+            echo_strength = min(1.0, np.mean(list(agent.source_exposure_count.values())) / 8.0) if agent.source_exposure_count else 0.0
+            recovery_prob = self.gamma * (1 + agent.state_duration * 0.1) * (1.0 - 0.4 * echo_strength)
+            recovery_prob = float(np.clip(recovery_prob, 0.0, 1.0))
             if random.random() < recovery_prob:
-                return SentimentState.RECOVERED
-        
-        elif current_state == SentimentState.RECOVERED:
-            # R → S: 可能再次易感
-            if random.random() < self.delta:
-                return SentimentState.SUSCEPTIBLE
-        
-        return current_state
-    
+                return SentimentState.RECOVERED, diagnostics
+            return state, diagnostics
+
+        if state == SentimentState.RECOVERED:
+            # 免疫衰减：在语义匹配的传播环境下更容易再次变为易感
+            diagnostics = self.compute_infection_signal(agent.node_id)
+            decay_prob = self.delta * (1.0 + 0.5 * diagnostics["pressure"])
+            decay_prob = float(np.clip(decay_prob, 0.0, 1.0))
+            if random.random() < decay_prob:
+                return SentimentState.SUSCEPTIBLE, diagnostics
+            return state, diagnostics
+
+        # BULLISH 或其他扩展状态先保持不变
+        return state, diagnostics
+
     def _update_lambda_by_herding(self) -> None:
         """
-        基于羊群效应动态调整 λ (损失厌恶系数)
-        
-        规则:
-        - 邻居看空比例越高 → λ 越大 → 越恐惧
-        - λ 范围: [base_lambda * 0.8, base_lambda * 2.0]
+        动态损失厌恶更新：
+        旧版只看“感染邻居比例”，新版叠加语义感染压力，反映茧房放大效应。
         """
         for node_id, agent in self.graph.agents.items():
             bearish_ratio = self.graph.get_bearish_ratio(node_id)
-            
-            # 羊群效应放大
-            # λ = base_λ * (1 + amplifier * bearish_ratio)
-            herding_factor = 1 + self.lambda_amplifier * bearish_ratio
-            
-            # 限制范围
+            semantic_pressure = self.compute_infection_signal(node_id)["pressure"]
+            herding_factor = 1 + self.lambda_amplifier * (0.6 * bearish_ratio + 0.4 * semantic_pressure)
             new_lambda = agent.base_lambda * herding_factor
-            new_lambda = np.clip(new_lambda, agent.base_lambda * 0.8, agent.base_lambda * 2.0)
-            
-            agent.lambda_coeff = new_lambda
-    
-    def inject_panic(
-        self,
-        n_seeds: int = 10,
-        method: str = "random"
-    ) -> List[int]:
-        """
-        注入恐慌种子
-        
-        模拟外部冲击 (如政策变化、黑天鹅事件) 导致部分 Agent 变为看空。
-        
-        Args:
-            n_seeds: 种子数量
-            method: 选择方法
-                - "random": 随机选择
-                - "influential": 选择高影响力节点
-                - "clustered": 选择同一社区的节点
-                
-        Returns:
-            被感染的节点 ID 列表
-        """
+            agent.lambda_coeff = float(np.clip(new_lambda, agent.base_lambda * 0.8, agent.base_lambda * 2.0))
+
+    def inject_panic(self, n_seeds: int = 10, method: str = "random") -> List[int]:
         if method == "random":
             seeds = random.sample(list(self.graph.agents.keys()), min(n_seeds, len(self.graph.agents)))
-        
         elif method == "influential":
-            # 按影响力排序，选择最高的
-            sorted_agents = sorted(
-                self.graph.agents.items(),
-                key=lambda x: x[1].influence,
-                reverse=True
-            )
+            sorted_agents = sorted(self.graph.agents.items(), key=lambda x: x[1].influence, reverse=True)
             seeds = [a[0] for a in sorted_agents[:n_seeds]]
-        
         elif method == "clustered":
-            # 选择一个随机节点及其邻居
             start_node = random.choice(list(self.graph.agents.keys()))
-            neighbors = self.graph.get_neighbors(start_node)
-            seeds = [start_node] + neighbors[:n_seeds-1]
-        
+            seeds = [start_node] + self.graph.get_neighbors(start_node)[: max(0, n_seeds - 1)]
         else:
             seeds = random.sample(list(self.graph.agents.keys()), min(n_seeds, len(self.graph.agents)))
-        
-        # 设置为感染状态
+
         for node_id in seeds:
             self.graph.agents[node_id].sentiment_state = SentimentState.INFECTED
             self.graph.agents[node_id].state_duration = 0
-        
         return seeds
-    
+
     def get_propagation_stats(self) -> Dict:
-        """获取传播统计"""
         if not self.history:
             return {}
-        
         infected_counts = [h["infected"] for h in self.history]
-        
+        peak = max(infected_counts) if infected_counts else 0
         return {
             "total_ticks": len(self.history),
-            "peak_infected": max(infected_counts) if infected_counts else 0,
-            "peak_tick": infected_counts.index(max(infected_counts)) if infected_counts else 0,
-            "current_stats": self.history[-1] if self.history else {}
+            "peak_infected": peak,
+            "peak_tick": infected_counts.index(peak) if infected_counts else 0,
+            "current_stats": self.history[-1],
         }
-    
-    def simulate(
-        self,
-        n_ticks: int = 100,
-        initial_infected: int = 10
-    ) -> List[Dict]:
-        """
-        运行完整传播模拟
-        
-        Args:
-            n_ticks: 模拟轮数
-            initial_infected: 初始感染数
-            
-        Returns:
-            每轮的统计列表
-        """
-        # 注入初始恐慌
+
+    def simulate(self, n_ticks: int = 100, initial_infected: int = 10) -> List[Dict]:
         self.inject_panic(initial_infected, method="influential")
-        
-        # 运行模拟
         for _ in range(n_ticks):
             self.update_sentiment_propagation()
-        
         return self.history
-
-
-

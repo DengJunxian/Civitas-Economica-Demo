@@ -406,6 +406,13 @@ class CivitasModel(Model):
         
         # 更新社交网络情绪传播
         if self.diffusion:
+            # 在每轮扩散前先同步各 Agent 的语义画像（GraphRAG 主导叙事 + 风偏）。
+            for agent in self.agents:
+                if hasattr(agent, "core") and hasattr(agent.core, "sync_social_semantic_profile"):
+                    try:
+                        agent.core.sync_social_semantic_profile()
+                    except Exception:
+                        pass
             self.diffusion.update_sentiment_propagation()
         
         # 阶段 1: 市场感知

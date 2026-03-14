@@ -17,6 +17,7 @@ import json
 import random
 import time
 from typing import Dict, List, Optional, Any, Tuple
+import numpy as np
 
 from agents.base_agent import BaseAgent, MarketSnapshot
 from agents.brain import DeepSeekBrain
@@ -120,6 +121,68 @@ class TraderAgent(BaseAgent):
         # Sync agent ID to graph node
         if node_id in graph.agents:
             graph.agents[node_id].agent_id = self.agent_id
+        # 初次绑定时立即同步一次语义画像，确保传播引擎有可用语义向量。
+        self.sync_social_semantic_profile()
+
+    def _risk_tilt_from_persona(self) -> float:
+        """将离散风险偏好映射到连续风偏分数 [-1, 1]。"""
+        mapping = {
+            RiskAppetite.CONSERVATIVE: -0.8,
+            RiskAppetite.BALANCED: 0.0,
+            RiskAppetite.AGGRESSIVE: 0.6,
+            RiskAppetite.GAMBLER: 0.9,
+        }
+        return float(mapping.get(self.persona.risk_appetite, 0.0))
+
+    def _default_focus_topics(self) -> List[str]:
+        """
+        基于人格生成默认关注主题。
+        用于 GraphRAG 尚未形成稳定子图时的冷启动推荐画像。
+        """
+        horizon_map = {
+            "short-term": ["波动", "成交量", "情绪", "热点"],
+            "medium-term": ["政策", "流动性", "盈利", "估值"],
+            "long-term": ["基本面", "产业趋势", "财政", "利率"],
+        }
+        risk_map = {
+            RiskAppetite.CONSERVATIVE: ["防御", "分红", "稳增长"],
+            RiskAppetite.BALANCED: ["均衡配置", "政策", "景气"],
+            RiskAppetite.AGGRESSIVE: ["成长", "科技", "弹性"],
+            RiskAppetite.GAMBLER: ["题材", "高波动", "杠杆"],
+        }
+
+        horizon_key = str(self.persona.investment_horizon.value).lower()
+        topics = horizon_map.get(horizon_key, ["政策", "风险"])
+        topics = topics + risk_map.get(self.persona.risk_appetite, ["政策", "风险"])
+        return list(dict.fromkeys(topics))
+
+    def sync_social_semantic_profile(self) -> None:
+        """
+        将 TraderAgent 的 GraphRAG 主导叙事同步到社交图节点。
+
+        该方法是“语义驱动 SIRS”的数据入口：
+        - dominant_narratives: 取自 GraphMemoryBank
+        - focus_topics: 人格冷启动 + 近期叙事融合
+        - risk_tilt / historical_risk_bias: 用于 RecSys Hot Score 的风偏匹配
+        """
+        if self.social_graph is None or self.social_node_id is None:
+            return
+
+        dominant = self.graph_memory.get_dominant_narratives(top_k=6)
+        default_focus = self._default_focus_topics()
+        focus_topics = list(dict.fromkeys(default_focus + dominant[:3]))
+
+        # 将脑状态中的信心和情绪轻量映射为历史风险偏置，模拟“越亏越保守/越赚越激进”。
+        confidence = float(getattr(self.brain.state, "confidence", 50.0))
+        confidence_bias = np.clip((confidence - 50.0) / 50.0, -1.0, 1.0)
+
+        self.social_graph.update_semantic_profile(
+            self.social_node_id,
+            dominant_narratives=dominant if dominant else default_focus[:3],
+            focus_topics=focus_topics,
+            risk_tilt=self._risk_tilt_from_persona(),
+            historical_risk_bias=float(confidence_bias) * 0.3,
+        )
 
     async def perceive(
         self,
@@ -305,6 +368,9 @@ class TraderAgent(BaseAgent):
         
         snapshot: MarketSnapshot = perceived_data["snapshot"]
         news = perceived_data["news"]
+
+        # 每轮推理前同步一次语义画像，使扩散模型能实时读取 GraphRAG 最新主导叙事。
+        self.sync_social_semantic_profile()
         
         # 1. 检索 GraphRAG 记忆与知识胶囊
         current_time = snapshot.timestamp

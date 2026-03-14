@@ -404,10 +404,10 @@ def _read_beliefs(agent_id: str) -> Dict:
 
 
 def render_manager_analyst_panel(ctrl) -> None:
-    st.subheader("Manager/Analyst Status")
+    st.subheader("经理-分析师状态")
     rows = _iter_agent_cores(ctrl)
     if not rows:
-        st.info("No active agents.")
+        st.info("暂无活动智能体。")
         return
 
     step = getattr(getattr(ctrl, "model", None), "steps", 0)
@@ -441,10 +441,10 @@ def render_manager_analyst_panel(ctrl) -> None:
 
 
 def render_intent_mapping_panel(ctrl) -> None:
-    st.subheader("Intent -> Order Mapping (FCN)")
+    st.subheader("交易意图到订单映射（FCN）")
     rows = _iter_agent_cores(ctrl)
     if not rows:
-        st.info("No active agents.")
+        st.info("暂无活动智能体。")
         return
 
     table = []
@@ -467,15 +467,15 @@ def render_intent_mapping_panel(ctrl) -> None:
 
 
 def render_social_network_panel(ctrl) -> None:
-    st.subheader("Social Graph (BDI + Weights)")
+    st.subheader("社交网络（BDI 与边权）")
     if not ctrl or not hasattr(ctrl, "model"):
-        st.info("Simulation not running.")
+        st.info("仿真尚未启动。")
         return
 
     graph = getattr(ctrl.model, "social_graph", None)
     diffusion = getattr(ctrl.model, "diffusion", None)
     if graph is None or diffusion is None:
-        st.info("Social graph not available.")
+        st.info("社交网络不可用。")
         return
 
     weights = [float(data.get("weight", 1.0)) for _, _, data in graph.graph.edges(data=True)]
@@ -507,33 +507,33 @@ def render_social_network_panel(ctrl) -> None:
 
 
 def render_evolution_panel(ctrl, cadence: str = "day") -> None:
-    st.subheader("Evolution Cycle")
-    st.write(f"Cadence: {cadence}")
+    st.subheader("演化周期")
+    st.write(f"触发节奏: {cadence}")
     if not ctrl or not hasattr(ctrl, "model"):
-        st.info("Simulation not running.")
+        st.info("仿真尚未启动。")
         return
-    st.info("Evolution is executed in the simulation loop backend. Use cadence controls to align UI with backend settings.")
+    st.info("演化在后端仿真循环中执行，请用侧边栏节奏设置与后端保持一致。")
 
 
 def render_wind_tunnel_panel(ctrl) -> None:
-    st.subheader("Wind-Tunnel Forecasts")
+    st.subheader("风洞预测")
     rows = _iter_agent_cores(ctrl)
     if not rows:
-        st.info("No active agents.")
+        st.info("暂无活动智能体。")
         return
     agent_ids = [getattr(core, "agent_id", getattr(agent, "id", "unknown")) for agent, core in rows]
-    selected = st.selectbox("Agent", agent_ids, key="wind_tunnel_agent")
+    selected = st.selectbox("智能体", agent_ids, key="wind_tunnel_agent")
     core = None
     for agent, c in rows:
         if getattr(c, "agent_id", getattr(agent, "id", "")) == selected:
             core = c
             break
     if core is None:
-        st.info("Agent not found.")
+        st.info("未找到该智能体。")
         return
     records = getattr(core, "_wind_tunnel_records", [])
     if not records:
-        st.info("No wind-tunnel records yet.")
+        st.info("暂无风洞记录。")
         return
     df = pd.DataFrame(records)
     st.line_chart(df.set_index("step")[["confidence"]])
@@ -541,16 +541,16 @@ def render_wind_tunnel_panel(ctrl) -> None:
 
 
 def render_belief_panel(ctrl) -> None:
-    st.subheader("Investment Beliefs")
+    st.subheader("投资信仰")
     rows = _iter_agent_cores(ctrl)
     if not rows:
-        st.info("No active agents.")
+        st.info("暂无活动智能体。")
         return
     agent_ids = [getattr(core, "agent_id", getattr(agent, "id", "unknown")) for agent, core in rows]
-    selected = st.selectbox("Agent", agent_ids, key="belief_agent")
+    selected = st.selectbox("智能体", agent_ids, key="belief_agent")
     payload = _read_beliefs(selected)
     if not payload:
-        st.info("No persisted beliefs for this agent.")
+        st.info("该智能体暂无持久化信仰。")
         return
     st.json(payload)
 

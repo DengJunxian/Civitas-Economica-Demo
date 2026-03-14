@@ -360,9 +360,9 @@ with st.sidebar:
     st.divider()
     
     # --- 状态指示器 ---
-    st.subheader("Dashboard Panels")
+    st.subheader("功能面板设置")
     st.session_state.evolution_cadence = st.selectbox(
-        "Evolution cadence",
+        "演化触发节奏",
         ["day", "week"],
         index=0 if st.session_state.evolution_cadence == "day" else 1
     )

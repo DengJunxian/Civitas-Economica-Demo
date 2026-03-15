@@ -10,6 +10,7 @@ from data_flywheel.sources.base_source import BaseSource
 from data_flywheel.sources.news_api_source import NewsApiSource
 from data_flywheel.sources.rss_source import RssSource
 from data_flywheel.nlp_processor import NlpProcessor
+from data_flywheel.event_graph_store import EventGraphStore
 from data_flywheel.seed_store import SeedStore
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,10 @@ class BettaSpider:
         if config_paths and "output_path" in config_paths:
              store_path = config_paths["output_path"]
         self.store = SeedStore(store_path)
+        graph_path = "data/event_graph.graphml"
+        if config_paths and "graph_path" in config_paths:
+            graph_path = config_paths["graph_path"]
+        self.event_graph = EventGraphStore(graph_path=graph_path)
 
         logger.info(f"BettaSpider initialized with {len(self.sources)} sources.")
 
@@ -98,6 +103,10 @@ class BettaSpider:
         for article in all_articles:
             event = self.nlp.process(article)
             new_events.append(event)
+            try:
+                self.event_graph.ingest(event)
+            except Exception as e:
+                logger.warning("Event graph ingest failed for '%s': %s", event.title, e)
             
         # 3. 持久化
         saved_count = self.store.append_batch(new_events)

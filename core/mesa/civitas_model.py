@@ -88,7 +88,7 @@ class CivitasModel(Model):
         self.quant_manager = quant_manager
         
         # 0. 初始化仿真时钟
-        self.clock = SimulationClock()
+        self.clock = SimulationClock(mode=mode)
         
         # 初始化社会网络与传播引擎
         # k must be <= n and even for Watts-Strogatz
@@ -107,6 +107,13 @@ class CivitasModel(Model):
             clock=self.clock,
             regulatory_module=self.regulatory_module
         )
+        self.seed_store = None
+        self._last_seed_event_id: Optional[str] = None
+        try:
+            from data_flywheel.seed_store import SeedStore
+            self.seed_store = SeedStore("data/seed_events.jsonl")
+        except Exception:
+            self.seed_store = None
         
         # 覆写初始价格 (如果有指定)
         if hasattr(self.market_manager.engine, 'last_price'):
@@ -338,6 +345,12 @@ class CivitasModel(Model):
             "volatility": self.volatility,
             "csad": self.csad,
             "news": truncate_text(self.market_manager.current_news, 500),
+            "text_dominant_topic": self.market_manager.text_factor_state.get("dominant_topic", "uncategorized"),
+            "text_sentiment_score": self.market_manager.text_factor_state.get("sentiment_score", 0.0),
+            "text_panic_score": self.market_manager.text_factor_state.get("panic_index", 0.0),
+            "text_greed_score": self.market_manager.text_factor_state.get("greed_index", 0.0),
+            "text_policy_shock": self.market_manager.text_factor_state.get("policy_shock", 0.0),
+            "text_regime_bias": self.market_manager.text_factor_state.get("regime_bias", "neutral"),
             "dates": self.market_manager.history_candles[-1].timestamp if self.market_manager.history_candles else "2024-01-01",
             "infected_ratio": self.diffusion.history[-1]['infected'] / self.n_agents if self.diffusion.history else 0
         }
@@ -383,6 +396,22 @@ class CivitasModel(Model):
             }
         }
 
+    def _ingest_latest_seed_event(self) -> None:
+        if self.seed_store is None:
+            return
+        try:
+            latest = self.seed_store.read_latest(n=1, min_impact="medium")
+        except Exception:
+            return
+        if not latest:
+            return
+        event = latest[0]
+        event_id = getattr(event, "event_id", None)
+        if event_id and event_id == self._last_seed_event_id:
+            return
+        self.market_manager.ingest_seed_event(event)
+        self._last_seed_event_id = event_id
+
     def step(self) -> None:
         """
         [已废弃] 同步 Step 方法
@@ -400,6 +429,7 @@ class CivitasModel(Model):
         4. 市场结算
         """
         # 更新熔断器参考价
+        self._ingest_latest_seed_event()
         cb = self.market_manager.policy_manager.policies.get("circuit_breaker")
         if cb:
             cb.update_reference_price(self.current_price)

@@ -18,10 +18,12 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import time
 import os
 import json
+from collections import Counter, deque
+import networkx as nx
 
 if os.environ.get("CIVITAS_DASHBOARD_EMBED") == "1":
     st.set_page_config = lambda *args, **kwargs: None
@@ -554,6 +556,325 @@ def render_belief_panel(ctrl) -> None:
         st.info("该智能体暂无持久化信仰。")
         return
     st.json(payload)
+
+
+def _read_seed_factor_rows(seed_path: str, max_rows: int = 1200) -> List[Dict[str, Any]]:
+    if not os.path.exists(seed_path):
+        return []
+
+    lines = deque(maxlen=max_rows)
+    try:
+        with open(seed_path, "r", encoding="utf-8") as f:
+            for raw in f:
+                row = raw.strip()
+                if row:
+                    lines.append(row)
+    except Exception:
+        return []
+
+    rows: List[Dict[str, Any]] = []
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except Exception:
+            continue
+        factors = event.get("text_factors", {}) or {}
+        financial = factors.get("financial_factors", {}) or {}
+        rows.append(
+            {
+                "timestamp": (
+                    event.get("processed_at")
+                    or event.get("created_at")
+                    or event.get("published_at")
+                    or event.get("fetched_at")
+                ),
+                "title": event.get("title", ""),
+                "topic": factors.get("dominant_topic", "uncategorized"),
+                "sentiment_score": float(factors.get("sentiment_score", event.get("sentiment", 0.0) or 0.0)),
+                "panic_index": float(financial.get("panic_index", 0.0) or 0.0),
+                "greed_index": float(financial.get("greed_index", 0.0) or 0.0),
+                "policy_shock": float(financial.get("policy_shock", 0.0) or 0.0),
+                "regime_bias": str(financial.get("regime_bias", "neutral") or "neutral"),
+            }
+        )
+    return rows
+
+
+def render_text_factor_timeline_panel(ctrl, seed_path: str = "data/seed_events.jsonl") -> None:
+    st.subheader("主题-情绪-冲击时间序列")
+    rows = _read_seed_factor_rows(seed_path, max_rows=1500)
+    if not rows:
+        st.info(f"未找到文本因子数据：{seed_path}")
+        return
+
+    df = pd.DataFrame(rows)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    df = df.dropna(subset=["timestamp"]).sort_values("timestamp")
+    if df.empty:
+        st.info("文本因子时间戳不可解析，无法绘图。")
+        return
+
+    lookback = st.slider(
+        "序列长度",
+        min_value=20,
+        max_value=min(600, len(df)),
+        value=min(180, len(df)),
+        step=10,
+        key="text_factor_lookback",
+        help="显示最近 N 条事件的因子序列",
+    )
+    view = df.tail(lookback).copy()
+
+    latest = view.iloc[-1]
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric("最新主题", str(latest["topic"]))
+    with c2:
+        st.metric("情绪", f'{float(latest["sentiment_score"]):+.2f}')
+    with c3:
+        st.metric("冲击", f'{float(latest["policy_shock"]):.2f}')
+    with c4:
+        st.metric("Regime", str(latest["regime_bias"]))
+
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.08,
+        row_heights=[0.52, 0.48],
+        subplot_titles=("Sentiment and Topic Regime", "Panic / Greed / Policy Shock"),
+    )
+    custom = np.stack([view["topic"], view["regime_bias"]], axis=1)
+    fig.add_trace(
+        go.Scatter(
+            x=view["timestamp"],
+            y=view["sentiment_score"],
+            mode="lines+markers",
+            name="sentiment",
+            line=dict(color="#56B4E9", width=2),
+            marker=dict(size=5),
+            customdata=custom,
+            hovertemplate="时间=%{x}<br>sentiment=%{y:.3f}<br>topic=%{customdata[0]}<br>regime=%{customdata[1]}<extra></extra>",
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_hline(y=0.0, line_width=1, line_dash="dot", line_color="#888", row=1, col=1)
+
+    fig.add_trace(
+        go.Scatter(
+            x=view["timestamp"],
+            y=view["panic_index"],
+            mode="lines",
+            name="panic",
+            line=dict(color="#FF6B6B", width=2),
+            hovertemplate="时间=%{x}<br>panic=%{y:.3f}<extra></extra>",
+        ),
+        row=2,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=view["timestamp"],
+            y=view["greed_index"],
+            mode="lines",
+            name="greed",
+            line=dict(color="#22C55E", width=2),
+            hovertemplate="时间=%{x}<br>greed=%{y:.3f}<extra></extra>",
+        ),
+        row=2,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=view["timestamp"],
+            y=view["policy_shock"],
+            mode="lines",
+            name="shock",
+            line=dict(color="#F59E0B", width=2),
+            hovertemplate="时间=%{x}<br>policy_shock=%{y:.3f}<extra></extra>",
+        ),
+        row=2,
+        col=1,
+    )
+
+    fig.update_yaxes(range=[-1.05, 1.05], row=1, col=1)
+    fig.update_yaxes(range=[-0.02, 1.02], row=2, col=1)
+    fig.update_layout(
+        height=520,
+        margin=dict(l=10, r=10, t=50, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    topic_counter = Counter([str(v) for v in view["topic"].tolist()])
+    if topic_counter:
+        top_topics = pd.DataFrame(topic_counter.most_common(10), columns=["topic", "count"])
+        st.caption("最近窗口主题分布")
+        st.dataframe(top_topics, use_container_width=True, hide_index=True)
+
+
+def _load_event_graph(graph_path: str) -> nx.DiGraph:
+    if not os.path.exists(graph_path):
+        return nx.DiGraph()
+    try:
+        graph = nx.read_graphml(graph_path)
+        if isinstance(graph, nx.DiGraph):
+            return graph
+        return nx.DiGraph(graph)
+    except Exception:
+        return nx.DiGraph()
+
+
+def _extract_subgraph(graph: nx.DiGraph, keyword: str, max_nodes: int) -> nx.DiGraph:
+    if graph.number_of_nodes() == 0:
+        return nx.DiGraph()
+
+    keyword = (keyword or "").strip().lower()
+    if keyword:
+        seeds = []
+        for node, attrs in graph.nodes(data=True):
+            label = str(attrs.get("label", node)).lower()
+            if keyword in label or keyword in str(node).lower():
+                seeds.append(node)
+    else:
+        degrees = sorted(graph.degree(), key=lambda x: x[1], reverse=True)
+        seeds = [node for node, _ in degrees[: max(8, min(24, max_nodes // 2))]]
+
+    if not seeds:
+        return nx.DiGraph()
+
+    picked = set()
+    for node in seeds:
+        picked.add(node)
+        for nbr in graph.successors(node):
+            picked.add(nbr)
+        for nbr in graph.predecessors(node):
+            picked.add(nbr)
+        if len(picked) >= max_nodes * 2:
+            break
+
+    if len(picked) > max_nodes:
+        ranked = sorted(picked, key=lambda n: graph.degree(n), reverse=True)[:max_nodes]
+        picked = set(ranked)
+    return graph.subgraph(picked).copy()
+
+
+def render_event_graph_panel(ctrl, graph_path: str = "data/event_graph.graphml") -> None:
+    st.subheader("事件图谱面板")
+    graph = _load_event_graph(graph_path)
+    if graph.number_of_nodes() == 0:
+        st.info(f"未找到事件图谱：{graph_path}")
+        return
+
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        keyword = st.text_input("关键词过滤", value="", key="event_graph_keyword")
+    with c2:
+        max_nodes = st.slider("节点上限", 20, 200, 80, 10, key="event_graph_max_nodes")
+
+    sub = _extract_subgraph(graph, keyword, max_nodes=max_nodes)
+    if sub.number_of_nodes() == 0:
+        st.info("当前关键词下没有匹配节点。")
+        return
+
+    n_nodes = sub.number_of_nodes()
+    n_edges = sub.number_of_edges()
+    density = nx.density(sub) if n_nodes > 1 else 0.0
+    avg_degree = float(np.mean([deg for _, deg in sub.degree()])) if n_nodes > 0 else 0.0
+
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.metric("节点", n_nodes)
+    with m2:
+        st.metric("边", n_edges)
+    with m3:
+        st.metric("密度", f"{density:.3f}")
+    with m4:
+        st.metric("平均度", f"{avg_degree:.2f}")
+
+    pos = nx.spring_layout(sub, seed=42, k=max(0.2, 1.2 / np.sqrt(max(n_nodes, 1))))
+    edge_x, edge_y = [], []
+    for u, v in sub.edges():
+        x0, y0 = pos[u]
+        x1, y1 = pos[v]
+        edge_x.extend([x0, x1, None])
+        edge_y.extend([y0, y1, None])
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=edge_x,
+            y=edge_y,
+            mode="lines",
+            line=dict(width=0.8, color="rgba(130,130,130,0.45)"),
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
+
+    kind_colors = {
+        "event": "#38BDF8",
+        "topic": "#A78BFA",
+        "entity": "#FB7185",
+        "sector": "#34D399",
+        "factor": "#F59E0B",
+    }
+    grouped: Dict[str, List[str]] = {}
+    for node, attrs in sub.nodes(data=True):
+        kind = str(attrs.get("kind", "other"))
+        grouped.setdefault(kind, []).append(node)
+
+    for kind, nodes in grouped.items():
+        x, y, text, size = [], [], [], []
+        for node in nodes:
+            px, py = pos[node]
+            attrs = sub.nodes[node]
+            label = str(attrs.get("label", node))
+            deg = sub.degree(node)
+            x.append(px)
+            y.append(py)
+            text.append(f"{label}<br>kind={kind}<br>degree={deg}")
+            size.append(8 + min(18, deg * 1.4))
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode="markers",
+                name=kind,
+                marker=dict(
+                    size=size,
+                    color=kind_colors.get(kind, "#9CA3AF"),
+                    line=dict(color="white", width=0.6),
+                    opacity=0.9,
+                ),
+                hovertemplate="%{text}<extra></extra>",
+                text=text,
+            )
+        )
+
+    fig.update_layout(
+        height=560,
+        margin=dict(l=10, r=10, t=10, b=10),
+        xaxis=dict(showgrid=False, zeroline=False, visible=False),
+        yaxis=dict(showgrid=False, zeroline=False, visible=False),
+        legend=dict(orientation="h"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    edge_rows: List[Dict[str, Any]] = []
+    for u, v, attrs in list(sub.edges(data=True))[:20]:
+        edge_rows.append(
+            {
+                "source": sub.nodes[u].get("label", u),
+                "relation": attrs.get("relation", "relates_to"),
+                "target": sub.nodes[v].get("label", v),
+                "weight": float(attrs.get("weight", 0.0) or 0.0),
+            }
+        )
+    if edge_rows:
+        st.caption("样例关系（最多 20 条）")
+        st.dataframe(pd.DataFrame(edge_rows), use_container_width=True, hide_index=True)
 
 
 def main():

@@ -96,6 +96,9 @@ class SeedEvent:
     raw_text: str = ""
     created_at: str = ""
     processed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    # Structured text factors for backtesting/simulation:
+    # topic_signals, sentiment components, financial_factors, impact_paths, etc.
+    text_factors: Dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     #  序列化 / 反序列化
@@ -113,13 +116,17 @@ class SeedEvent:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SeedEvent":
         """从字典恢复 SeedEvent"""
+        payload = dict(data)
         # 处理嵌套的 entities 列表
-        entities_raw = data.pop("entities", [])
+        entities_raw = payload.pop("entities", [])
         entities = [
             ExtractedEntity(**e) if isinstance(e, dict) else e
             for e in entities_raw
         ]
-        return cls(entities=entities, **data)
+        text_factors = payload.get("text_factors")
+        if text_factors is None or not isinstance(text_factors, dict):
+            payload["text_factors"] = {}
+        return cls(entities=entities, **payload)
 
     @classmethod
     def from_json(cls, json_str: str) -> "SeedEvent":
@@ -152,6 +159,18 @@ class SeedEvent:
         # 构建板块描述
         sector_line = ", ".join(self.affected_sectors) if self.affected_sectors else "未明确"
 
+        factor_line = "文本因子: N/A"
+        if self.text_factors:
+            dominant_topic = self.text_factors.get("dominant_topic", "unknown")
+            financial = self.text_factors.get("financial_factors", {}) or {}
+            panic = float(financial.get("panic_index", 0.0))
+            greed = float(financial.get("greed_index", 0.0))
+            shock = float(financial.get("policy_shock", 0.0))
+            factor_line = (
+                f"文本因子: topic={dominant_topic}, "
+                f"panic={panic:.2f}, greed={greed:.2f}, shock={shock:.2f}"
+            )
+
         policy_text = (
             f"【财经快讯 | 来源: {self.source} | "
             f"情感: {self.sentiment_label}({self.sentiment:.2f}) | "
@@ -159,6 +178,7 @@ class SeedEvent:
             f"{self.title}\n"
             f"{self.summary}\n"
             f"涉及实体: {entity_line}\n"
-            f"影响板块: {sector_line}"
+            f"影响板块: {sector_line}\n"
+            f"{factor_line}"
         )
         return policy_text

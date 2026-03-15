@@ -73,6 +73,25 @@ class NewsAnalyst:
         avg_sentiment = sum(sentiments) / max(1, len(sentiments))
         sentiment_label = self._label_sentiment(avg_sentiment)
         impact_level = self._max_impact_level([e.impact_level for e in events])
+        text_topics: List[str] = []
+        panic_scores: List[float] = []
+        greed_scores: List[float] = []
+        shock_scores: List[float] = []
+        for event in events:
+            factors = getattr(event, "text_factors", {}) or {}
+            topic = factors.get("dominant_topic")
+            if isinstance(topic, str) and topic:
+                text_topics.append(topic)
+            financial = factors.get("financial_factors", {}) or {}
+            if isinstance(financial, dict):
+                panic_scores.append(float(financial.get("panic_index", 0.0)))
+                greed_scores.append(float(financial.get("greed_index", 0.0)))
+                shock_scores.append(float(financial.get("policy_shock", 0.0)))
+
+        dominant_topic = max(set(text_topics), key=text_topics.count) if text_topics else "uncategorized"
+        avg_panic = sum(panic_scores) / max(1, len(panic_scores))
+        avg_greed = sum(greed_scores) / max(1, len(greed_scores))
+        avg_shock = sum(shock_scores) / max(1, len(shock_scores))
 
         return {
             "analyst": "NewsAnalyst",
@@ -81,6 +100,12 @@ class NewsAnalyst:
             "sentiment_score": avg_sentiment,
             "sentiment_label": sentiment_label,
             "impact_level": impact_level,
+            "text_factors": {
+                "dominant_topic": dominant_topic,
+                "panic_index": avg_panic,
+                "greed_index": avg_greed,
+                "policy_shock": avg_shock,
+            },
             "source": "BettaSpider",
         }
 

@@ -10,7 +10,7 @@
 """
 
 import numpy as np
-from typing import Tuple, Optional, List, Dict
+from typing import Tuple, Optional, List, Dict, Literal
 from dataclasses import dataclass
 
 
@@ -454,3 +454,70 @@ def create_behavioral_profile(
         disposition_effect=disposition,
         mental_utility=mental_utility
     )
+
+
+# ========== Cumulative Prospect Theory (CPT) Profiles ==========
+
+@dataclass
+class CPTAgentProfile:
+    """Standardized CPT profile for different agent archetypes."""
+
+    name: str
+    params: ProspectTheoryParams
+    reference_return: float = 0.0
+
+
+_CPT_PROFILE_MAP: Dict[str, ProspectTheoryParams] = {
+    "retail": ProspectTheoryParams(alpha=0.86, beta=0.90, lambda_=2.8, gamma=0.60, delta=0.70),
+    "institution": ProspectTheoryParams(alpha=0.92, beta=0.92, lambda_=1.6, gamma=0.72, delta=0.78),
+    "quant": ProspectTheoryParams(alpha=0.95, beta=0.95, lambda_=1.2, gamma=0.80, delta=0.82),
+}
+
+
+def get_cpt_profile(agent_type: Literal["retail", "institution", "quant"] | str) -> CPTAgentProfile:
+    key = str(agent_type).strip().lower()
+    params = _CPT_PROFILE_MAP.get(key, ProspectTheoryParams())
+    return CPTAgentProfile(name=key or "custom", params=params)
+
+
+def cpt_decision_utility(
+    outcome: float,
+    probability: float,
+    *,
+    profile: Optional[CPTAgentProfile] = None,
+    reference: Optional[float] = None,
+) -> float:
+    """CPT subjective utility for a single outcome-probability pair."""
+    prof = profile or CPTAgentProfile(name="default", params=ProspectTheoryParams())
+    ref = prof.reference_return if reference is None else float(reference)
+    subjective_value = prospect_value(outcome=outcome, reference=ref, params=prof.params)
+    weighted_prob = probability_weight(
+        p=float(np.clip(probability, 1e-8, 1 - 1e-8)),
+        is_gain=(outcome - ref) >= 0,
+    )
+    return float(subjective_value * weighted_prob)
+
+
+def cpt_expected_utility(
+    outcomes: List[float],
+    probabilities: List[float],
+    *,
+    profile: Optional[CPTAgentProfile] = None,
+    reference: Optional[float] = None,
+) -> float:
+    """Aggregate CPT utility over a distribution of outcomes."""
+    if not outcomes or not probabilities:
+        return 0.0
+    n = min(len(outcomes), len(probabilities))
+    if n == 0:
+        return 0.0
+    utils = [
+        cpt_decision_utility(
+            outcome=float(outcomes[i]),
+            probability=float(probabilities[i]),
+            profile=profile,
+            reference=reference,
+        )
+        for i in range(n)
+    ]
+    return float(np.sum(utils))

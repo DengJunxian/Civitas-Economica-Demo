@@ -650,6 +650,13 @@ class TraderAgent(BaseAgent):
             "policy_description": getattr(snapshot, "policy_description", ""),
             "policy_tax_rate": getattr(snapshot, "policy_tax_rate", 0.0),
             "policy_news": getattr(snapshot, "policy_news", ""),
+            "text_dominant_topic": getattr(snapshot, "text_dominant_topic", "uncategorized"),
+            "text_sentiment_score": getattr(snapshot, "text_sentiment_score", 0.0),
+            "text_panic_score": getattr(snapshot, "text_panic_score", 0.0),
+            "text_greed_score": getattr(snapshot, "text_greed_score", 0.0),
+            "text_policy_shock": getattr(snapshot, "text_policy_shock", 0.0),
+            "text_regime_bias": getattr(snapshot, "text_regime_bias", "neutral"),
+            "text_impact_paths": getattr(snapshot, "text_impact_paths", []),
             "graph_context": graph_context,
             "analyst_reports": perceived_data.get("analyst_reports", {})
         }

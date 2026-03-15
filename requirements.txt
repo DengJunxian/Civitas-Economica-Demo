@@ -9,6 +9,7 @@ matplotlib>=3.7.0
 sortedcontainers>=2.4.0
 networkx
 akshare
+yfinance>=0.2.40
 httpx
 tenacity>=8.2.0
 scipy
@@ -18,3 +19,9 @@ mesa>=3.0
 # finrobot  # optional: CoT templates & financial prompts
 pybind11>=2.10.0
 setuptools>=42.0.0
+# Optional analytics ecosystem (install on demand):
+# empyrical>=0.5.5
+# quantstats>=0.0.62
+# PyPortfolioOpt>=1.5.5
+# ndlib>=5.1.1
+# EoN>=1.2

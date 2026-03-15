@@ -64,6 +64,14 @@ class MarketSnapshot:
     policy_description: str = ""
     policy_tax_rate: float = 0.0
     policy_news: str = ""
+    # Text factor fields from data flywheel (topic/sentiment/financial shocks)
+    text_dominant_topic: str = "uncategorized"
+    text_sentiment_score: float = 0.0
+    text_panic_score: float = 0.0
+    text_greed_score: float = 0.0
+    text_policy_shock: float = 0.0
+    text_regime_bias: str = "neutral"
+    text_impact_paths: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         """序列化为字典，用于 Prompt 构建"""
@@ -83,6 +91,13 @@ class MarketSnapshot:
             "policy_description": self.policy_description,
             "policy_tax_rate": self.policy_tax_rate,
             "policy_news": self.policy_news,
+            "text_dominant_topic": self.text_dominant_topic,
+            "text_sentiment_score": self.text_sentiment_score,
+            "text_panic_score": self.text_panic_score,
+            "text_greed_score": self.text_greed_score,
+            "text_policy_shock": self.text_policy_shock,
+            "text_regime_bias": self.text_regime_bias,
+            "text_impact_paths": self.text_impact_paths,
         }
 
 

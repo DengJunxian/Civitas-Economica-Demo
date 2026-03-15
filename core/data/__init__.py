@@ -1,5 +1,8 @@
-# core/data 模块
+# core/data module
 """
-数据摄取与重放组件
-支持高频历史数据加载和流式重放
+Data acquisition and replay components.
 """
+
+from core.data.market_data_provider import MarketDataProvider, MarketDataQuery
+
+__all__ = ["MarketDataProvider", "MarketDataQuery"]

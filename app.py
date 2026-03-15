@@ -33,7 +33,6 @@ from config import GLOBAL_CONFIG
 from core.scheduler import SimulationController
 from agents.brain import DeepSeekBrain, ThoughtRecord
 from agents.quant_group import QuantGroupManager, QuantStrategyGroup
-from core.backtester import HistoricalBacktester, BacktestConfig, BacktestReportGenerator
 
 # 新增模块
 from agents.debate_brain import DebateBrain, DebateRecord, DebateRole
@@ -52,6 +51,7 @@ from core.policy_committee import PolicyCommittee
 os.environ["CIVITAS_DASHBOARD_EMBED"] = "1"
 from ui import dashboard as dashboard_ui
 from ui.demo_wind_tunnel import render_demo_tab
+from ui.backtest_panel import render_backtest_panel
 
 # --- 1. 页面配置 ---
 st.set_page_config(
@@ -656,51 +656,8 @@ ctrl = st.session_state.controller
 if st.session_state.backtest_mode:
     # 回测模式
     with tab1:
-        st.subheader("📊 历史回测校准")
-        
-        if st.session_state.backtester is None:
-            st.session_state.backtester = HistoricalBacktester(
-                BacktestConfig(period_days=1095)  # 3年数据
-            )
-        
-        col_bt1, col_bt2 = st.columns([2, 1])
-        
-        with col_bt1:
-            if st.button("🚀 开始回测", use_container_width=True):
-                if ctrl:
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
-                    def bt_progress(current, total, msg):
-                        progress_bar.progress(current / max(total, 1))
-                        status_text.text(msg)
-                    
-                    result = st.session_state.backtester.run_backtest(
-                        ctrl.model.population,
-                        ctrl.market,
-                        bt_progress
-                    )
-                    
-                    status_text.text("✅ 回测完成！")
-                    
-                    # 显示结果
-                    st.markdown(BacktestReportGenerator.generate_html_report(result), 
-                               unsafe_allow_html=True)
-                else:
-                    st.warning("请先启动仿真系统")
-        
-        with col_bt2:
-            st.markdown("""
-            **回测说明**
-            
-            系统将使用近3年的上证指数历史数据，
-            让Agent群体在真实行情中进行交易决策。
-            
-            校准指标包括：
-            - 📈 价格走势相关性
-            - 📊 换手率相关性
-            - 📉 波动率相关性
-            """)
+        # 新版历史回测面板: 因子研究 + 事件驱动 + 成本建模 + 报告导出
+        render_backtest_panel(ctrl=ctrl)
 
 else:
     # 实时仿真模式
@@ -763,6 +720,10 @@ else:
         dashboard_ui.render_manager_analyst_panel(ctrl)
         st.markdown("---")
         dashboard_ui.render_intent_mapping_panel(ctrl)
+        st.markdown("---")
+        dashboard_ui.render_text_factor_timeline_panel(ctrl)
+        st.markdown("---")
+        dashboard_ui.render_event_graph_panel(ctrl)
         st.markdown("---")
         dashboard_ui.render_social_network_panel(ctrl)
         st.markdown("---")

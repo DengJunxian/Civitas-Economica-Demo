@@ -14,6 +14,14 @@ This repository focuses on a manager-analyst agent architecture, intent-first tr
 - Wind-tunnel prediction and belief reinforcement persisted to disk.
 - IPC boundary to a C++ LOB engine for fast matching and realistic microstructure.
 
+## New Analytics/Portfolio Extensions
+
+- Reusable risk and performance engine in [core/performance.py](core/performance.py) (empyrical-compatible with fallback).
+- Standardized tear sheet and scenario comparison in [core/tear_sheet.py](core/tear_sheet.py).
+- Unified portfolio construction layer in [core/portfolio/construction.py](core/portfolio/construction.py) (equal/inv-vol/mean-variance/HRP).
+- Optional NDlib/EoN diffusion adapters in [core/society/network.py](core/society/network.py).
+- CPT profile helpers in [core/behavioral_finance.py](core/behavioral_finance.py).
+
 ## Quickstart
 
 Create an environment and install dependencies:

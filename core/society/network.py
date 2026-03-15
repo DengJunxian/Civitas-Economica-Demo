@@ -629,3 +629,158 @@ class InformationDiffusion:
         for _ in range(n_ticks):
             self.update_sentiment_propagation()
         return self.history
+
+
+class NDlibBackendAdapter:
+    """Optional NDlib adapter to run standard epidemic models on SocialGraph."""
+
+    _MODEL_MAP = {
+        "SIR": ("SIRModel", "epidemics"),
+        "SIS": ("SISModel", "epidemics"),
+        "IC": ("IndependentCascadesModel", "epidemics"),
+    }
+
+    def __init__(
+        self,
+        social_graph: SocialGraph,
+        *,
+        model_name: str = "SIR",
+        beta: float = 0.3,
+        gamma: float = 0.1,
+    ):
+        self.social_graph = social_graph
+        self.model_name = model_name.upper()
+        self.beta = float(beta)
+        self.gamma = float(gamma)
+        self._model = None
+        self._status_name = {0: SentimentState.SUSCEPTIBLE, 1: SentimentState.INFECTED, 2: SentimentState.RECOVERED}
+        self._init_model()
+
+    def _init_model(self) -> None:
+        try:  # pragma: no cover - optional dependency
+            from ndlib.models import ModelConfig as model_config
+            from ndlib.models import epidemics as epidemic_models
+        except Exception:
+            self._model = None
+            return
+
+        model_entry = self._MODEL_MAP.get(self.model_name, self._MODEL_MAP["SIR"])
+        model_cls = getattr(epidemic_models, model_entry[0], None)
+        if model_cls is None:
+            self._model = None
+            return
+
+        model = model_cls(self.social_graph.graph)
+        config = model_config.Configuration()
+        config.add_model_parameter("beta", self.beta)
+        if self.model_name in {"SIR", "SIS"}:
+            config.add_model_parameter("lambda", self.gamma)
+        model.set_initial_status(config)
+        self._model = model
+
+    @property
+    def available(self) -> bool:
+        return self._model is not None
+
+    def seed_infected(self, node_ids: List[int]) -> None:
+        if self._model is None:
+            for node_id in node_ids:
+                if node_id in self.social_graph.agents:
+                    self.social_graph.agents[node_id].sentiment_state = SentimentState.INFECTED
+            return
+        for node_id in node_ids:
+            if node_id in self.social_graph.graph:
+                self._model.status[node_id] = 1
+
+    def step(self) -> Dict[str, int]:
+        if self._model is None:
+            local = InformationDiffusion(self.social_graph, beta=self.beta, gamma=self.gamma, delta=0.0)
+            stats = local.update_sentiment_propagation()
+            return {
+                "susceptible": int(stats.get("susceptible", 0)),
+                "infected": int(stats.get("infected", 0)),
+                "recovered": int(stats.get("recovered", 0)),
+            }
+
+        iteration = self._model.iteration()
+        status = iteration.get("status", {})
+        for node_id, state_id in status.items():
+            mapped = self._status_name.get(int(state_id), SentimentState.SUSCEPTIBLE)
+            if node_id in self.social_graph.agents:
+                self.social_graph.agents[node_id].sentiment_state = mapped
+
+        dist = self.social_graph.get_network_stats()["sentiment_distribution"]
+        return {
+            "susceptible": int(dist.get("susceptible", 0)),
+            "infected": int(dist.get("infected", 0)),
+            "recovered": int(dist.get("recovered", 0)),
+        }
+
+
+class EoNBackendAdapter:
+    """Optional EoN adapter for numerically robust network SIR simulations."""
+
+    def __init__(self, social_graph: SocialGraph):
+        self.social_graph = social_graph
+
+    def simulate_sir(
+        self,
+        *,
+        beta: float = 0.3,
+        gamma: float = 0.1,
+        tmax: int = 60,
+        initial_infected: Optional[List[int]] = None,
+    ) -> Dict[str, List[float]]:
+        initial = initial_infected or []
+        if not initial:
+            initial = [random.choice(list(self.social_graph.agents.keys()))] if self.social_graph.agents else []
+
+        try:  # pragma: no cover - optional dependency
+            import EoN
+
+            t, S, I, R = EoN.fast_SIR(
+                self.social_graph.graph,
+                beta,
+                gamma,
+                initial_infecteds=initial,
+                tmax=tmax,
+                return_full_data=False,
+            )
+            return {
+                "time": [float(x) for x in np.asarray(t).tolist()],
+                "S": [float(x) for x in np.asarray(S).tolist()],
+                "I": [float(x) for x in np.asarray(I).tolist()],
+                "R": [float(x) for x in np.asarray(R).tolist()],
+                "backend": "EoN",
+            }
+        except Exception:
+            return self._fallback_sir(beta=beta, gamma=gamma, tmax=tmax, initial_infected=initial)
+
+    def _fallback_sir(self, *, beta: float, gamma: float, tmax: int, initial_infected: List[int]) -> Dict[str, List[float]]:
+        n = max(1, self.social_graph.n_agents)
+        i0 = float(min(len(initial_infected), n))
+        s = float(n) - i0
+        i = i0
+        r = 0.0
+
+        times = [0.0]
+        s_hist = [s]
+        i_hist = [i]
+        r_hist = [r]
+
+        for t in range(1, max(tmax, 1) + 1):
+            new_inf = beta * s * i / n
+            new_rec = gamma * i
+            new_inf = float(np.clip(new_inf, 0.0, s))
+            new_rec = float(np.clip(new_rec, 0.0, i))
+
+            s -= new_inf
+            i += new_inf - new_rec
+            r += new_rec
+
+            times.append(float(t))
+            s_hist.append(float(s))
+            i_hist.append(float(i))
+            r_hist.append(float(r))
+
+        return {"time": times, "S": s_hist, "I": i_hist, "R": r_hist, "backend": "fallback"}

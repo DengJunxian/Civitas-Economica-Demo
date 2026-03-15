@@ -11,6 +11,8 @@
 from core.society.network import (
     SocialGraph,
     InformationDiffusion,
+    NDlibBackendAdapter,
+    EoNBackendAdapter,
     AgentNode,
     SentimentState,
 )
@@ -18,6 +20,8 @@ from core.society.network import (
 __all__ = [
     "SocialGraph",
     "InformationDiffusion",
+    "NDlibBackendAdapter",
+    "EoNBackendAdapter",
     "AgentNode",
     "SentimentState",
 ]

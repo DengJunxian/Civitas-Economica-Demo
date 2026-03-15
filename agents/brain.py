@@ -687,6 +687,10 @@ JSON 格式示例：
         - 趋势: {market_state.get('trend', '未知')}
         - 恐慌指数: {market_state.get('panic_level', 0):.2f}
         - 最新消息: {market_state.get('news', '无')}
+        - text_topic: {market_state.get('text_dominant_topic', 'uncategorized')}
+        - text_sentiment: {market_state.get('text_sentiment_score', 0):.2f}
+        - text_panic_greed: {market_state.get('text_panic_score', 0):.2f}/{market_state.get('text_greed_score', 0):.2f}
+        - text_policy_shock: {market_state.get('text_policy_shock', 0):.2f} ({market_state.get('text_regime_bias', 'neutral')})
         {regulatory_block}
         
         【当前政策】
@@ -726,6 +730,9 @@ JSON 格式示例：
         price = market_state.get('price', 3000)
         trend = market_state.get('trend', '震荡')
         panic_level = market_state.get('panic_level', 0.5)
+        text_sentiment = market_state.get('text_sentiment_score', 0.0)
+        text_policy_shock = market_state.get('text_policy_shock', 0.0)
+        text_regime = market_state.get('text_regime_bias', 'neutral')
         cash = account_state.get('cash', 100000)
         market_value = account_state.get('market_value', 0)
         pnl_pct = account_state.get('pnl_pct', 0)
@@ -760,6 +767,20 @@ JSON 格式示例：
             reasoning_parts.append("市场情绪较为乐观")
         else:
             panic_signal = 0.0
+
+        # Rule 2.5: exogenous text factor signal
+        if text_regime == "risk_off":
+            text_signal = -0.2 - (0.2 * min(1.0, abs(text_policy_shock)))
+            reasoning_parts.append(
+                f"NLP regime={text_regime}, sentiment={text_sentiment:.2f}, shock={text_policy_shock:.2f}"
+            )
+        elif text_regime == "risk_on":
+            text_signal = 0.1 + (0.2 * min(1.0, text_policy_shock))
+            reasoning_parts.append(
+                f"NLP regime={text_regime}, sentiment={text_sentiment:.2f}, shock={text_policy_shock:.2f}"
+            )
+        else:
+            text_signal = 0.15 * float(text_sentiment)
         
         # 规则3: 盈亏反应（前景理论）
         if pnl_pct < -0.05:
@@ -778,7 +799,7 @@ JSON 格式示例：
         reasoning_parts.append(f"当前信心指数: {confidence:.0f}")
         
         # 综合信号
-        total_signal = (trend_signal + panic_signal + pnl_signal) * confidence_factor
+        total_signal = (trend_signal + panic_signal + text_signal + pnl_signal) * confidence_factor
         
         # 决策阈值
         if total_signal > 0.3:

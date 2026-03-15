@@ -1,0 +1,44 @@
+{
+  "e9844b7b0bec3b51ba0a1d58ed795dcbecbeda23bb1a3279c188ab3b975b8a79": {
+    "content": "{\"action\": \"HOLD\", \"qty\": 0, \"confidence\": 0.051, \"error\": \"glm-4-flashx: Timeout should be used inside a task\", \"mode\": \"deterministic_stub\"}",
+    "reasoning": "fallback: glm-4-flashx: Timeout should be used inside a task",
+    "model_used": "deterministic_stub",
+    "timestamp": 1773579520.3582153
+  },
+  "ce822030c3e1553deda1886a2b228413519c6a0c7c5e0b79c82f8812bc2d198a": {
+    "content": "{\"action\": \"SELL\", \"qty\": 80, \"confidence\": 0.749, \"error\": \"deepseek-reasoner: Timeout should be used inside a task\", \"mode\": \"deterministic_stub\"}",
+    "reasoning": "fallback: deepseek-reasoner: Timeout should be used inside a task",
+    "model_used": "deterministic_stub",
+    "timestamp": 1773579532.5319424
+  },
+  "787e42882a28d61d8c15c522f65d9a82ca62b7b8ee2957bccb74c010b204a28b": {
+    "content": "{\"action\": \"BUY\", \"qty\": 120, \"confidence\": 0.929, \"error\": \"deepseek-reasoner: Timeout should be used inside a task\", \"mode\": \"deterministic_stub\"}",
+    "reasoning": "fallback: deepseek-reasoner: Timeout should be used inside a task",
+    "model_used": "deterministic_stub",
+    "timestamp": 1773579532.5376105
+  },
+  "fe31b9e0eeb220676dc5992b0dce20dc63431cdb4e7118ca8430f3f332a6c484": {
+    "content": "{\"action\": \"SELL\", \"qty\": 80, \"confidence\": 0.718, \"error\": \"deepseek-reasoner: Timeout should be used inside a task\", \"mode\": \"deterministic_stub\"}",
+    "reasoning": "fallback: deepseek-reasoner: Timeout should be used inside a task",
+    "model_used": "deterministic_stub",
+    "timestamp": 1773579532.5452964
+  },
+  "524e84c734474bcd2a2fa3afe2b63301bbf587f12eb40a178b3ecae226611aeb": {
+    "content": "{\"action\": \"SELL\", \"qty\": 80, \"confidence\": 0.522, \"error\": \"deepseek-reasoner: Timeout should be used inside a task\", \"mode\": \"deterministic_stub\"}",
+    "reasoning": "fallback: deepseek-reasoner: Timeout should be used inside a task",
+    "model_used": "deterministic_stub",
+    "timestamp": 1773579532.5511365
+  },
+  "b63c581229bbc03b8ea948e31062d3b0c6f9065a506798ad0deef8dc5c4caa52": {
+    "content": "{\"action\": \"SELL\", \"qty\": 80, \"confidence\": 0.718, \"error\": \"deepseek-reasoner: Timeout should be used inside a task\", \"mode\": \"deterministic_stub\"}",
+    "reasoning": "fallback: deepseek-reasoner: Timeout should be used inside a task",
+    "model_used": "deterministic_stub",
+    "timestamp": 1773579532.5590923
+  },
+  "663e0f7f8301b5b3da789fdac8c54c76479f124807bc960e8b4696ef7d9c7374": {
+    "content": "{\"action\": \"SELL\", \"qty\": 80, \"confidence\": 0.906, \"error\": \"glm-4-flashx: Timeout should be used inside a task\", \"mode\": \"deterministic_stub\"}",
+    "reasoning": "fallback: glm-4-flashx: Timeout should be used inside a task",
+    "model_used": "deterministic_stub",
+    "timestamp": 1773579566.5753634
+  }
+}

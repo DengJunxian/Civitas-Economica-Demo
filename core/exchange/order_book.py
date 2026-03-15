@@ -17,7 +17,7 @@ Data Structures:
 import heapq
 import time
 import uuid
-from typing import List, Dict, Optional, Tuple, Set
+from typing import Dict, List, Optional, Tuple
 
 from config import GLOBAL_CONFIG
 from core.types import Order, Trade, OrderSide, OrderType, OrderStatus
@@ -46,6 +46,9 @@ class OrderBook:
         self.total_volume: int = 0
         self.trades_history: List[Trade] = []
         self._step_trades: List[Trade] = []
+        self.submitted_orders: int = 0
+        self.cancelled_orders: int = 0
+        self.trade_count: int = 0
 
     def _get_dynamic_limit(self) -> float:
         """Get dynamic price limits based on symbol."""
@@ -87,6 +90,7 @@ class OrderBook:
         # 3. Register Order
         self.orders[order.order_id] = order
         order.status = OrderStatus.PENDING
+        self.submitted_orders += 1
         
         # 4. Attempt Matching (Incoming vs Book)
         trades = []
@@ -162,6 +166,7 @@ class OrderBook:
             order = self.orders[order_id]
             if not order.is_filled:
                 order.status = OrderStatus.CANCELLED
+                self.cancelled_orders += 1
                 # We do NOT remove from self.orders yet, or the heap pop will fail to find it.
                 return True
         return False
@@ -245,7 +250,8 @@ class OrderBook:
         self.total_volume += exec_qty
         self.trades_history.append(trade)
         self._step_trades.append(trade)
-        
+        self.trade_count += 1
+
         return trade
 
     def get_best_bid(self) -> Optional[float]:
@@ -302,7 +308,17 @@ class OrderBook:
     def update_prev_close(self, close: float):
         self.prev_close = close
 
+    def get_activity_stats(self) -> Dict[str, int]:
+        return {
+            "submitted_orders": int(self.submitted_orders),
+            "cancelled_orders": int(self.cancelled_orders),
+            "trade_count": int(self.trade_count),
+        }
+
     def clear(self):
         self.bids.clear()
         self.asks.clear()
         self.orders.clear()
+        self.submitted_orders = 0
+        self.cancelled_orders = 0
+        self.trade_count = 0

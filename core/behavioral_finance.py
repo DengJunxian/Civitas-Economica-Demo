@@ -9,9 +9,14 @@
 4. 过度自信（Overconfidence）偏差
 """
 
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Dict, List, Literal, Optional, Sequence, Tuple
+
 import numpy as np
-from typing import Tuple, Optional, List, Dict, Literal
-from dataclasses import dataclass
 
 
 # ========== 前景理论 (Prospect Theory) ==========
@@ -255,10 +260,10 @@ def csad_regression(
         herding_detected = gamma2 < -0.01
         
         return {
-            'gamma1': gamma1,
-            'gamma2': gamma2,
-            'herding_detected': herding_detected,
-            'strength': abs(gamma2) if herding_detected else 0.0
+            'gamma1': float(gamma1),
+            'gamma2': float(gamma2),
+            'herding_detected': bool(herding_detected),
+            'strength': float(abs(gamma2) if herding_detected else 0.0)
         }
         
     except np.linalg.LinAlgError:
@@ -521,3 +526,467 @@ def cpt_expected_utility(
         for i in range(n)
     ]
     return float(np.sum(utils))
+
+
+# ========== Reference-Point-Driven Behavioral Layer ==========
+
+
+def _safe_price(value: float, fallback: float = 1.0) -> float:
+    price = float(value)
+    if price <= 0:
+        return float(max(fallback, 1e-6))
+    return price
+
+
+@dataclass
+class ReferencePoints:
+    """
+    Agent-level reference points used by behavioral finance dynamics.
+
+    All anchors are price-like levels (must be > 0).
+    """
+
+    purchase_anchor: float
+    recent_high_anchor: float
+    peer_anchor: float
+    policy_anchor: float
+
+    def normalized_returns(self, current_price: float) -> Dict[str, float]:
+        """Return anchor-relative returns at current price."""
+        price = _safe_price(current_price)
+        return {
+            "purchase_anchor": (price - _safe_price(self.purchase_anchor, price)) / _safe_price(self.purchase_anchor, price),
+            "recent_high_anchor": (price - _safe_price(self.recent_high_anchor, price)) / _safe_price(self.recent_high_anchor, price),
+            "peer_anchor": (price - _safe_price(self.peer_anchor, price)) / _safe_price(self.peer_anchor, price),
+            "policy_anchor": (price - _safe_price(self.policy_anchor, price)) / _safe_price(self.policy_anchor, price),
+        }
+
+
+@dataclass
+class ReferenceShiftConfig:
+    """Smoothing parameters for reference-point shift."""
+
+    purchase_decay: float = 0.03
+    recent_high_decay: float = 0.12
+    peer_decay: float = 0.18
+    policy_decay: float = 0.20
+    policy_sensitivity: float = 0.20
+
+
+@dataclass
+class BehavioralStepState:
+    """Output state from one behavioral update step."""
+
+    sentiment: float
+    reference_points: ReferencePoints
+    prospect_direction: float
+    risk_appetite: float
+    trading_intent: float
+    loss_aversion_intensity: float
+    weighted_reference_return: float
+
+
+def initialize_reference_points(
+    current_price: float,
+    *,
+    peer_anchor: Optional[float] = None,
+    policy_anchor: Optional[float] = None,
+) -> ReferencePoints:
+    """Initialize four anchors with sensible defaults."""
+    price = _safe_price(current_price)
+    return ReferencePoints(
+        purchase_anchor=price,
+        recent_high_anchor=price,
+        peer_anchor=_safe_price(peer_anchor if peer_anchor is not None else price, price),
+        policy_anchor=_safe_price(policy_anchor if policy_anchor is not None else price, price),
+    )
+
+
+def update_reference_points(
+    reference_points: ReferencePoints,
+    *,
+    current_price: float,
+    peer_anchor: float,
+    policy_anchor: float,
+    policy_shock: float = 0.0,
+    config: Optional[ReferenceShiftConfig] = None,
+) -> ReferencePoints:
+    """
+    Update reference points every step.
+
+    Order requirement mapping:
+    sentiment -> reference point shift -> risk appetite -> trading intent
+    """
+    cfg = config or ReferenceShiftConfig()
+    price = _safe_price(current_price)
+    old = reference_points
+
+    purchase_target = old.purchase_anchor * (1.0 - cfg.purchase_decay) + price * cfg.purchase_decay
+    recent_high_target = max(old.recent_high_anchor, price)
+    recent_high = old.recent_high_anchor * (1.0 - cfg.recent_high_decay) + recent_high_target * cfg.recent_high_decay
+
+    peer = old.peer_anchor * (1.0 - cfg.peer_decay) + _safe_price(peer_anchor, price) * cfg.peer_decay
+    policy_target = _safe_price(policy_anchor, price) * (1.0 + cfg.policy_sensitivity * float(policy_shock))
+    policy = old.policy_anchor * (1.0 - cfg.policy_decay) + policy_target * cfg.policy_decay
+
+    return ReferencePoints(
+        purchase_anchor=_safe_price(purchase_target, price),
+        recent_high_anchor=_safe_price(recent_high, price),
+        peer_anchor=_safe_price(peer, price),
+        policy_anchor=_safe_price(policy, price),
+    )
+
+
+def prospect_direction_preference(
+    current_price: float,
+    reference_points: ReferencePoints,
+    *,
+    loss_aversion: float = 2.25,
+    reference_weights: Optional[Dict[str, float]] = None,
+) -> Dict[str, float]:
+    """Prospect-theory style direction preference from four anchors."""
+    returns = reference_points.normalized_returns(current_price)
+    weights = {
+        "purchase_anchor": 0.34,
+        "recent_high_anchor": 0.26,
+        "peer_anchor": 0.20,
+        "policy_anchor": 0.20,
+    }
+    if reference_weights:
+        weights.update(reference_weights)
+
+    weighted_return = 0.0
+    weighted_utility = 0.0
+    underwater = 0.0
+    total_w = 0.0
+
+    for key, value in returns.items():
+        w = float(max(0.0, weights.get(key, 0.0)))
+        total_w += w
+        weighted_return += w * value
+        utility = prospect_utility(value, reference=0.0, loss_aversion=loss_aversion)
+        weighted_utility += w * utility
+        if value < 0:
+            underwater += w
+
+    if total_w <= 0:
+        total_w = 1.0
+    weighted_return /= total_w
+    weighted_utility /= total_w
+    underwater_ratio = underwater / total_w
+
+    # Direction in [-1, 1], positive = buy bias, negative = sell bias
+    direction = float(np.tanh(weighted_utility / 55.0))
+    # Loss-aversion intensity (dynamic) increases when more anchors are underwater
+    loss_intensity = float(np.clip(loss_aversion * (1.0 + 0.8 * underwater_ratio), 0.5, 6.0))
+
+    return {
+        "direction": direction,
+        "weighted_return": float(weighted_return),
+        "weighted_utility": float(weighted_utility),
+        "underwater_ratio": float(underwater_ratio),
+        "loss_aversion_intensity": loss_intensity,
+    }
+
+
+def update_risk_appetite(
+    base_risk_appetite: float,
+    sentiment: float,
+    direction_preference: float,
+    loss_aversion_intensity: float,
+) -> float:
+    """Update risk appetite in [0, 1] using sentiment + prospect signals."""
+    base = float(np.clip(base_risk_appetite, 0.0, 1.0))
+    senti = float(np.clip(sentiment, -1.0, 1.0))
+    direction = float(np.clip(direction_preference, -1.0, 1.0))
+    loss_penalty = (float(loss_aversion_intensity) - 1.0) / 5.0
+    updated = base + 0.22 * senti + 0.30 * direction - 0.18 * max(0.0, loss_penalty)
+    return float(np.clip(updated, 0.0, 1.0))
+
+
+def build_trading_intent(
+    risk_appetite: float,
+    direction_preference: float,
+    sentiment: float,
+) -> float:
+    """
+    Trading intent score in [-1, 1].
+    Positive means buy-side intent, negative means sell-side intent.
+    """
+    risk = float(np.clip(risk_appetite, 0.0, 1.0))
+    direction = float(np.clip(direction_preference, -1.0, 1.0))
+    senti = float(np.clip(sentiment, -1.0, 1.0))
+    intent = 0.65 * direction + 0.25 * senti + 0.10 * (risk - 0.5) * 2.0
+    return float(np.clip(intent, -1.0, 1.0))
+
+
+def behavioral_update_step(
+    *,
+    sentiment: float,
+    current_price: float,
+    reference_points: ReferencePoints,
+    base_risk_appetite: float,
+    peer_anchor: float,
+    policy_anchor: float,
+    policy_shock: float,
+    loss_aversion: float = 2.25,
+    shift_config: Optional[ReferenceShiftConfig] = None,
+    reference_weights: Optional[Dict[str, float]] = None,
+) -> BehavioralStepState:
+    """
+    One-step behavioral pipeline:
+    sentiment -> reference point shift -> risk appetite -> trading intent
+    """
+    shifted = update_reference_points(
+        reference_points,
+        current_price=current_price,
+        peer_anchor=peer_anchor,
+        policy_anchor=policy_anchor,
+        policy_shock=policy_shock,
+        config=shift_config,
+    )
+    prospect = prospect_direction_preference(
+        current_price=current_price,
+        reference_points=shifted,
+        loss_aversion=loss_aversion,
+        reference_weights=reference_weights,
+    )
+    risk = update_risk_appetite(
+        base_risk_appetite=base_risk_appetite,
+        sentiment=sentiment,
+        direction_preference=prospect["direction"],
+        loss_aversion_intensity=prospect["loss_aversion_intensity"],
+    )
+    intent = build_trading_intent(risk, prospect["direction"], sentiment)
+    return BehavioralStepState(
+        sentiment=float(np.clip(sentiment, -1.0, 1.0)),
+        reference_points=shifted,
+        prospect_direction=prospect["direction"],
+        risk_appetite=risk,
+        trading_intent=intent,
+        loss_aversion_intensity=prospect["loss_aversion_intensity"],
+        weighted_reference_return=prospect["weighted_return"],
+    )
+
+
+# ========== Disposition Effect (PGR / PLR) ==========
+
+
+@dataclass
+class DispositionCounter:
+    """Counters for computing PGR / PLR."""
+
+    realized_gains: int = 0
+    realized_losses: int = 0
+    paper_gains: int = 0
+    paper_losses: int = 0
+
+    def record_realized(self, pnl: float) -> None:
+        if pnl >= 0:
+            self.realized_gains += 1
+        else:
+            self.realized_losses += 1
+
+    def record_paper(self, pnl: float) -> None:
+        if pnl >= 0:
+            self.paper_gains += 1
+        else:
+            self.paper_losses += 1
+
+
+def calculate_pgr_plr(counter: DispositionCounter) -> Dict[str, float]:
+    """Compute realization rates for gains and losses."""
+    pgr_den = counter.realized_gains + counter.paper_gains
+    plr_den = counter.realized_losses + counter.paper_losses
+    pgr = counter.realized_gains / pgr_den if pgr_den > 0 else 0.0
+    plr = counter.realized_losses / plr_den if plr_den > 0 else 0.0
+    return {
+        "pgr": float(pgr),
+        "plr": float(plr),
+        "disposition_gap": float(pgr - plr),
+        "realized_gains": float(counter.realized_gains),
+        "realized_losses": float(counter.realized_losses),
+        "paper_gains": float(counter.paper_gains),
+        "paper_losses": float(counter.paper_losses),
+    }
+
+
+# ========== Stylized Facts Helpers ==========
+
+
+def all_time_high_effect(returns: Sequence[float], ath_flags: Sequence[bool]) -> Dict[str, float]:
+    """Measure return anomaly around all-time-high (ATH) states."""
+    if not returns:
+        return {
+            "ath_hit_rate": 0.0,
+            "mean_return_on_ath": 0.0,
+            "mean_return_off_ath": 0.0,
+            "ath_outperformance": 0.0,
+        }
+    n = min(len(returns), len(ath_flags))
+    if n <= 0:
+        return {
+            "ath_hit_rate": 0.0,
+            "mean_return_on_ath": 0.0,
+            "mean_return_off_ath": 0.0,
+            "ath_outperformance": 0.0,
+        }
+
+    arr = np.asarray([float(x) for x in returns[:n]], dtype=float)
+    flags = np.asarray([bool(x) for x in ath_flags[:n]], dtype=bool)
+    on = arr[flags]
+    off = arr[~flags]
+    mean_on = float(np.mean(on)) if on.size else 0.0
+    mean_off = float(np.mean(off)) if off.size else 0.0
+    return {
+        "ath_hit_rate": float(np.mean(flags)),
+        "mean_return_on_ath": mean_on,
+        "mean_return_off_ath": mean_off,
+        "ath_outperformance": float(mean_on - mean_off),
+    }
+
+
+def volatility_clustering_metrics(returns: Sequence[float]) -> Dict[str, float]:
+    """Estimate volatility clustering via lag autocorrelation of |r| and r^2."""
+    if len(returns) < 3:
+        return {
+            "abs_return_lag1_autocorr": 0.0,
+            "squared_return_lag1_autocorr": 0.0,
+            "volatility_level": 0.0,
+        }
+
+    arr = np.asarray([float(x) for x in returns], dtype=float)
+    abs_r = np.abs(arr)
+    sq_r = arr ** 2
+
+    def _lag1_autocorr(series: np.ndarray) -> float:
+        x0 = series[:-1]
+        x1 = series[1:]
+        if x0.size < 2 or float(np.std(x0)) < 1e-12 or float(np.std(x1)) < 1e-12:
+            return 0.0
+        return float(np.corrcoef(x0, x1)[0, 1])
+
+    return {
+        "abs_return_lag1_autocorr": _lag1_autocorr(abs_r),
+        "squared_return_lag1_autocorr": _lag1_autocorr(sq_r),
+        "volatility_level": float(np.std(arr)),
+    }
+
+
+def drawdown_distribution(prices: Sequence[float]) -> Dict[str, float]:
+    """Build drawdown distribution summary."""
+    if len(prices) < 2:
+        return {
+            "mean_drawdown": 0.0,
+            "max_drawdown": 0.0,
+            "median_drawdown": 0.0,
+            "q90_drawdown": 0.0,
+            "count": 0.0,
+        }
+    arr = np.asarray([_safe_price(x) for x in prices], dtype=float)
+    running_max = np.maximum.accumulate(arr)
+    drawdowns = arr / running_max - 1.0
+    dd = drawdowns[drawdowns < 0]
+    if dd.size == 0:
+        return {
+            "mean_drawdown": 0.0,
+            "max_drawdown": 0.0,
+            "median_drawdown": 0.0,
+            "q90_drawdown": 0.0,
+            "count": 0.0,
+        }
+    return {
+        "mean_drawdown": float(np.mean(dd)),
+        "max_drawdown": float(np.min(dd)),
+        "median_drawdown": float(np.median(dd)),
+        "q90_drawdown": float(np.quantile(dd, 0.9)),
+        "count": float(dd.size),
+    }
+
+
+@dataclass
+class StylizedFactsTracker:
+    """
+    Collect per-step market/behavior traces and export stylized facts.
+    """
+
+    prices: List[float] = field(default_factory=list)
+    market_returns: List[float] = field(default_factory=list)
+    csad_series: List[float] = field(default_factory=list)
+    cross_sectional_returns: List[List[float]] = field(default_factory=list)
+    ath_flags: List[bool] = field(default_factory=list)
+    loss_aversion_intensity: List[float] = field(default_factory=list)
+    disposition: DispositionCounter = field(default_factory=DispositionCounter)
+
+    def record_step(
+        self,
+        *,
+        price: float,
+        market_return: float,
+        csad: float,
+        cross_returns: Sequence[float],
+        is_all_time_high: bool,
+        loss_aversion_intensity: float,
+    ) -> None:
+        self.prices.append(float(price))
+        self.market_returns.append(float(market_return))
+        self.csad_series.append(float(csad))
+        self.cross_sectional_returns.append([float(x) for x in cross_returns])
+        self.ath_flags.append(bool(is_all_time_high))
+        self.loss_aversion_intensity.append(float(loss_aversion_intensity))
+
+    def report(self) -> Dict[str, object]:
+        csad_mean = float(np.mean(self.csad_series)) if self.csad_series else 0.0
+        csad_std = float(np.std(self.csad_series)) if self.csad_series else 0.0
+        matrix = np.zeros((0, 0), dtype=float)
+        if self.cross_sectional_returns:
+            valid_rows = [row for row in self.cross_sectional_returns if row]
+            if valid_rows:
+                width = min(len(row) for row in valid_rows)
+                if width > 0:
+                    matrix = np.asarray([row[:width] for row in valid_rows], dtype=float)
+        aligned_market_returns = np.asarray(self.market_returns, dtype=float) if self.market_returns else np.zeros(0, dtype=float)
+        if matrix.shape[0] > 0 and aligned_market_returns.shape[0] != matrix.shape[0]:
+            aligned_market_returns = aligned_market_returns[-matrix.shape[0]:]
+        herding = csad_regression(
+            returns_history=matrix,
+            market_returns=aligned_market_returns,
+            window=min(20, int(aligned_market_returns.shape[0])) if aligned_market_returns.size else 20,
+        )
+        ath = all_time_high_effect(self.market_returns, self.ath_flags)
+        vol_cluster = volatility_clustering_metrics(self.market_returns)
+        drawdowns = drawdown_distribution(self.prices)
+        pgr_plr = calculate_pgr_plr(self.disposition)
+        loss_avg = float(np.mean(self.loss_aversion_intensity)) if self.loss_aversion_intensity else 0.0
+        loss_p90 = float(np.quantile(self.loss_aversion_intensity, 0.9)) if self.loss_aversion_intensity else 0.0
+        payload = {
+            "csad": {
+                "mean": csad_mean,
+                "std": csad_std,
+                "herding_regression": herding,
+            },
+            "pgr_plr": pgr_plr,
+            "volatility_clustering": vol_cluster,
+            "drawdown_distribution": drawdowns,
+            "all_time_high_effect": ath,
+            "loss_aversion_intensity": {
+                "mean": loss_avg,
+                "p90": loss_p90,
+                "n_obs": len(self.loss_aversion_intensity),
+            },
+        }
+        # Alias keys kept for compatibility with external evaluators.
+        payload["volatility clustering"] = payload["volatility_clustering"]
+        payload["drawdown distribution"] = payload["drawdown_distribution"]
+        payload["all_time_high effect"] = payload["all_time_high_effect"]
+        return payload
+
+    def save_json(self, output_path: str | Path) -> Path:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = self.report()
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return path
+
+    def to_dict(self) -> Dict[str, object]:
+        return asdict(self)

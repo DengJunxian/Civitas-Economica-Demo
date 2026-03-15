@@ -37,10 +37,42 @@ class Persona:
     # Cognitive Biases (0.0 to 1.0 strength)
     loss_aversion: float = 2.25   # Kahneman's Lambda (Standard ~2.25)
     overconfidence: float = 0.0
+    reference_adaptivity: float = 0.5
+    purchase_anchor_weight: float = 0.34
+    recent_high_anchor_weight: float = 0.26
+    peer_anchor_weight: float = 0.20
+    policy_anchor_weight: float = 0.20
     
     def __str__(self):
         return (f"Persona({self.name} | {self.risk_appetite.value} | "
                 f"{self.investment_horizon.value} | Conformity: {self.conformity:.2f})")
+
+    def base_risk_score(self) -> float:
+        mapping = {
+            RiskAppetite.CONSERVATIVE: 0.25,
+            RiskAppetite.BALANCED: 0.50,
+            RiskAppetite.AGGRESSIVE: 0.72,
+            RiskAppetite.GAMBLER: 0.86,
+        }
+        return float(mapping.get(self.risk_appetite, 0.50))
+
+    def reference_weights(self) -> Dict[str, float]:
+        return {
+            "purchase_anchor": float(self.purchase_anchor_weight),
+            "recent_high_anchor": float(self.recent_high_anchor_weight),
+            "peer_anchor": float(self.peer_anchor_weight),
+            "policy_anchor": float(self.policy_anchor_weight),
+        }
+
+    def reference_shift_profile(self) -> Dict[str, float]:
+        adapt = max(0.05, min(0.95, float(self.reference_adaptivity)))
+        return {
+            "purchase_decay": 0.02 + 0.05 * adapt,
+            "recent_high_decay": 0.08 + 0.10 * adapt,
+            "peer_decay": 0.10 + 0.18 * adapt,
+            "policy_decay": 0.10 + 0.20 * adapt,
+            "policy_sensitivity": 0.08 + 0.25 * adapt,
+        }
 
 class PersonaGenerator:
     """

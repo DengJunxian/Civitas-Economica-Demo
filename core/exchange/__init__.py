@@ -1,5 +1,27 @@
-# core/exchange 模块
-"""
-虚拟交易所核心组件
-包含订单簿、撮合引擎和市场状态管理
-"""
+﻿"""Core exchange package exports."""
+
+from .evolution import (
+    EcologyMetricsRow,
+    EcologyMetricsTracker,
+    EvolutionOperators,
+    StrategyGenome,
+    approx_modularity,
+    build_sentiment_coalitions,
+    coalition_persistence,
+    entropy_from_labels,
+    hhi_from_shares,
+    phase_change_score,
+)
+
+__all__ = [
+    "StrategyGenome",
+    "EvolutionOperators",
+    "EcologyMetricsRow",
+    "EcologyMetricsTracker",
+    "entropy_from_labels",
+    "hhi_from_shares",
+    "build_sentiment_coalitions",
+    "coalition_persistence",
+    "approx_modularity",
+    "phase_change_score",
+]

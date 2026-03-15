@@ -1,15 +1,15 @@
-# file: agents/trader_agent.py
+﻿# file: agents/trader_agent.py
 """
-TraderAgent 实现 — 基于认知闭环的交易智能体
+TraderAgent 瀹炵幇 鈥?鍩轰簬璁ょ煡闂幆鐨勪氦鏄撴櫤鑳戒綋
 
-实现 BaseAgent 定义的 Perceive-Reason-Decide-Act 闭环。
-核心特性:
-1. 心理画像驱动: 风险厌恶、自信程度、关注广度等个性化参数
-2. 模拟 DeepSeek R1 推理: 生成类人思维链 (Chain of Thought)
-3. 结构化决策: 输出标准 Limit Order
-4. 快慢思考双层架构 (System 1/2): 节约算力，模拟直觉与深思
+瀹炵幇 BaseAgent 瀹氫箟鐨?Perceive-Reason-Decide-Act 闂幆銆?
+鏍稿績鐗规€?
+1. 蹇冪悊鐢诲儚椹卞姩: 椋庨櫓鍘屾伓銆佽嚜淇＄▼搴︺€佸叧娉ㄥ箍搴︾瓑涓€у寲鍙傛暟
+2. 妯℃嫙 DeepSeek R1 鎺ㄧ悊: 鐢熸垚绫讳汉鎬濈淮閾?(Chain of Thought)
+3. 缁撴瀯鍖栧喅绛? 杈撳嚭鏍囧噯 Limit Order
+4. 蹇參鎬濊€冨弻灞傛灦鏋?(System 1/2): 鑺傜害绠楀姏锛屾ā鎷熺洿瑙変笌娣辨€?
 
-作者: Civitas Economica Team
+浣滆€? Civitas Economica Team
 """
 
 import asyncio
@@ -23,7 +23,13 @@ import numpy as np
 from agents.base_agent import BaseAgent, MarketSnapshot
 from agents.brain import DeepSeekBrain
 from core.types import Order, OrderSide, OrderType, OrderStatus
-from core.behavioral_finance import predict_next_return
+from core.behavioral_finance import (
+    ReferencePoints,
+    ReferenceShiftConfig,
+    behavioral_update_step,
+    initialize_reference_points,
+    predict_next_return,
+)
 from agents.persona import Persona, RiskAppetite
 from core.society.network import SocialGraph, SentimentState
 from agents.cognition.graph_storage import GraphMemoryBank
@@ -34,7 +40,7 @@ from agents.roles.risk_analyst import RiskAnalyst
 
 class TraderAgent(BaseAgent):
     """
-    TraderAgent — 具备完整认知闭环的交易智能体
+    TraderAgent 鈥?鍏峰瀹屾暣璁ょ煡闂幆鐨勪氦鏄撴櫤鑳戒綋
     """
 
     def __init__(
@@ -55,10 +61,10 @@ class TraderAgent(BaseAgent):
         
         self.use_llm = use_llm
         
-        # 人格画像集成
+        # 浜烘牸鐢诲儚闆嗘垚
         self.persona = persona if persona else Persona(name=agent_id)
         
-        # 社交网络集成
+        # 绀句氦缃戠粶闆嗘垚
         self.social_node_id: Optional[int] = None
         self.social_graph: Optional[SocialGraph] = None
         
@@ -94,19 +100,19 @@ class TraderAgent(BaseAgent):
                 },
                 model_router=model_router
             )
-        # 注入模型优先级 (如果 Brain 支持)
+        # 娉ㄥ叆妯″瀷浼樺厛绾?(濡傛灉 Brain 鏀寔)
         if hasattr(self.brain, 'model_priority'):
             self.brain.model_priority = model_priority
         
-        # 合规反馈记忆（存储被风控拒绝的原因）
+        # 鍚堣鍙嶉璁板繂锛堝瓨鍌ㄨ椋庢帶鎷掔粷鐨勫師鍥狅級
         self.compliance_feedback: List[str] = []
         
-        # 快/慢思考模式状态跟踪
+        # 蹇?鎱㈡€濊€冩ā寮忕姸鎬佽窡韪?
         self._last_news_count = 0
         self._last_social_sentiment = "neutral"
         self._fast_mode_consecutive_steps = 0
         
-        # GraphRAG 记忆层
+        # GraphRAG 璁板繂灞?
         self.graph_memory = GraphMemoryBank(agent_id=self.agent_id)
         self.graph_extractor = GraphExtractor(model_router=self.brain.model_router if hasattr(self, 'brain') else model_router)
         
@@ -131,6 +137,14 @@ class TraderAgent(BaseAgent):
         self._wind_tunnel_records: List[Dict[str, Any]] = []
         self._recent_trade_outcomes: List[Dict[str, Any]] = []
         self._last_belief_reflection_step: int = 0
+        self.reference_points: Optional[ReferencePoints] = None
+        shift_profile = self.persona.reference_shift_profile() if hasattr(self.persona, "reference_shift_profile") else {}
+        self.reference_shift_config = ReferenceShiftConfig(**shift_profile)
+        base_risk = self.persona.base_risk_score() if hasattr(self.persona, "base_risk_score") else 0.5
+        self.current_risk_appetite: float = float(base_risk)
+        self.current_trading_intent: float = 0.0
+        self.current_loss_aversion_intensity: float = float(self.persona.loss_aversion)
+        self.last_behavioral_state: Dict[str, Any] = {}
 
     def _map_persona_to_risk_aversion(self) -> float:
         mapping = {
@@ -141,18 +155,136 @@ class TraderAgent(BaseAgent):
         }
         return mapping.get(self.persona.risk_appetite, 0.5)
 
+    @staticmethod
+    def _emotion_to_sentiment(emotion: str) -> float:
+        mapping = {
+            "Greedy": 0.65,
+            "Confident": 0.35,
+            "Neutral": 0.0,
+            "Anxious": -0.35,
+            "Regretful": -0.65,
+            "Fearful": -0.8,
+        }
+        return float(mapping.get(str(emotion or "Neutral"), 0.0))
+
+    def _derive_step_sentiment(self, perceived_data: Dict[str, Any], social_signal: str) -> float:
+        snapshot: MarketSnapshot = perceived_data.get("snapshot")
+        trend = float(getattr(snapshot, "market_trend", 0.0))
+        emotion_term = self._emotion_to_sentiment(getattr(self, "emotional_state", "Neutral"))
+        signal = (social_signal or "").lower()
+        social_term = 0.0
+        if "panic" in signal or "selling" in signal or "nervous" in signal:
+            social_term -= 0.35
+        if "buying" in signal or "fomo" in signal or "bull" in signal:
+            social_term += 0.35
+        sentiment = 0.45 * emotion_term + 0.35 * np.clip(trend, -1.0, 1.0) + 0.20 * social_term
+        return float(np.clip(sentiment, -1.0, 1.0))
+
+    def _estimate_peer_anchor(self, current_price: float) -> float:
+        price = float(max(current_price, 1e-6))
+        if self.social_graph is None or self.social_node_id is None:
+            return price
+        bearish_ratio = float(self.social_graph.get_bearish_ratio(self.social_node_id))
+        bullish_ratio = float(self.social_graph.get_bullish_ratio(self.social_node_id))
+        peer_shift = np.clip((bullish_ratio - bearish_ratio) * 0.05, -0.10, 0.10)
+        return float(price * (1.0 + peer_shift))
+
+    def _estimate_policy_anchor(self, snapshot: MarketSnapshot, current_price: float) -> tuple[float, float]:
+        price = float(max(current_price, 1e-6))
+        text_shock = float(getattr(snapshot, "text_policy_shock", 0.0))
+        tax_rate = float(getattr(snapshot, "policy_tax_rate", 0.0))
+        regime = str(getattr(snapshot, "text_regime_bias", "neutral")).lower()
+        shock = text_shock - tax_rate * 0.5
+        if regime in {"bullish", "easing", "supportive"}:
+            shock += 0.2
+        elif regime in {"bearish", "tightening", "restrictive"}:
+            shock -= 0.2
+        shock = float(np.clip(shock, -1.0, 1.0))
+        return float(price * (1.0 + 0.08 * shock)), shock
+
+    def update_behavioral_state(self, perceived_data: Dict[str, Any], social_signal: str) -> Dict[str, Any]:
+        snapshot: MarketSnapshot = perceived_data["snapshot"]
+        current_price = float(snapshot.last_price)
+        if self.reference_points is None:
+            self.reference_points = initialize_reference_points(current_price)
+
+        sentiment = self._derive_step_sentiment(perceived_data, social_signal)
+        peer_anchor = self._estimate_peer_anchor(current_price)
+        policy_anchor, policy_shock = self._estimate_policy_anchor(snapshot, current_price)
+        step = behavioral_update_step(
+            sentiment=sentiment,
+            current_price=current_price,
+            reference_points=self.reference_points,
+            base_risk_appetite=self.current_risk_appetite,
+            peer_anchor=peer_anchor,
+            policy_anchor=policy_anchor,
+            policy_shock=policy_shock,
+            loss_aversion=float(self.persona.loss_aversion),
+            shift_config=self.reference_shift_config,
+            reference_weights=self.persona.reference_weights() if hasattr(self.persona, "reference_weights") else None,
+        )
+        self.reference_points = step.reference_points
+        self.current_risk_appetite = float(step.risk_appetite)
+        self.current_trading_intent = float(step.trading_intent)
+        self.current_loss_aversion_intensity = float(step.loss_aversion_intensity)
+        self.last_behavioral_state = {
+            "sentiment": float(step.sentiment),
+            "risk_appetite": float(step.risk_appetite),
+            "trading_intent": float(step.trading_intent),
+            "prospect_direction": float(step.prospect_direction),
+            "loss_aversion_intensity": float(step.loss_aversion_intensity),
+            "weighted_reference_return": float(step.weighted_reference_return),
+            "reference_points": {
+                "purchase_anchor": float(step.reference_points.purchase_anchor),
+                "recent_high_anchor": float(step.reference_points.recent_high_anchor),
+                "peer_anchor": float(step.reference_points.peer_anchor),
+                "policy_anchor": float(step.reference_points.policy_anchor),
+            },
+        }
+        return dict(self.last_behavioral_state)
+
+    def _apply_behavioral_intent_overlay(
+        self,
+        decision_payload: Dict[str, Any],
+        snapshot: MarketSnapshot,
+    ) -> Dict[str, Any]:
+        intent = float(self.current_trading_intent)
+        risk = float(self.current_risk_appetite)
+        decision = decision_payload.setdefault("decision", {})
+        action = str(decision.get("action", "HOLD")).upper()
+        qty = int(decision.get("qty", 0) or 0)
+        price = float(decision.get("price", snapshot.last_price) or snapshot.last_price)
+
+        if action == "HOLD":
+            if intent >= 0.55 and self.cash_balance > snapshot.last_price:
+                action = "BUY"
+                qty = max(100, int((self.cash_balance * (0.06 + 0.16 * risk)) / snapshot.last_price) // 100 * 100)
+                price = round(snapshot.last_price * 1.01, 2)
+            elif intent <= -0.55:
+                holding = int(self.portfolio.get(snapshot.symbol, 0))
+                if holding > 0:
+                    action = "SELL"
+                    qty = max(100, int(holding * (0.25 + 0.45 * abs(intent))) // 100 * 100)
+                    qty = min(qty, holding)
+                    price = round(snapshot.last_price * 0.99, 2)
+
+        decision["action"] = action
+        decision["qty"] = max(0, int(qty))
+        decision["price"] = float(price)
+        decision_payload["behavioral_state"] = dict(self.last_behavioral_state)
+        return decision_payload
+
     def bind_social_node(self, node_id: int, graph: SocialGraph):
         """Bind this agent to a node in the Social Graph."""
         self.social_node_id = node_id
         self.social_graph = graph
-        # Sync agent ID to graph node
         if node_id in graph.agents:
             graph.agents[node_id].agent_id = self.agent_id
-        # 初次绑定时立即同步一次语义画像，确保传播引擎有可用语义向量。
+        # Initial sync so social diffusion can consume semantic profile.
         self.sync_social_semantic_profile()
 
     def _risk_tilt_from_persona(self) -> float:
-        """将离散风险偏好映射到连续风偏分数 [-1, 1]。"""
+        """Map discrete risk preference to a continuous tilt score in [-1, 1]."""
         mapping = {
             RiskAppetite.CONSERVATIVE: -0.8,
             RiskAppetite.BALANCED: 0.0,
@@ -162,44 +294,32 @@ class TraderAgent(BaseAgent):
         return float(mapping.get(self.persona.risk_appetite, 0.0))
 
     def _default_focus_topics(self) -> List[str]:
-        """
-        基于人格生成默认关注主题。
-        用于 GraphRAG 尚未形成稳定子图时的冷启动推荐画像。
-        """
+        """Build a stable cold-start topic profile before graph memory converges."""
         horizon_map = {
-            "short-term": ["波动", "成交量", "情绪", "热点"],
-            "medium-term": ["政策", "流动性", "盈利", "估值"],
-            "long-term": ["基本面", "产业趋势", "财政", "利率"],
+            "short-term": ["volatility", "turnover", "sentiment", "hot-theme"],
+            "medium-term": ["policy", "liquidity", "earnings", "valuation"],
+            "long-term": ["fundamental", "industry-trend", "fiscal", "rates"],
         }
         risk_map = {
-            RiskAppetite.CONSERVATIVE: ["防御", "分红", "稳增长"],
-            RiskAppetite.BALANCED: ["均衡配置", "政策", "景气"],
-            RiskAppetite.AGGRESSIVE: ["成长", "科技", "弹性"],
-            RiskAppetite.GAMBLER: ["题材", "高波动", "杠杆"],
+            RiskAppetite.CONSERVATIVE: ["defensive", "dividend", "stable-growth"],
+            RiskAppetite.BALANCED: ["balanced-allocation", "policy", "cycle"],
+            RiskAppetite.AGGRESSIVE: ["growth", "technology", "beta"],
+            RiskAppetite.GAMBLER: ["speculation", "high-vol", "leverage"],
         }
 
         horizon_key = str(self.persona.investment_horizon.value).lower()
-        topics = horizon_map.get(horizon_key, ["政策", "风险"])
-        topics = topics + risk_map.get(self.persona.risk_appetite, ["政策", "风险"])
+        topics = horizon_map.get(horizon_key, ["policy", "risk"])
+        topics = topics + risk_map.get(self.persona.risk_appetite, ["policy", "risk"])
         return list(dict.fromkeys(topics))
 
     def sync_social_semantic_profile(self) -> None:
-        """
-        将 TraderAgent 的 GraphRAG 主导叙事同步到社交图节点。
-
-        该方法是“语义驱动 SIRS”的数据入口：
-        - dominant_narratives: 取自 GraphMemoryBank
-        - focus_topics: 人格冷启动 + 近期叙事融合
-        - risk_tilt / historical_risk_bias: 用于 RecSys Hot Score 的风偏匹配
-        """
+        """Sync GraphRAG semantic profile to social graph node."""
         if self.social_graph is None or self.social_node_id is None:
             return
 
         dominant = self.graph_memory.get_dominant_narratives(top_k=6)
         default_focus = self._default_focus_topics()
         focus_topics = list(dict.fromkeys(default_focus + dominant[:3]))
-
-        # 将脑状态中的信心和情绪轻量映射为历史风险偏置，模拟“越亏越保守/越赚越激进”。
         confidence = float(getattr(self.brain.state, "confidence", 50.0))
         confidence_bias = np.clip((confidence - 50.0) / 50.0, -1.0, 1.0)
 
@@ -223,10 +343,8 @@ class TraderAgent(BaseAgent):
         market_snapshot: MarketSnapshot,
         public_news: List[str],
     ) -> Dict[str, Any]:
-        """
-        感知阶段: 过滤信息
-        """
-        # 1. 过滤新闻 (基于 attention_span)
+        """Perception stage."""
+        # 1. 杩囨护鏂伴椈 (鍩轰簬 attention_span)
         span = int(self.profile.get("attention_span", 3))
         observed_news = public_news[:span] if public_news else []
         
@@ -257,128 +375,116 @@ class TraderAgent(BaseAgent):
         self,
         perceived_data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """
-        推理阶段: 调用 DeepSeek Brain (Enhanced with Emotion & Social)
-        """
-        # 计算当前情绪状态
-        # Phase 1: Analyst Reports
+        """Reasoning stage with analyst reports and behavioral context."""
         analyst_reports = self._collect_analyst_reports(perceived_data)
         perceived_data["analyst_reports"] = analyst_reports
-
         self.update_emotional_state(perceived_data)
-
-        # RAM 触发判定（先于常规决策）
         self._update_ram_state(
             analyst_reports.get("risk", {}),
-            getattr(self, "emotional_state", "Neutral")
+            getattr(self, "emotional_state", "Neutral"),
         )
-        
-        # 获取社交信号
         social_signal = self.perceive_social_signal(perceived_data)
-        
-        # 调用增强版推理方法 (reason_and_act logic integrated here)
+        perceived_data["behavioral_state"] = self.update_behavioral_state(perceived_data, social_signal)
         return await self.reason_and_act(perceived_data, self.emotional_state, social_signal)
 
     def _needs_deep_thinking(self, perceived_data: Dict[str, Any], social_signal: str) -> bool:
-        """
-        判断是否需要触发慢思考 (System 2 / LLM)
-        
-        触发条件:
-        1. 突发新闻: 新闻数量增加
-        2. 盈亏剧烈: 触及止损/止盈阈值 (效用极值)
-        3. 社交逆转: 社交信号发生方向性改变
-        4. 强制刷新: 连续 N 步快思考后强制刷新一次
-        """
-        # Condition 1: New News
+        """Decide whether to invoke expensive deep-thinking path."""
         news = perceived_data.get("news", [])
         if len(news) > self._last_news_count:
             self._last_news_count = len(news)
             return True
-            
-        # Condition 2: PnL Extremes (Use Prospect Theory utility approximation)
+
         pnl_pct = perceived_data.get("pnl_pct", 0)
-        # 简化版前景效用: 亏损更敏感
         utility = pnl_pct if pnl_pct > 0 else pnl_pct * 2.25
-        if utility < -0.15 or utility > 0.10: # 大亏或大赚
-            # 但如果已经在同一状态很久，可能不需要每步都想？
-            # 暂时简化为：极端情况始终深思
+        if utility < -0.15 or utility > 0.10:
             return True
-            
-        # Condition 3: Social Signal Reversal
-        # Parse social signal simple sentiment
+
         current_social = "neutral"
-        if "Panic" in social_signal or "selling" in social_signal: current_social = "bearish"
-        elif "buy" in social_signal or "FOMO" in social_signal: current_social = "bullish"
-        
+        if "panic" in social_signal.lower() or "selling" in social_signal.lower():
+            current_social = "bearish"
+        elif "buy" in social_signal.lower() or "fomo" in social_signal.lower():
+            current_social = "bullish"
+
         if current_social != self._last_social_sentiment:
             self._last_social_sentiment = current_social
             return True
-            
-        # Condition 4: Forced Refresh (every 10 steps to prevent zombies)
+
         if self._fast_mode_consecutive_steps > 10:
             return True
-            
         return False
 
     def _fast_think(
-        self, 
+        self,
         perceived_data: Dict[str, Any],
         emotional_state: str,
-        social_signal: str
+        social_signal: str,
     ) -> Dict[str, Any]:
-        """
-        快思考 (System 1): 基于规则和启发式的快速反应
-        不调用 LLM，极其高效。
-        """
+        """Fast rule-based decision path."""
         snapshot: MarketSnapshot = perceived_data["snapshot"]
         trend_val = getattr(snapshot, "market_trend", 0)
-        pnl_pct = perceived_data.get("pnl_pct", 0)
-        
+
         action = "HOLD"
         qty = 0
         price = 0.0
-        
         last_price = snapshot.last_price
-        
-        # Heuristic 1: Trend Following (Momentum)
-        if trend_val > 0.03: # Strong Up
-             if self.cash_balance > last_price * 100:
-                 action = "BUY"
-                 # Buy small amount (10% of cash)
-                 qty = int((self.cash_balance * 0.1) / last_price) // 100 * 100
-                 price = round(last_price * 1.02, 2) # Aggressive
-        elif trend_val < -0.03: # Strong Down
-             holding = self.portfolio.get(snapshot.symbol, 0)
-             if holding > 0:
-                 action = "SELL"
-                 # Sell 20% of holding
-                 qty = int(holding * 0.2) // 100 * 100
-                 price = round(last_price * 0.98, 2) # Aggressive
-                 
-        # Heuristic 2: Panic Selling (Override)
-        if "Panic" in social_signal or emotional_state == "Fearful":
-             holding = self.portfolio.get(snapshot.symbol, 0)
-             if holding > 0:
-                 action = "SELL"
-                 qty = int(holding * 0.5) // 100 * 100 # Dump 50%
-                 if qty == 0 and holding > 0: qty = holding # Dump all if small
-                 price = round(last_price * 0.95, 2) # Panic price
-        
+        behavioral_state = perceived_data.get("behavioral_state", self.last_behavioral_state)
+        if isinstance(behavioral_state, dict):
+            intent_score = float(behavioral_state.get("trading_intent", self.current_trading_intent))
+            risk_score = float(behavioral_state.get("risk_appetite", self.current_risk_appetite))
+        else:
+            intent_score = self.current_trading_intent
+            risk_score = self.current_risk_appetite
+
+        if trend_val > 0.03 and self.cash_balance > last_price * 100:
+            action = "BUY"
+            qty = int((self.cash_balance * (0.06 + 0.18 * risk_score)) / last_price) // 100 * 100
+            price = round(last_price * 1.02, 2)
+        elif trend_val < -0.03:
+            holding = self.portfolio.get(snapshot.symbol, 0)
+            if holding > 0:
+                action = "SELL"
+                qty = int(holding * 0.2) // 100 * 100
+                price = round(last_price * 0.98, 2)
+
+        if "panic" in social_signal.lower() or emotional_state == "Fearful":
+            holding = self.portfolio.get(snapshot.symbol, 0)
+            if holding > 0:
+                action = "SELL"
+                qty = int(holding * 0.5) // 100 * 100
+                if qty == 0 and holding > 0:
+                    qty = holding
+                price = round(last_price * 0.95, 2)
+
+        if action == "HOLD":
+            if intent_score >= 0.55 and self.cash_balance > last_price * 100:
+                action = "BUY"
+                qty = int((self.cash_balance * (0.05 + 0.18 * risk_score)) / last_price) // 100 * 100
+                price = round(last_price * 1.01, 2)
+            elif intent_score <= -0.55:
+                holding = self.portfolio.get(snapshot.symbol, 0)
+                if holding > 0:
+                    action = "SELL"
+                    qty = int(holding * (0.20 + 0.55 * abs(intent_score))) // 100 * 100
+                    if qty <= 0:
+                        qty = holding
+                    price = round(last_price * 0.99, 2)
+
+        if action == "BUY" and qty > 0:
+            qty = max(100, int(qty * (0.85 + 0.6 * risk_score)))
+        elif action == "SELL" and qty > 0:
+            qty = max(100, int(qty * (0.85 + 0.6 * abs(min(0.0, intent_score)))))
+
         reasoning = f"(System 1) Fast response. Trend={trend_val:.3f}, Emotion={emotional_state}"
-        
         return {
-            "decision": {
-                "action": action,
-                "qty": qty,
-                "price": price
-            },
+            "decision": {"action": action, "qty": qty, "price": price},
             "reasoning": reasoning,
             "symbol": snapshot.symbol,
-            "timestamp": snapshot.timestamp
+            "timestamp": snapshot.timestamp,
+            "behavioral_state": dict(self.last_behavioral_state),
         }
 
     async def _async_extract_and_store(self, text: str, current_time: float, is_news: bool = False):
-        """后台异步抽取图谱节点，避免阻塞主交易循环"""
+        """Background graph extraction to avoid blocking the trade loop."""
         triplets = await self.graph_extractor.extract_graph(text)
         if not triplets:
             return
@@ -388,17 +494,14 @@ class TraderAgent(BaseAgent):
             self.graph_memory.add_triplet(t["subject"], t["predicate"], t["target"], t["weight"])
             topics.add(t["subject"])
             
-        # 如果是宏观新闻，生成短期胶囊缓存
+        # 濡傛灉鏄畯瑙傛柊闂伙紝鐢熸垚鐭湡鑳跺泭缂撳瓨
         if is_news and topics:
-            capsule_topic = list(topics)[0] # 取主要概念作为 topic
-            summary = f"[{capsule_topic}] 相关动态已发生: {text[:50]}..."
+            capsule_topic = list(topics)[0] # 鍙栦富瑕佹蹇典綔涓?topic
+            summary = f"[{capsule_topic}] 鐩稿叧鍔ㄦ€佸凡鍙戠敓: {text[:50]}..."
             self.graph_memory.add_capsule(capsule_topic, summary, current_time, ttl_seconds=3600)
 
     def _collect_analyst_reports(self, perceived_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        收集三名分析师的 JSON 输出，并对失败调用进行容错降级。
-        该机制对应 FINCON/QuantAgents 的“角色解耦 + 分工协作”范式。
-        """
+        """Collect analyst reports with defensive fallback payloads."""
         reports: Dict[str, Any] = {}
         snapshot: MarketSnapshot = perceived_data.get("snapshot")
 
@@ -411,7 +514,7 @@ class TraderAgent(BaseAgent):
                 "error": str(exc),
                 "events": [],
                 "sentiment_score": 0.0,
-                "sentiment_label": "中性",
+                "sentiment_label": "neutral",
             }
 
         try:
@@ -440,11 +543,7 @@ class TraderAgent(BaseAgent):
         return reports
 
     def _update_ram_state(self, risk_report: Dict[str, Any], emotional_state: str) -> None:
-        """
-        更新 Risk Alert Meeting (RAM) 状态。
-        触发条件：CVaR 显著恶化或情绪进入 Fearful。
-        对应 FINCON 风控会议机制：在情节内强制避险。
-        """
+        """Update Risk Alert Meeting (RAM) state machine."""
         cvar = float(risk_report.get("cvar", 0.0) or 0.0)
         cvar_drop = None
         trigger_reason = ""
@@ -452,10 +551,10 @@ class TraderAgent(BaseAgent):
         if self._last_cvar is not None:
             cvar_drop = cvar - self._last_cvar
             if cvar_drop < -abs(self._last_cvar) * 0.5 and cvar < 0:
-                trigger_reason = f"CVaR 陡降: {self._last_cvar:.4f} -> {cvar:.4f}"
+                trigger_reason = f"CVaR 闄￠檷: {self._last_cvar:.4f} -> {cvar:.4f}"
 
         if emotional_state == "Fearful":
-            trigger_reason = trigger_reason or "情绪 Fearful 触发风控会议"
+            trigger_reason = trigger_reason or "鎯呯华 Fearful 瑙﹀彂椋庢帶浼氳"
 
         if trigger_reason:
             self._ram_until_step = max(self._ram_until_step, self._step_count + self._ram_cooldown_steps)
@@ -473,7 +572,7 @@ class TraderAgent(BaseAgent):
         return os.path.join(base_dir, f"beliefs_{self.agent_id}.json")
 
     def _persist_beliefs(self, new_beliefs: List[str]) -> None:
-        """将交易信仰持久化写入文件，供 System Prompt 长期强化。"""
+        """Persist trade beliefs for future prompt reinforcement."""
         path = self._beliefs_file_path()
         beliefs = []
         if os.path.exists(path):
@@ -500,10 +599,7 @@ class TraderAgent(BaseAgent):
             pass
 
     def _reflect_and_persist_beliefs(self) -> None:
-        """
-        文本梯度下降：让 LLM 从连续盈亏中提炼抽象交易信仰，并写入系统提示。
-        对应 FINCON/QuantAgents 中的“概念化语言强化”。
-        """
+        """Summarize recent outcomes into compact investment beliefs."""
         if not self._recent_trade_outcomes:
             return
         if self._step_count - self._last_belief_reflection_step < 5:
@@ -512,20 +608,20 @@ class TraderAgent(BaseAgent):
         recent = self._recent_trade_outcomes[-8:]
         prompt = {
             "recent_trades": recent,
-            "instruction": "提炼3条高度抽象的交易信仰(Investment Beliefs)，输出JSON数组"
+            "instruction": "Extract up to 3 abstract investment beliefs as a JSON array.",
         }
         messages = [
-            {"role": "system", "content": "你是资深量化与行为金融分析师。只输出JSON数组，不要包含其他文本。"},
-            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)}
+            {"role": "system", "content": "You are a quantitative behavioral analyst. Return JSON array only."},
+            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
         ]
 
         beliefs: List[str] = []
         try:
-            if self.brain.model_router:
+            if getattr(self.brain, "model_router", None):
                 content, _, _ = self.brain.model_router.sync_call_with_fallback(
                     messages=messages,
                     priority_models=["deepseek-chat", "glm-4-flashx"],
-                    timeout_budget=20.0
+                    timeout_budget=20.0,
                 )
                 parsed = json.loads(content)
                 if isinstance(parsed, list):
@@ -534,21 +630,18 @@ class TraderAgent(BaseAgent):
             beliefs = []
 
         if not beliefs:
-            # 兜底规则
             if self.brain.state.consecutive_losses >= 3:
-                beliefs = ["震荡市中高频追涨导致摩擦成本过高，应降低交易频率"]
+                beliefs = ["In noisy regimes, reduce turnover and avoid overtrading."]
             elif self.brain.state.consecutive_wins >= 3:
-                beliefs = ["趋势市中顺势而为可提高胜率，但需控制回撤"]
+                beliefs = ["Trend-following can work, but drawdown controls must remain active."]
             else:
-                beliefs = ["在高不确定性环境中保持仓位纪律优于频繁试错"]
+                beliefs = ["When uncertainty is high, position discipline beats frequent trial-and-error."]
 
         self._persist_beliefs(beliefs)
         self._last_belief_reflection_step = self._step_count
 
     def _wind_tunnel_predict(self) -> Dict[str, Any]:
-        """
-        内部模拟风洞：基于历史价格预测次日走势，作为下单前的拦截信号。
-        """
+        """Internal wind-tunnel predictor used as pre-trade veto signal."""
         pred_return = predict_next_return(self._price_history)
         if pred_return is None:
             return {"valid": False}
@@ -564,13 +657,7 @@ class TraderAgent(BaseAgent):
         emotional_state: str,
         social_signal: str
     ) -> Dict[str, Any]:
-        """
-        核心认知方法：结合市场感知、情绪、社交信号进行推理决策
-        此方法对应 User Request Prompt 3 中的 "reason_and_act"
-        
-        采用快慢思考双层架构 (System 1/2)
-        """
-        # 0. Risk Alert Meeting (RAM) override
+        """Core cognition method combining market, emotion, and social signals."""
         snapshot: MarketSnapshot = perceived_data["snapshot"]
         if self._ram_until_step >= self._step_count:
             holding = self.portfolio.get(snapshot.symbol, 0)
@@ -581,7 +668,7 @@ class TraderAgent(BaseAgent):
                         "qty": holding,
                         "price": round(snapshot.last_price * 0.98, 2)
                     },
-                    "reasoning": f"[RAM] 风控会议触发，强制避险清仓。原因：{self._ram_last_trigger}",
+                    "reasoning": f"[RAM] 椋庢帶浼氳瑙﹀彂锛屽己鍒堕伩闄╂竻浠撱€傚師鍥狅細{self._ram_last_trigger}",
                     "symbol": snapshot.symbol,
                     "timestamp": snapshot.timestamp,
                     "analyst_reports": perceived_data.get("analyst_reports", {}),
@@ -589,7 +676,7 @@ class TraderAgent(BaseAgent):
                 }
             return {
                 "decision": {"action": "HOLD"},
-                "reasoning": f"[RAM] 风控会议触发，当前无持仓，保持观望。原因：{self._ram_last_trigger}",
+                "reasoning": f"[RAM] 椋庢帶浼氳瑙﹀彂锛屽綋鍓嶆棤鎸佷粨锛屼繚鎸佽鏈涖€傚師鍥狅細{self._ram_last_trigger}",
                 "symbol": snapshot.symbol,
                 "timestamp": snapshot.timestamp,
                 "analyst_reports": perceived_data.get("analyst_reports", {}),
@@ -597,7 +684,7 @@ class TraderAgent(BaseAgent):
             }
 
         # 1. System 1 (Rule-based) Enforcement
-        # 如果被标记为非 LLM Agent，强制使用快思考 (模拟计算模式)
+        # 濡傛灉琚爣璁颁负闈?LLM Agent锛屽己鍒朵娇鐢ㄥ揩鎬濊€?(妯℃嫙璁＄畻妯″紡)
         if not self.use_llm:
             return self._fast_think(perceived_data, emotional_state, social_signal)
 
@@ -612,10 +699,10 @@ class TraderAgent(BaseAgent):
         snapshot: MarketSnapshot = perceived_data["snapshot"]
         news = perceived_data["news"]
 
-        # 每轮推理前同步一次语义画像，使扩散模型能实时读取 GraphRAG 最新主导叙事。
+        # Sync semantic profile before deep reasoning.
         self.sync_social_semantic_profile()
         
-        # 1. 检索 GraphRAG 记忆与知识胶囊
+        # 1. 妫€绱?GraphRAG 璁板繂涓庣煡璇嗚兌鍥?
         current_time = snapshot.timestamp
         graph_context = ""
         capsules = self.graph_memory.get_valid_capsules(current_time)
@@ -623,29 +710,30 @@ class TraderAgent(BaseAgent):
         news_text = "; ".join(news) if news else ""
         
         if news_text:
-            # 简单的关键词提取逻辑用于查图
-            if "利率" in news_text or "降准" in news_text: extracted_keywords.append("利率")
-            if "流动性" in news_text: extracted_keywords.append("流动性")
-            if "政策" in news_text: extracted_keywords.append("政策")
-            if not extracted_keywords: extracted_keywords = ["市场", "风险"]
+            # 绠€鍗曠殑鍏抽敭璇嶆彁鍙栭€昏緫鐢ㄤ簬鏌ュ浘
+            if "鍒╃巼" in news_text or "闄嶅噯" in news_text: extracted_keywords.append("鍒╃巼")
+            if "liquidity" in news_text.lower():
+                extracted_keywords.append("liquidity")
+            if "鏀跨瓥" in news_text: extracted_keywords.append("鏀跨瓥")
+            if not extracted_keywords: extracted_keywords = ["甯傚満", "椋庨櫓"]
         
         if capsules:
-            graph_context = "【知识胶囊(宏观共识缓存)】\n" + "\n".join(capsules)
+            graph_context = "銆愮煡璇嗚兌鍥?瀹忚鍏辫瘑缂撳瓨)銆慭n" + "\n".join(capsules)
         elif extracted_keywords:
             subgraph = self.graph_memory.retrieve_subgraph(extracted_keywords, depth=2)
             if subgraph:
-                graph_context = "【私有认知图谱关联】\n" + subgraph
+                graph_context = "銆愮鏈夎鐭ュ浘璋卞叧鑱斻€慭n" + subgraph
                 
-        # 如果有新消息且没有命中缓存，后台启动提取以充实图谱
+        # 濡傛灉鏈夋柊娑堟伅涓旀病鏈夊懡涓紦瀛橈紝鍚庡彴鍚姩鎻愬彇浠ュ厖瀹炲浘璋?
         if news_text and not capsules:
             asyncio.create_task(self._async_extract_and_store(news_text, current_time, is_news=True))
             
         # 2. Construct Market State
         market_state = {
             "price": snapshot.last_price,
-            "trend": getattr(snapshot, "market_trend", "震荡"), 
+            "trend": getattr(snapshot, "market_trend", "闇囪崱"), 
             "panic_level": getattr(snapshot, "panic_level", 0.5), 
-            "news": news_text if news_text else "无重大新闻",
+            "news": news_text if news_text else "no-major-news",
             "last_rejection_reason": self.compliance_feedback[-1] if self.compliance_feedback else None,
             "policy_description": getattr(snapshot, "policy_description", ""),
             "policy_tax_rate": getattr(snapshot, "policy_tax_rate", 0.0),
@@ -658,20 +746,22 @@ class TraderAgent(BaseAgent):
             "text_regime_bias": getattr(snapshot, "text_regime_bias", "neutral"),
             "text_impact_paths": getattr(snapshot, "text_impact_paths", []),
             "graph_context": graph_context,
-            "analyst_reports": perceived_data.get("analyst_reports", {})
+            "analyst_reports": perceived_data.get("analyst_reports", {}),
+            "behavioral_state": perceived_data.get("behavioral_state", self.last_behavioral_state),
         }
         
         # Map numeric trend to string for Brain
         trend_val = snapshot.market_trend
-        if trend_val > 0.02: market_state["trend"] = "上涨"
-        elif trend_val < -0.02: market_state["trend"] = "下跌"
-        else: market_state["trend"] = "震荡"
+        if trend_val > 0.02: market_state["trend"] = "涓婃定"
+        elif trend_val < -0.02: market_state["trend"] = "涓嬭穼"
+        else: market_state["trend"] = "闇囪崱"
 
         # 2. Construct Account State
         account_state = {
             "cash": perceived_data["cash"],
             "market_value": perceived_data["portfolio_value"] - perceived_data["cash"],
-            "pnl_pct": perceived_data["pnl_pct"]
+            "pnl_pct": perceived_data["pnl_pct"],
+            "risk_appetite": self.current_risk_appetite,
         }
 
         # 3. Call Brain with Enhanced Context
@@ -686,7 +776,7 @@ class TraderAgent(BaseAgent):
             # Inject symbol/timestamp for decide phase
             decision_output["symbol"] = snapshot.symbol
             decision_output["timestamp"] = snapshot.timestamp
-            
+            decision_output = self._apply_behavioral_intent_overlay(decision_output, snapshot)
             return decision_output
             
         except Exception as e:
@@ -699,7 +789,7 @@ class TraderAgent(BaseAgent):
             }
 
     def update_emotional_state(self, perceived_data: Dict[str, Any]):
-        """根据 PnL 和 市场波动更新情绪 (受 Persona 影响)"""
+        """Update emotional state from PnL and panic indicators."""
         pnl_pct = perceived_data.get("pnl_pct", 0)
         snapshot = perceived_data.get("snapshot")
         panic_level = getattr(snapshot, "panic_level", 0)
@@ -709,23 +799,21 @@ class TraderAgent(BaseAgent):
         panic_threshold = 0.6 * self.persona.patience # More patient -> higher threshold
         
         if pnl_pct < loss_threshold:
-            self.emotional_state = "Regretful" # 悔恨 (大亏)
+            self.emotional_state = "Regretful" # 鎮旀仺 (澶т簭)
         elif pnl_pct < loss_threshold / 2:
-            self.emotional_state = "Anxious"   # 焦虑 (小亏)
+            self.emotional_state = "Anxious"   # 鐒﹁檻 (灏忎簭)
         elif pnl_pct > 0.10:
-            self.emotional_state = "Greedy"    # 贪婪 (大赚)
+            self.emotional_state = "Greedy"    # 璐┆ (澶ц禋)
         elif pnl_pct > 0.05:
-            self.emotional_state = "Confident" # 自信 (小赚)
+            self.emotional_state = "Confident" # 鑷俊 (灏忚禋)
         elif panic_level > panic_threshold:
-            self.emotional_state = "Fearful"   # 恐惧 (市场恐慌)
+            self.emotional_state = "Fearful"   # 鎭愭儳 (甯傚満鎭愭厡)
         else:
-            self.emotional_state = "Neutral"   # 中性
+            self.emotional_state = "Neutral"   # 涓€?
             
     def perceive_social_signal(self, perceived_data: Dict[str, Any]) -> str:
-        """
-        感知社交信号 (集成 SocialNetwork)
-        """
-        # 1. 优先使用真实社交网络
+        """Perceive social signal from graph neighbors and market trend."""
+        # 1. 浼樺厛浣跨敤鐪熷疄绀句氦缃戠粶
         if self.social_graph and self.social_node_id is not None:
             bearish_ratio = self.social_graph.get_bearish_ratio(self.social_node_id)
             
@@ -737,7 +825,7 @@ class TraderAgent(BaseAgent):
             elif bearish_ratio > panic_threshold * 0.6:
                 return "Neighbors are getting nervous."
                 
-        # 2. 只有在没有网络连接时，才回退到市场趋势代理
+        # 2. 鍙湁鍦ㄦ病鏈夌綉缁滆繛鎺ユ椂锛屾墠鍥為€€鍒板競鍦鸿秼鍔夸唬鐞?
         snapshot = perceived_data.get("snapshot")
         trend = getattr(snapshot, "market_trend", 0)
         
@@ -752,22 +840,16 @@ class TraderAgent(BaseAgent):
         self,
         reasoning_output: Dict[str, Any],
     ) -> Optional[Order]:
-        """
-        决策阶段: 将 Brain 的输出转化为 Order 对象
-        """
+        """Convert reasoning output into an executable order."""
         decision = reasoning_output.get("decision", {})
         action = decision.get("action", "HOLD")
-        
         if action == "HOLD" or not action:
             return None
-            
-        qty = decision.get("qty", 0)
-        # Brain might return JSON with "price" or "limit_price"
-        price = decision.get("price", 0.0)
-        
+
+        qty = int(decision.get("qty", 0) or 0)
+        price = float(decision.get("price", 0.0) or 0.0)
         symbol = reasoning_output.get("symbol", "UNKNOWN")
         timestamp = reasoning_output.get("timestamp", time.time())
-        side = None
 
         if action == "BUY":
             side = OrderSide.BUY
@@ -775,11 +857,9 @@ class TraderAgent(BaseAgent):
             side = OrderSide.SELL
         else:
             return None
-            
         if qty <= 0:
             return None
 
-        # Phase 4: Wind-Tunnel 拦截
         wind_report = self._wind_tunnel_predict()
         decision["wind_tunnel"] = wind_report
         if wind_report.get("valid"):
@@ -789,64 +869,48 @@ class TraderAgent(BaseAgent):
                 return None
             if action == "SELL" and pred > 0.005 and conf > 0.6:
                 return None
-            
-        # 资金/持仓 预检查 (虽然 OrderBook 也会查，但 Agent 应有自我认知)
+
         if side == OrderSide.BUY:
             cost = price * qty
             if cost > self.cash_balance:
-                # 资金不足，尝试调整
-                if price > 0:
-                    qty = int(self.cash_balance / price) // 100 * 100
-                else:
-                    qty = 0
+                qty = int(self.cash_balance / price) // 100 * 100 if price > 0 else 0
                 if qty <= 0:
                     return None
         elif side == OrderSide.SELL:
             holding = self.portfolio.get(symbol, 0)
-            if qty > holding:
-                qty = holding
+            qty = min(qty, int(holding))
             if qty <= 0:
                 return None
-        
-        # 生成 Order
-        order = Order(
+
+        return Order(
             symbol=symbol,
             price=price,
             quantity=qty,
             side=side,
             order_type=OrderType.LIMIT,
             agent_id=self.agent_id,
-            timestamp=timestamp
+            timestamp=timestamp,
         )
-        return order
 
     async def update_memory(
         self,
         decision: Dict[str, Any],
         outcome: Dict[str, Any],
     ) -> None:
-        """
-        更新记忆
-        """
-        # Updates both Vector Memory (Brain) and Local List
-        
-        # 1. Update Brain's State (Confidence, PnL)
-        pnl = outcome.get("pnl", 0.0)
-        pnl_pct = 0.0 # Need total capital to calc pct, simplified here
+        """Update memory and reinforcement signals after execution feedback."""
+        pnl = float(outcome.get("pnl", 0.0) or 0.0)
+        pnl_pct = 0.0
         self.brain.state.update_after_trade(pnl, pnl_pct)
-        
-        # 2. Update Vector Memory if significant
-        if abs(pnl) > 1000:
-             content = f"Decision: {decision}. Outcome: {outcome}"
-             score = 1.0 if pnl > 0 else -1.0
-             self.brain.memory.add_memory(content, score)
-             
-             # 【GraphRAG 重构】重大爆仓/盈利提取概念写入图谱
-             extract_text = f"交易复盘: 进行了操作 {decision.get('action')}，导致 {pnl} 的盈亏结果。当时信心为 {self.brain.state.confidence}。请提取本次成败的关键因素概念。"
-             current_time = time.time()
-             asyncio.create_task(self._async_extract_and_store(extract_text, current_time, is_news=False))
 
-        # Phase 4: Wind-Tunnel reward update
+        if abs(pnl) > 1000:
+            content = f"Decision: {decision}. Outcome: {outcome}"
+            score = 1.0 if pnl > 0 else -1.0
+            self.brain.memory.add_memory(content, score)
+            extract_text = (
+                f"Trade recap: action={decision.get('action')}, pnl={pnl}, confidence={self.brain.state.confidence}"
+            )
+            asyncio.create_task(self._async_extract_and_store(extract_text, time.time(), is_news=False))
+
         wind = decision.get("wind_tunnel", {})
         if wind.get("valid"):
             pred = float(wind.get("predicted_return", 0.0))
@@ -859,77 +923,50 @@ class TraderAgent(BaseAgent):
                 self._wind_tunnel_confidence = min(1.0, self._wind_tunnel_confidence + 0.05)
             else:
                 self._wind_tunnel_confidence = max(0.1, self._wind_tunnel_confidence - 0.02)
-            self._wind_tunnel_records.append({
-                "pred": pred,
-                "actual": actual,
-                "pnl": pnl,
-                "confidence": self._wind_tunnel_confidence,
-                "step": self._step_count
-            })
-            if len(self._wind_tunnel_records) > 50:
-                self._wind_tunnel_records = self._wind_tunnel_records[-50:]
 
-        # Phase 4: Text-based Gradient Descent (Investment Beliefs)
         self._recent_trade_outcomes.append({
             "decision": decision,
             "pnl": pnl,
             "status": outcome.get("status", "UNKNOWN"),
-            "timestamp": time.time()
+            "timestamp": time.time(),
         })
         if len(self._recent_trade_outcomes) > 20:
             self._recent_trade_outcomes = self._recent_trade_outcomes[-20:]
 
         if self.brain.state.consecutive_losses >= 3 or self.brain.state.consecutive_wins >= 3:
             self._reflect_and_persist_beliefs()
-             
-        # 3. 处理被风控拒绝的订单（监管认知）
+
         status = outcome.get("status")
         if status == "REJECTED" or status == OrderStatus.REJECTED:
-             reason = outcome.get("reason", "Unknown regulatory rejection")
-             self.compliance_feedback.append(reason)
-             if len(self.compliance_feedback) > 5:
-                 self.compliance_feedback.pop(0)
-                 
-             # Add to brain memory with negative penalty
-             content = f"REGULATORY REJECTION! Order was rejected by Risk Control. Reason: {reason}. Action was: {decision.get('action')}"
-             # Higher penalty than normal loss to ensure "respect" for regulation
-             self.brain.memory.add_memory(content, -2.0)
-             
-             # 【GraphRAG 重构】监管教训提取
-             asyncio.create_task(self._async_extract_and_store(content, time.time(), is_news=False))
-             
-             # Also slightly decrease confidence
-             self.brain.state.confidence *= 0.95
+            reason = outcome.get("reason", "Unknown regulatory rejection")
+            self.compliance_feedback.append(reason)
+            if len(self.compliance_feedback) > 5:
+                self.compliance_feedback.pop(0)
+            content = f"REGULATORY REJECTION: {reason}. Action={decision.get('action')}"
+            self.brain.memory.add_memory(content, -2.0)
+            asyncio.create_task(self._async_extract_and_store(content, time.time(), is_news=False))
+            self.brain.state.confidence *= 0.95
 
     # ------------------------------------------
-    # 额外方法 (针对 TraderAgent 特定请求)
+    # 棰濆鏂规硶 (閽堝 TraderAgent 鐗瑰畾璇锋眰)
     # ------------------------------------------
     
     def get_psychology_description(self) -> str:
-        """返回心理画像描述"""
+        """Return short text summary of agent psychology profile."""
         return (
             f"Risk: {self.profile.get('risk_aversion', 0.5):.2f}, "
             f"Conf: {self.brain.state.confidence:.1f}"
         )
-    
+
     def share_opinion(self) -> Dict[str, Any]:
-        """
-        分享自己的投资观点到社交网络
-        
-        生成当前 Agent 的情绪/观点信号，供邻居 Agent 接收。
-        
-        Returns:
-            包含 agent_id、sentiment、confidence 的字典
-        """
-        # 基于最近的决策和情绪确定观点
+        """Share local sentiment/opinion into social network."""
         sentiment = "neutral"
-        if hasattr(self, 'emotional_state'):
+        if hasattr(self, "emotional_state"):
             if self.emotional_state in ("Greedy", "Confident"):
                 sentiment = "bullish"
             elif self.emotional_state in ("Fearful", "Regretful", "Anxious"):
                 sentiment = "bearish"
-        
-        # 如果绑定了社交网络，更新节点状态
+
         if self.social_graph and self.social_node_id is not None:
             node = self.social_graph.agents.get(self.social_node_id)
             if node:
@@ -939,50 +976,36 @@ class TraderAgent(BaseAgent):
                     node.sentiment_state = SentimentState.BULLISH
                 else:
                     node.sentiment_state = SentimentState.SUSCEPTIBLE
-        
+
         return {
             "agent_id": self.agent_id,
             "sentiment": sentiment,
             "confidence": self.brain.state.confidence / 100.0,
-            "emotional_state": getattr(self, 'emotional_state', 'Neutral')
+            "emotional_state": getattr(self, "emotional_state", "Neutral"),
         }
-    
+
     def receive_opinion(self, opinions: List[Dict[str, Any]]) -> str:
-        """
-        接收邻居的观点，生成社交压力描述
-        
-        Args:
-            opinions: 邻居分享的观点列表
-            
-        Returns:
-            社交压力描述字符串 (用于注入 Prompt)
-        """
+        """Receive neighbor opinions and summarize social pressure."""
         if not opinions:
-            return "没有收到朋友们的消息。"
-        
+            return "No social messages received."
+
         bearish_count = sum(1 for o in opinions if o.get("sentiment") == "bearish")
         bullish_count = sum(1 for o in opinions if o.get("sentiment") == "bullish")
         total = len(opinions)
-        
-        # 计算社交压力
+
         if bearish_count > total * 0.6:
-            return f"朋友圈{bearish_count}/{total}个人在恐慌抛售！你感到巨大的社交压力。"
-        elif bullish_count > total * 0.6:
-            return f"朋友圈{bullish_count}/{total}个人在兴奋加仓！你感到 FOMO 压力。"
-        elif bearish_count > bullish_count:
-            return f"朋友圈偏悲观 ({bearish_count}空 vs {bullish_count}多)。"
-        elif bullish_count > bearish_count:
-            return f"朋友圈偏乐观 ({bullish_count}多 vs {bearish_count}空)。"
-        else:
-            return "朋友圈观点分歧，情绪比较混乱。"
+            return f"{bearish_count}/{total} neighbors are panic selling."
+        if bullish_count > total * 0.6:
+            return f"{bullish_count}/{total} neighbors are aggressively buying."
+        if bearish_count > bullish_count:
+            return f"Circle is bearish ({bearish_count} vs {bullish_count})."
+        if bullish_count > bearish_count:
+            return f"Circle is bullish ({bullish_count} vs {bearish_count})."
+        return "Circle is split and uncertain."
 
     def get_social_summary(self) -> str:
-        """
-        获取绑定社交网络的舆情摘要
-        
-        Returns:
-            社交舆情摘要字符串
-        """
+        """Return social sentiment summary for bound social graph."""
         if self.social_graph and self.social_node_id is not None:
             return self.social_graph.generate_social_summary(self.social_node_id)
-        return "未加入任何投资社群。"
+        return "Not bound to social graph."
+

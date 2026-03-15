@@ -19,6 +19,9 @@ class OrderBookCPP(OrderBook):
         if _civitas_lob is None:
             raise ImportError("C++ extension _civitas_lob not found. Please build with setup.py.")
         self._cpp_lob = _civitas_lob.LimitOrderBook(symbol)
+        self.submitted_orders = 0
+        self.cancelled_orders = 0
+        self.trade_count = 0
         
     def add_order(self, order: Order) -> List[Trade]:
         # 1. Validation (reusing base class logic or simplified)
@@ -41,6 +44,7 @@ class OrderBookCPP(OrderBook):
              order.price = upper if order.side == OrderSide.BUY else lower
 
         # 2. Call C++ Exploded Interface (Fast)
+        self.submitted_orders += 1
         # Handle Enum to string conversion
         side_str = order.side.value if hasattr(order.side, 'value') else str(order.side)
         type_str = order.order_type.value if hasattr(order.order_type, 'value') else str(order.order_type)
@@ -99,11 +103,15 @@ class OrderBookCPP(OrderBook):
             self.total_volume += int(t.quantity)
             self.trades_history.append(t)
             self._step_trades.append(t)
+            self.trade_count += 1
 
         return trades
 
     def cancel_order(self, order_id: str) -> bool:
-        return self._cpp_lob.cancel_order(str(order_id))
+        success = bool(self._cpp_lob.cancel_order(str(order_id)))
+        if success:
+            self.cancelled_orders += 1
+        return success
     
     # Override data access methods
     def get_best_bid(self) -> Optional[float]:
@@ -131,3 +139,13 @@ class OrderBookCPP(OrderBook):
     def clear(self):
         super().clear()
         self._cpp_lob.clear()
+        self.submitted_orders = 0
+        self.cancelled_orders = 0
+        self.trade_count = 0
+
+    def get_activity_stats(self) -> Dict[str, int]:
+        return {
+            "submitted_orders": int(self.submitted_orders),
+            "cancelled_orders": int(self.cancelled_orders),
+            "trade_count": int(self.trade_count),
+        }

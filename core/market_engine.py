@@ -112,6 +112,42 @@ class PolicyState:
     liquidity_injection: float = 0.0 
     description: str = "Initial State" 
 
+
+@dataclass
+class ExogenousLiquidityPoint:
+    """External market backdrop point used by hybrid replay mode."""
+
+    step: int
+    price: float
+    volume: float
+
+
+def blend_price_with_backdrop(
+    old_price: float,
+    endogenous_price: float,
+    *,
+    exogenous_price: Optional[float] = None,
+    exogenous_volume: float = 0.0,
+    backdrop_weight: float = 0.35,
+) -> float:
+    """
+    Blend endogenous simulated price with exogenous backdrop series.
+    Agents still generate endogenous orders; backdrop acts as liquidity anchor.
+    """
+    old_p = float(max(old_price, 1e-6))
+    endo_p = float(max(endogenous_price, 1e-6))
+    if exogenous_price is None:
+        return endo_p
+
+    exo_p = float(max(exogenous_price, 1e-6))
+    w = max(0.0, min(1.0, float(backdrop_weight)))
+    raw = (1.0 - w) * endo_p + w * exo_p
+
+    # Higher exogenous volume dampens endogenous impact.
+    vol = max(0.0, float(exogenous_volume))
+    damp = 1.0 + min(3.0, vol / 1_000_000.0) * 0.20
+    return float(old_p + (raw - old_p) / damp)
+
 # ==========================================
 # PART 3: Matching Engine
 # (From coremarket_engine.py, enhanced for Simulation)

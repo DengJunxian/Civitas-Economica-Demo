@@ -21,6 +21,7 @@ from core.competition_demo import (
     bootstrap_competition_demo,
 )
 from ui.backtest_panel import render_backtest_panel
+from ui.behavioral_diagnostics import render_behavioral_diagnostics
 from ui.demo_wind_tunnel import render_demo_tab
 from ui import dashboard as dashboard_ui
 
@@ -33,7 +34,7 @@ st.set_page_config(
 )
 
 
-ENTRY_POINTS = ["答辩模式", "专家模式", "历史回测", "系统说明"]
+ENTRY_POINTS = ["答辩模式", "专家模式", "历史回测", "行为金融诊断", "系统说明"]
 THEME_PATH = Path("theme") / "competition_dark.css"
 MATERIALS_ROOT = Path("outputs") / "competition_materials"
 
@@ -79,9 +80,9 @@ def _init_state() -> None:
 
 def _render_top_entry_selector() -> None:
     st.markdown("## Civitas-Economica-Demo")
-    st.caption("首页仅保留四个核心入口：答辩模式 / 专家模式 / 历史回测 / 系统说明")
+    st.caption("首页入口：答辩模式 / 专家模式 / 历史回测 / 行为金融诊断 / 系统说明")
 
-    cols = st.columns(4)
+    cols = st.columns(len(ENTRY_POINTS))
     for idx, entry in enumerate(ENTRY_POINTS):
         with cols[idx]:
             if st.button(entry, key=f"entry_{entry}", use_container_width=True):
@@ -135,7 +136,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
     comparison_md = (
         "## UI 重构前后对比\n"
         "- 前：入口较分散，演示链路跨多个标签页，评委视角不连续。\n"
-        "- 后：首页收敛为四入口，答辩链路一键加载+自动时间线+三段叙事。\n"
+        "- 后：首页收敛为五入口（含行为金融诊断页），答辩链路一键加载+自动时间线+三段叙事。\n"
         "- 前：思维链以原始文本为主。\n"
         "- 后：改为“决策证据流”，仅展示结构化 reasoning artifacts。\n"
         "- 前：图表样式不统一。\n"
@@ -164,7 +165,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
     design_outline = f"""# design_outline
 
 ## 信息架构
-- 首页四入口：答辩模式 / 专家模式 / 历史回测 / 系统说明
+- 首页五入口：答辩模式 / 专家模式 / 历史回测 / 行为金融诊断 / 系统说明
 - 答辩模式：场景加载、自动时间线、KPI 大卡、三段叙事、A/B Compare
 - 专家模式：决策证据流 + 多图联动
 
@@ -185,7 +186,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
     demo_script_10min = f"""# demo_script_10min
 
 ## 0:00 - 1:00 开场
-- 打开首页，说明四入口结构和当前演示目标。
+- 打开首页，说明五入口结构和当前演示目标。
 
 ## 1:00 - 4:00 答辩模式
 - 一键加载场景 `{scenario.name}`。
@@ -330,7 +331,7 @@ def _render_system_guide() -> None:
 - 撮合：C++ LOB 引擎
 
 ### 本次前端重构重点
-- 首页收敛为四入口，减少答辩流程切换成本。
+- 首页收敛为五入口，减少答辩流程切换成本并新增行为金融诊断页。
 - 新增“答辩模式”：一键场景、自动时间线、KPI 大卡、三段叙事、A/B compare。
 - “思维链可视化”重命名为“决策证据流”，仅展示结构化 artifacts。
 - 图表统一深色主题，默认中文标题，并支持 PNG / CSV / JSON 导出。
@@ -338,7 +339,7 @@ def _render_system_guide() -> None:
 
 ### 重构前后对比
 - 前：功能入口分散，演示路径长。
-- 后：四入口固定，答辩路径可复现。
+- 后：五入口固定，答辩路径与行为诊断路径均可复现。
 - 前：图表风格不一，导出能力弱。
 - 后：图表风格统一，支持比赛材料沉淀。
 
@@ -362,6 +363,8 @@ def main() -> None:
         _render_expert_mode()
     elif entry == "历史回测":
         _render_backtest_mode()
+    elif entry == "行为金融诊断":
+        render_behavioral_diagnostics()
     else:
         _render_system_guide()
 

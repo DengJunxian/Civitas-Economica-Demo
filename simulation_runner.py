@@ -12,6 +12,7 @@ from __future__ import annotations
 import multiprocessing as mp
 import tempfile
 import time
+import csv
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -45,6 +46,7 @@ class BufferedIntent:
     price: float
     symbol: str = "A_SHARE_IDX"
     order_type: str = "limit"
+    intent_type: str = "order"  # order | cancel
     activate_step: Optional[int] = None
     expire_step: Optional[int] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -60,6 +62,13 @@ class BufferedIntent:
             timestamp=timestamp,
             order_id=self.intent_id,
         )
+
+
+@dataclass(slots=True)
+class ExogenousBackdropPoint:
+    step: int
+    price: float
+    volume: float
 
 
 class OASISRunner:
@@ -137,6 +146,7 @@ class OASISRunner:
         """
         all_trades: List[Dict[str, Any]] = []
         executed_intents: List[str] = []
+        cancelled_orders: List[Dict[str, Any]] = []
 
         for _ in range(steps):
             self.clock.tick()
@@ -157,6 +167,22 @@ class OASISRunner:
             self.intent_buffer = deferred
 
             for intent in ready_intents:
+                intent_kind = str(getattr(intent, "intent_type", "order") or "order").lower()
+                side = str(getattr(intent, "side", "")).lower()
+                if intent_kind == "cancel" or side == "cancel":
+                    target_order_id = str(intent.metadata.get("target_order_id", "") or "")
+                    cancelled = bool(target_order_id) and bool(self.order_book.cancel_order(target_order_id))
+                    executed_intents.append(intent.intent_id)
+                    if cancelled:
+                        cancelled_orders.append(
+                            {
+                                "agent_id": intent.agent_id,
+                                "target_order_id": target_order_id,
+                                "timestamp": self.clock.timestamp,
+                            }
+                        )
+                    continue
+
                 order = intent.to_order(timestamp=self.clock.timestamp)
                 trades = self.order_book.add_order(order)
                 executed_intents.append(intent.intent_id)
@@ -168,6 +194,8 @@ class OASISRunner:
                             "quantity": trade.quantity,
                             "buyer_agent_id": trade.buyer_agent_id,
                             "seller_agent_id": trade.seller_agent_id,
+                            "maker_id": trade.maker_id,
+                            "taker_id": trade.taker_id,
                             "timestamp": trade.timestamp,
                         }
                     )
@@ -178,6 +206,8 @@ class OASISRunner:
                 "executed_intents": executed_intents,
                 "trade_count": len(all_trades),
                 "trades": all_trades,
+                "cancel_count": len(cancelled_orders),
+                "canceled_orders": cancelled_orders,
             }
         )
         return snapshot
@@ -190,6 +220,7 @@ class OASISRunner:
             "best_bid": self.order_book.get_best_bid(),
             "best_ask": self.order_book.get_best_ask(),
             "depth": self.order_book.get_depth(5),
+            "activity_stats": self.order_book.get_activity_stats() if hasattr(self.order_book, "get_activity_stats") else {},
         }
 
 
@@ -227,6 +258,7 @@ class SimulationRunner:
         self.prev_close = prev_close
         self.response_timeout = response_timeout
         self.process: Optional[mp.Process] = None
+        self._exogenous_backdrop: List[ExogenousBackdropPoint] = []
 
     def start(self) -> None:
         if self.process is not None and self.process.is_alive():
@@ -267,6 +299,44 @@ class SimulationRunner:
     def get_snapshot(self) -> Dict[str, Any]:
         return self._request("get_snapshot", {})
 
+    def set_exogenous_backdrop(self, series: List[Dict[str, Any]]) -> int:
+        backdrop: List[ExogenousBackdropPoint] = []
+        for row in series:
+            step = int(row.get("step", len(backdrop) + 1))
+            price = float(row.get("price", row.get("close", 0.0)) or 0.0)
+            volume = float(row.get("volume", row.get("qty", 0.0)) or 0.0)
+            if price <= 0:
+                continue
+            backdrop.append(ExogenousBackdropPoint(step=step, price=price, volume=max(0.0, volume)))
+        backdrop.sort(key=lambda item: item.step)
+        self._exogenous_backdrop = backdrop
+        return len(self._exogenous_backdrop)
+
+    def load_exogenous_backdrop_csv(self, path: str | Path) -> int:
+        p = Path(path)
+        rows: List[Dict[str, Any]] = []
+        with p.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                rows.append(dict(row))
+        return self.set_exogenous_backdrop(rows)
+
+    def get_exogenous_backdrop_point(self, step: int) -> Optional[Dict[str, float]]:
+        if not self._exogenous_backdrop:
+            return None
+        target = int(step)
+        selected = self._exogenous_backdrop[-1]
+        for item in self._exogenous_backdrop:
+            if item.step <= target:
+                selected = item
+            else:
+                break
+        return {
+            "step": float(selected.step),
+            "price": float(selected.price),
+            "volume": float(selected.volume),
+        }
+
     def _request(self, message_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         if self.process is None or not self.process.is_alive():
             raise RuntimeError("Simulation runner process is not running.")
@@ -278,4 +348,3 @@ class SimulationRunner:
         if response.message_type.endswith("_error"):
             raise RuntimeError(response.payload.get("error", f"{message_type} failed"))
         return response.payload
-

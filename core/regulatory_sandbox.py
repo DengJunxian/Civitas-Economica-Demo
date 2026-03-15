@@ -10,7 +10,9 @@
 """
 
 import time
-from typing import Dict, List, Optional, Tuple, Callable
+import json
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import defaultdict
@@ -511,3 +513,182 @@ class RegulatoryModule:
                 "历史熔断次数": len(self.circuit_breaker.halt_history)
             }
         }
+
+@dataclass
+class AbuseOrderRecord:
+    order_id: str
+    agent_id: str
+    side: str
+    qty: int
+    price: float
+    submitted_tick: int
+    executed: bool = False
+    cancelled_tick: Optional[int] = None
+    tag: str = "organic"
+
+
+@dataclass
+class AbuseEvent:
+    tick: int
+    event_type: str
+    agent_id: str
+    detail: Dict[str, Any]
+
+
+class MarketAbuseSandbox:
+    """Detect spoofing-like, sentiment manipulation, and abnormal cancellation patterns."""
+
+    def __init__(
+        self,
+        *,
+        spoofing_size_threshold: int = 2000,
+        spoofing_max_lifetime: int = 3,
+        sentiment_burst_threshold: float = 1.0,
+        cancellation_ratio_threshold: float = 0.65,
+        lookback_window: int = 12,
+    ) -> None:
+        self.spoofing_size_threshold = int(max(1, spoofing_size_threshold))
+        self.spoofing_max_lifetime = int(max(1, spoofing_max_lifetime))
+        self.sentiment_burst_threshold = float(max(0.0, sentiment_burst_threshold))
+        self.cancellation_ratio_threshold = float(max(0.0, min(1.0, cancellation_ratio_threshold)))
+        self.lookback_window = int(max(2, lookback_window))
+
+        self.submitted_orders: Dict[str, AbuseOrderRecord] = {}
+        self.agent_submit_count: Dict[str, int] = defaultdict(int)
+        self.agent_cancel_count: Dict[str, int] = defaultdict(int)
+        self.sentiment_flow: List[Tuple[int, str, float, str]] = []
+        self.events: List[AbuseEvent] = []
+
+    def register_submission(
+        self,
+        *,
+        agent_id: str,
+        order_id: str,
+        side: str,
+        qty: int,
+        price: float,
+        tick: int,
+        tag: str = "organic",
+    ) -> None:
+        if not order_id:
+            return
+        self.submitted_orders[order_id] = AbuseOrderRecord(
+            order_id=str(order_id),
+            agent_id=str(agent_id),
+            side=str(side),
+            qty=int(max(0, qty)),
+            price=float(max(0.0, price)),
+            submitted_tick=int(tick),
+            tag=str(tag or "organic"),
+        )
+        self.agent_submit_count[str(agent_id)] += 1
+
+    def register_trade(self, order_id: str, tick: int) -> None:
+        rec = self.submitted_orders.get(str(order_id))
+        if rec is not None:
+            rec.executed = True
+
+    def register_cancellation(self, *, agent_id: str, target_order_id: str, tick: int, successful: bool = True) -> None:
+        self.agent_cancel_count[str(agent_id)] += 1
+        rec = self.submitted_orders.get(str(target_order_id))
+        if rec is None:
+            return
+        rec.cancelled_tick = int(tick)
+        if not successful:
+            return
+
+        lifetime = int(tick) - int(rec.submitted_tick)
+        if rec.qty >= self.spoofing_size_threshold and lifetime <= self.spoofing_max_lifetime and not rec.executed:
+            self.events.append(
+                AbuseEvent(
+                    tick=int(tick),
+                    event_type="spoofing_like_pattern",
+                    agent_id=str(agent_id),
+                    detail={
+                        "target_order_id": str(target_order_id),
+                        "qty": int(rec.qty),
+                        "lifetime": int(lifetime),
+                        "tag": rec.tag,
+                    },
+                )
+            )
+
+    def register_sentiment(self, *, agent_id: str, sentiment_delta: float, tick: int, source: str = "organic") -> None:
+        self.sentiment_flow.append((int(tick), str(agent_id), float(sentiment_delta), str(source)))
+
+    def detect(self, tick: int) -> Dict[str, Any]:
+        current_tick = int(tick)
+        lower = current_tick - self.lookback_window + 1
+
+        # Sentiment manipulation burst
+        burst_sum = sum(
+            abs(delta)
+            for t, _agent, delta, source in self.sentiment_flow
+            if t >= lower and source in {"rumor", "manipulator", "spoofing"}
+        )
+        if burst_sum >= self.sentiment_burst_threshold:
+            self.events.append(
+                AbuseEvent(
+                    tick=current_tick,
+                    event_type="sentiment_manipulation_burst",
+                    agent_id="market",
+                    detail={"burst_abs_sum": float(burst_sum), "window": int(self.lookback_window)},
+                )
+            )
+
+        # Abnormal order cancellation ratio
+        for agent_id, submit_count in list(self.agent_submit_count.items()):
+            if submit_count < 5:
+                continue
+            cancel_count = int(self.agent_cancel_count.get(agent_id, 0))
+            ratio = cancel_count / max(1, submit_count)
+            if ratio >= self.cancellation_ratio_threshold:
+                self.events.append(
+                    AbuseEvent(
+                        tick=current_tick,
+                        event_type="abnormal_order_cancellation",
+                        agent_id=str(agent_id),
+                        detail={
+                            "submit_count": int(submit_count),
+                            "cancel_count": int(cancel_count),
+                            "cancel_ratio": float(ratio),
+                        },
+                    )
+                )
+
+        recent = [e for e in self.events if int(e.tick) == current_tick]
+        return {
+            "tick": current_tick,
+            "events_detected": len(recent),
+            "events": [
+                {
+                    "tick": int(e.tick),
+                    "type": e.event_type,
+                    "agent_id": e.agent_id,
+                    "detail": e.detail,
+                }
+                for e in recent
+            ],
+        }
+
+    def to_report(self) -> Dict[str, Any]:
+        return {
+            "total_events": len(self.events),
+            "events": [
+                {
+                    "tick": int(e.tick),
+                    "type": e.event_type,
+                    "agent_id": e.agent_id,
+                    "detail": e.detail,
+                }
+                for e in self.events[-500:]
+            ],
+            "agent_submit_count": {k: int(v) for k, v in self.agent_submit_count.items()},
+            "agent_cancel_count": {k: int(v) for k, v in self.agent_cancel_count.items()},
+        }
+
+    def save_report(self, path: str | Path) -> Path:
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(self.to_report(), ensure_ascii=False, indent=2), encoding="utf-8")
+        return out

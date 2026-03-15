@@ -3,27 +3,49 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import random
 import uuid
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Sequence
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 from agents.trading_agent_core import GLOBAL_CONFIG, Persona, TradingAgent
+from core.behavioral_finance import (
+    StylizedFactsTracker,
+    behavioral_update_step,
+    calculate_csad,
+    initialize_reference_points,
+)
+from core.exchange.evolution import (
+    EcologyMetricsRow,
+    EcologyMetricsTracker,
+    EvolutionOperators,
+    StrategyGenome,
+    approx_modularity,
+    build_sentiment_coalitions,
+    coalition_persistence,
+    entropy_from_labels,
+    hhi_from_shares,
+    phase_change_score,
+)
 from core.macro.bank import BankAgent
 from core.macro.firm import FirmAgent, FirmSignal
 from core.macro.government import GovernmentAgent, PolicyShock
 from core.macro.household import HouseholdAgent, HouseholdSignal
 from core.macro.state import MacroContextDTO, MacroState
+from core.market_engine import blend_price_with_backdrop
+from core.regulatory_sandbox import MarketAbuseSandbox
 from core.social.contagion import ContagionSnapshot, SocialContagionEngine
 from core.social.graph_state import SocialGraphState
 from core.world.event_bus import EventBus
 from engine.market_match import calculate_new_price
 from policy.policy_engine import PolicyEngine
-from simulation_runner import BufferedIntent, SimulationRunner
+from simulation_runner import BufferedIntent, ExogenousBackdropPoint, SimulationRunner
 
 
 logger = logging.getLogger("civitas.engine.simulation")
@@ -36,6 +58,82 @@ if not logger.handlers:
 
 def _clip(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, float(value)))
+
+
+class RumorManipulatorAgent:
+    """Adversarial actor that injects sentiment bursts and directional rumors."""
+
+    agent_id = "rumor_manipulator_agent"
+
+    def __init__(self, intensity: float = 0.75) -> None:
+        self.intensity = float(_clip(intensity, 0.1, 2.0))
+
+    def generate(self, tick: int, current_price: float) -> Tuple[float, Optional[BufferedIntent]]:
+        direction = -1.0 if tick % 2 == 0 else 1.0
+        shock = direction * 0.28 * self.intensity
+        qty = int(max(100, 800 * self.intensity))
+        side = "sell" if shock < 0 else "buy"
+        intent = BufferedIntent(
+            intent_id=f"{self.agent_id}_{tick}",
+            agent_id=self.agent_id,
+            side=side,
+            quantity=qty,
+            price=max(0.01, float(current_price)),
+            intent_type="order",
+            activate_step=tick,
+            metadata={"abuse_tag": "rumor", "sentiment_delta": shock},
+        )
+        return shock, intent
+
+
+class SpoofingAgent:
+    """Adversarial actor that layers and rapidly cancels large spoof orders."""
+
+    agent_id = "spoofing_agent"
+
+    def __init__(self, intensity: float = 1.0) -> None:
+        self.intensity = float(_clip(intensity, 0.2, 2.5))
+        self._last_spoof_order_id: Optional[str] = None
+
+    def generate(self, tick: int, current_price: float) -> List[BufferedIntent]:
+        intents: List[BufferedIntent] = []
+        if self._last_spoof_order_id:
+            intents.append(
+                BufferedIntent(
+                    intent_id=f"{self.agent_id}_cancel_{tick}",
+                    agent_id=self.agent_id,
+                    side="cancel",
+                    quantity=0,
+                    price=0.0,
+                    intent_type="cancel",
+                    activate_step=tick,
+                    metadata={
+                        "target_order_id": self._last_spoof_order_id,
+                        "abuse_tag": "spoof_cancel",
+                    },
+                )
+            )
+
+        side = "buy" if tick % 2 == 0 else "sell"
+        skew = -0.012 if side == "buy" else 0.012
+        price = max(0.01, float(current_price) * (1.0 + skew))
+        qty = int(max(1500, 5500 * self.intensity))
+        order_id = f"{self.agent_id}_layer_{tick}"
+        intents.append(
+            BufferedIntent(
+                intent_id=order_id,
+                agent_id=self.agent_id,
+                side=side,
+                quantity=qty,
+                price=price,
+                intent_type="order",
+                activate_step=tick,
+                expire_step=tick + 1,
+                metadata={"abuse_tag": "spoof_layer"},
+            )
+        )
+        self._last_spoof_order_id = order_id
+        return intents
 
 
 class MarketEnvironment:
@@ -75,6 +173,11 @@ class MarketEnvironment:
         low_return_threshold: float = -0.2,
         mutation_rate: float = 0.2,
         mutation_scale: float = 0.15,
+        hybrid_replay: bool = False,
+        exogenous_backdrop: Optional[Sequence[Dict[str, Any]] | str | Path] = None,
+        hybrid_backdrop_weight: float = 0.35,
+        enable_abuse_agents: bool = False,
+        abuse_agent_scale: float = 1.0,
         macro_state: Optional[MacroState] = None,
         event_bus: Optional[EventBus] = None,
         households: Optional[Sequence[HouseholdAgent]] = None,
@@ -105,6 +208,34 @@ class MarketEnvironment:
         self._policy_shocks: List[str] = []
         self.policy_transmission_history: List[Dict[str, Any]] = []
         self._last_social_mean: float = 0.0
+        self.stylized_facts_tracker = StylizedFactsTracker(prices=[self.current_price])
+        self.stylized_facts_report_path = Path("outputs") / "stylized_facts_report.json"
+        self._agent_reference_points: Dict[str, Any] = {}
+        self._agent_risk_appetite: Dict[str, float] = {}
+        self._agent_behavioral_state: Dict[str, Dict[str, float]] = {}
+        self._agent_position_book: Dict[str, Dict[str, float]] = {}
+        self._agent_genomes: Dict[str, StrategyGenome] = {}
+        self._evolution_ops = EvolutionOperators(
+            mutation_rate=self.mutation_rate,
+            mutation_scale=self.mutation_scale,
+            seed=42,
+        )
+        self.ecology_tracker = EcologyMetricsTracker()
+        self.ecology_metrics_path = Path("outputs") / "ecology_metrics.csv"
+        self.market_abuse_report_path = Path("outputs") / "market_abuse_report.json"
+        self.intervention_effect_report_path = Path("outputs") / "intervention_effect_report.json"
+        self.abuse_sandbox = MarketAbuseSandbox()
+        self._abuse_event_count_series: List[int] = []
+        self._intervention_tick: Optional[int] = None
+        self._intervention_active: bool = False
+        self.hybrid_replay = bool(hybrid_replay)
+        self.hybrid_backdrop_weight = float(_clip(hybrid_backdrop_weight, 0.0, 1.0))
+        self.enable_abuse_agents = bool(enable_abuse_agents)
+        self._abuse_agent_scale = float(max(0.1, abuse_agent_scale))
+        self.rumor_manipulator_agent = RumorManipulatorAgent(intensity=self._abuse_agent_scale)
+        self.spoofing_agent = SpoofingAgent(intensity=self._abuse_agent_scale)
+        self._exogenous_backdrop: List[ExogenousBackdropPoint] = []
+        self._latest_hybrid_point: Optional[Dict[str, float]] = None
 
         self.macro_state = macro_state or MacroState()
         self.event_bus = event_bus or EventBus()
@@ -122,6 +253,8 @@ class MarketEnvironment:
         )
         if self.use_isolated_matching:
             self.simulation_runner.start()
+        self._configure_hybrid_backdrop(exogenous_backdrop)
+        self._initialize_strategy_genomes()
 
         logger.info(
             "Initialized MarketEnvironment: agents=%s, price=%.2f, isolated=%s",
@@ -170,13 +303,122 @@ class MarketEnvironment:
         graph = SocialGraphState.ring(node_ids)
         for node in graph.nodes.values():
             node.sentiment = random.uniform(-0.05, 0.05)
+        for src, neighbors in graph.adjacency.items():
+            src_group = str(src).split("_")[0]
+            for dst in neighbors:
+                dst_group = str(dst).split("_")[0]
+                graph.set_edge_profile(
+                    src,
+                    dst,
+                    trust_edge=random.uniform(0.35, 0.90),
+                    position_similarity_edge=random.uniform(0.20, 0.95),
+                    news_exposure_edge=random.uniform(0.25, 0.90),
+                    institution_affiliation_edge=1.0 if src_group == dst_group else random.uniform(0.0, 0.4),
+                    bidirectional=False,
+                )
         return graph
+
+    def _configure_hybrid_backdrop(self, source: Optional[Sequence[Dict[str, Any]] | str | Path]) -> None:
+        if source is None:
+            self._exogenous_backdrop = []
+            return
+
+        loaded: List[ExogenousBackdropPoint] = []
+        if isinstance(source, (str, Path)):
+            path = Path(source)
+            if path.exists():
+                self.simulation_runner.load_exogenous_backdrop_csv(path)
+                for row in self.simulation_runner._exogenous_backdrop:
+                    loaded.append(row)
+        else:
+            self.simulation_runner.set_exogenous_backdrop(list(source))
+            for row in self.simulation_runner._exogenous_backdrop:
+                loaded.append(row)
+        self._exogenous_backdrop = loaded
+
+    def _exogenous_point_for_tick(self, tick: int) -> Optional[Dict[str, float]]:
+        point = self.simulation_runner.get_exogenous_backdrop_point(tick)
+        if point is None:
+            self._latest_hybrid_point = None
+            return None
+        payload = {
+            "step": float(point.get("step", tick)),
+            "price": float(point.get("price", self.current_price)),
+            "volume": float(point.get("volume", 0.0)),
+        }
+        self._latest_hybrid_point = payload
+        return payload
+
+    def _initialize_strategy_genomes(self) -> None:
+        self._agent_genomes = {}
+        rng = random.Random(7)
+        for agent in self.agents:
+            agent_id = str(getattr(agent, "agent_id", f"agent_{len(self._agent_genomes)}"))
+            genome = StrategyGenome.random(rng)
+            persona = getattr(agent, "persona", None)
+            if persona is not None:
+                rt = getattr(persona, "risk_tolerance", None)
+                if rt is not None:
+                    genome.risk_aversion = float(_clip(1.0 - float(rt), 0.01, 1.0))
+            self._agent_genomes[agent_id] = genome
+            try:
+                setattr(agent, "strategy_genome", genome)
+            except Exception:
+                pass
+
+    def _genome_for_agent(self, agent: TradingAgent) -> StrategyGenome:
+        agent_id = str(getattr(agent, "agent_id", "unknown"))
+        genome = self._agent_genomes.get(agent_id)
+        if genome is None:
+            genome = StrategyGenome.random(random.Random(hash(agent_id) % (2**16)))
+            self._agent_genomes[agent_id] = genome
+        return genome
+
+    def _apply_genome_behavior_overlay(self, state: Dict[str, float], genome: StrategyGenome) -> Dict[str, float]:
+        out = dict(state)
+        risk = float(out.get("risk_appetite", 0.5))
+        intent = float(out.get("trading_intent", 0.0))
+        social = float(out.get("sentiment", 0.0))
+        risk = risk * (1.0 - 0.35 * genome.risk_aversion) + 0.20 * genome.order_aggressiveness
+        intent = (
+            intent * (0.8 + 0.2 * genome.order_aggressiveness)
+            + social * 0.25 * genome.social_susceptibility
+            - 0.12 * genome.risk_aversion
+        )
+        out["risk_appetite"] = float(_clip(risk, 0.0, 1.0))
+        out["trading_intent"] = float(_clip(intent, -1.0, 1.0))
+        out["memory_span"] = float(genome.memory_span)
+        out["stop_loss_threshold"] = float(genome.stop_loss_threshold)
+        out["order_aggressiveness"] = float(genome.order_aggressiveness)
+        out["social_susceptibility"] = float(genome.social_susceptibility)
+        out["risk_aversion"] = float(genome.risk_aversion)
+        out["debate_participation"] = float(genome.debate_participation)
+        return out
 
     def close(self) -> None:
         """Release subprocess resources if this environment owns the runner."""
-        if not self.use_isolated_matching:
-            return
-        if self._owns_runner:
+        if self.stylized_facts_tracker.market_returns:
+            try:
+                path = self.stylized_facts_tracker.save_json(self.stylized_facts_report_path)
+                self.last_step_report["stylized_facts_report_path"] = str(path)
+            except Exception as exc:
+                logger.warning("Failed to save stylized facts report: %s", exc)
+        try:
+            eco = self.ecology_tracker.save_csv(self.ecology_metrics_path)
+            self.last_step_report["ecology_metrics_path"] = str(eco)
+        except Exception as exc:
+            logger.warning("Failed to save ecology metrics: %s", exc)
+        try:
+            abuse = self.abuse_sandbox.save_report(self.market_abuse_report_path)
+            self.last_step_report["market_abuse_report_path"] = str(abuse)
+        except Exception as exc:
+            logger.warning("Failed to save market abuse report: %s", exc)
+        try:
+            self._save_intervention_effect_report()
+        except Exception as exc:
+            logger.warning("Failed to save intervention report: %s", exc)
+
+        if self.use_isolated_matching and self._owns_runner:
             try:
                 self.simulation_runner.stop()
             except Exception as exc:
@@ -197,6 +439,279 @@ class MarketEnvironment:
         if not self._policy_shocks:
             return None
         return self._policy_shocks.pop(0)
+
+    def _base_risk_for_agent(self, agent: TradingAgent) -> float:
+        persona = getattr(agent, "persona", None)
+        risk = getattr(persona, "risk_tolerance", None)
+        if risk is not None:
+            return float(np.clip(float(risk), 0.0, 1.0))
+        appetite = getattr(persona, "risk_appetite", None)
+        appetite_map = {
+            "CONSERVATIVE": 0.25,
+            "BALANCED": 0.50,
+            "AGGRESSIVE": 0.72,
+            "GAMBLER": 0.86,
+        }
+        if appetite is not None:
+            key = getattr(appetite, "name", str(appetite)).upper()
+            return float(appetite_map.get(key, 0.50))
+        return 0.50
+
+    def _loss_aversion_for_agent(self, agent: TradingAgent) -> float:
+        persona = getattr(agent, "persona", None)
+        loss = getattr(persona, "loss_aversion", None)
+        if loss is not None:
+            return float(np.clip(float(loss), 0.5, 6.0))
+        bias = str(getattr(persona, "cognitive_bias", ""))
+        if "Loss_Aversion" in bias:
+            return 2.8
+        return 2.0
+
+    def _behavioral_state_for_agent(self, agent: TradingAgent) -> Dict[str, float]:
+        agent_id = str(getattr(agent, "agent_id", "unknown"))
+        reference_points = self._agent_reference_points.get(agent_id)
+        if reference_points is None:
+            reference_points = initialize_reference_points(self.current_price)
+            self._agent_reference_points[agent_id] = reference_points
+
+        node = self.social_graph.nodes.get(agent_id)
+        sentiment = float(getattr(node, "sentiment", self._last_social_mean))
+        peer_anchor = self.current_price * (1.0 + 0.04 * self._last_social_mean)
+        policy_shock = float(np.clip((self.macro_state.sentiment_index - 0.5) * 1.6, -1.0, 1.0))
+        policy_anchor = self.current_price * (1.0 + 0.08 * policy_shock)
+        base_risk = self._agent_risk_appetite.get(agent_id, self._base_risk_for_agent(agent))
+        step = behavioral_update_step(
+            sentiment=sentiment,
+            current_price=self.current_price,
+            reference_points=reference_points,
+            base_risk_appetite=base_risk,
+            peer_anchor=peer_anchor,
+            policy_anchor=policy_anchor,
+            policy_shock=policy_shock,
+            loss_aversion=self._loss_aversion_for_agent(agent),
+        )
+        self._agent_reference_points[agent_id] = step.reference_points
+        self._agent_risk_appetite[agent_id] = float(step.risk_appetite)
+        state = {
+            "sentiment": float(step.sentiment),
+            "risk_appetite": float(step.risk_appetite),
+            "trading_intent": float(step.trading_intent),
+            "prospect_direction": float(step.prospect_direction),
+            "loss_aversion_intensity": float(step.loss_aversion_intensity),
+            "purchase_anchor": float(step.reference_points.purchase_anchor),
+            "recent_high_anchor": float(step.reference_points.recent_high_anchor),
+            "peer_anchor": float(step.reference_points.peer_anchor),
+            "policy_anchor": float(step.reference_points.policy_anchor),
+        }
+        self._agent_behavioral_state[agent_id] = state
+        return state
+
+    def _cross_sectional_action_returns(self, agent_actions: Sequence[Any], old_price: float) -> List[float]:
+        returns: List[float] = []
+        base_price = float(max(old_price, 1e-6))
+        for action in agent_actions:
+            direction = str(getattr(action, "action", "HOLD")).upper()
+            amount = float(getattr(action, "amount", 0.0) or 0.0)
+            target = getattr(action, "target_price", None)
+            target_price = float(target) if target is not None else base_price
+            price_signal = (target_price - base_price) / base_price
+            size_signal = float(np.tanh(amount / 5000.0) * 0.04)
+            if direction == "BUY":
+                signal = 0.6 * price_signal + 0.4 * abs(size_signal)
+            elif direction == "SELL":
+                signal = -0.6 * price_signal - 0.4 * abs(size_signal)
+            else:
+                signal = 0.0
+            returns.append(float(np.clip(signal, -0.20, 0.20)))
+        if not returns:
+            returns = [0.0]
+        return returns
+
+    def _update_disposition_book(self, agent_actions: Sequence[Any], old_price: float) -> None:
+        for idx, action in enumerate(agent_actions):
+            if idx >= len(self.agents):
+                break
+            agent = self.agents[idx]
+            agent_id = str(getattr(agent, "agent_id", f"agent_{idx}"))
+            side = str(getattr(action, "action", "HOLD")).upper()
+            qty = float(getattr(action, "amount", 0.0) or 0.0)
+            if qty <= 0 or side not in {"BUY", "SELL"}:
+                continue
+            px = float(getattr(action, "target_price", old_price) or old_price)
+            book = self._agent_position_book.setdefault(agent_id, {"qty": 0.0, "avg_cost": float(old_price)})
+            current_qty = float(book.get("qty", 0.0))
+            avg_cost = float(book.get("avg_cost", old_price))
+            if side == "BUY":
+                new_qty = current_qty + qty
+                if new_qty > 0:
+                    avg_cost = (current_qty * avg_cost + qty * px) / new_qty
+                book["qty"] = new_qty
+                book["avg_cost"] = avg_cost
+            else:
+                sell_qty = min(current_qty, qty)
+                if sell_qty <= 0:
+                    continue
+                realized_pnl = (px - avg_cost) * sell_qty
+                self.stylized_facts_tracker.disposition.record_realized(realized_pnl)
+                book["qty"] = current_qty - sell_qty
+                if book["qty"] <= 0:
+                    book["avg_cost"] = float(old_price)
+
+        for agent_id, pos in self._agent_position_book.items():
+            qty = float(pos.get("qty", 0.0))
+            if qty <= 0:
+                continue
+            avg_cost = float(pos.get("avg_cost", old_price))
+            paper_pnl = (self.current_price - avg_cost) * qty
+            self.stylized_facts_tracker.disposition.record_paper(paper_pnl)
+
+    def _generate_malicious_intents(self, tick: int) -> Tuple[List[BufferedIntent], float]:
+        if not self.enable_abuse_agents:
+            return [], 0.0
+        intents: List[BufferedIntent] = []
+        rumor_shock, rumor_intent = self.rumor_manipulator_agent.generate(tick, self.current_price)
+        intents.append(rumor_intent)
+        intents.extend(self.spoofing_agent.generate(tick, self.current_price))
+        return intents, float(rumor_shock)
+
+    def _inject_rumor_sentiment(self, shock: float) -> None:
+        if abs(shock) <= 1e-6 or not self.social_graph.nodes:
+            return
+        for node_id, node in self.social_graph.nodes.items():
+            node.sentiment = _clip(node.sentiment + shock * 0.35, -1.0, 1.0)
+            self.abuse_sandbox.register_sentiment(
+                agent_id="rumor_manipulator_agent",
+                sentiment_delta=shock * 0.35,
+                tick=self.simulation_time,
+                source="rumor",
+            )
+
+    def _register_order_submission(self, intent: BufferedIntent, *, tick: int) -> None:
+        intent_kind = str(getattr(intent, "intent_type", "order") or "order").lower()
+        if intent_kind == "cancel" or str(intent.side).lower() == "cancel":
+            self.abuse_sandbox.register_cancellation(
+                agent_id=str(intent.agent_id),
+                target_order_id=str(intent.metadata.get("target_order_id", "")),
+                tick=tick,
+                successful=False,
+            )
+            return
+        self.abuse_sandbox.register_submission(
+            agent_id=str(intent.agent_id),
+            order_id=str(intent.intent_id),
+            side=str(intent.side),
+            qty=int(intent.quantity),
+            price=float(intent.price),
+            tick=tick,
+            tag=str(intent.metadata.get("abuse_tag", "organic")),
+        )
+
+    def _consume_matching_snapshot_for_abuse(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        for trade in snapshot.get("trades", []) or []:
+            maker_id = str(trade.get("maker_id", ""))
+            taker_id = str(trade.get("taker_id", ""))
+            if maker_id:
+                self.abuse_sandbox.register_trade(maker_id, self.simulation_time)
+            if taker_id:
+                self.abuse_sandbox.register_trade(taker_id, self.simulation_time)
+
+        for item in snapshot.get("canceled_orders", []) or []:
+            self.abuse_sandbox.register_cancellation(
+                agent_id=str(item.get("agent_id", "")),
+                target_order_id=str(item.get("target_order_id", "")),
+                tick=self.simulation_time,
+                successful=True,
+            )
+
+        return self.abuse_sandbox.detect(self.simulation_time)
+
+    def _save_intervention_effect_report(self) -> Path:
+        returns = list(self.stylized_facts_tracker.market_returns)
+        abuse = list(self._abuse_event_count_series)
+
+        def _metrics(arr_ret: Sequence[float], arr_abuse: Sequence[int]) -> Dict[str, float]:
+            if not arr_ret:
+                return {"volatility": 0.0, "mean_abs_return": 0.0, "abuse_event_rate": 0.0}
+            vol = float(np.std(arr_ret))
+            mar = float(np.mean(np.abs(arr_ret)))
+            abr = float(np.mean(arr_abuse)) if arr_abuse else 0.0
+            return {"volatility": vol, "mean_abs_return": mar, "abuse_event_rate": abr}
+
+        split = None if self._intervention_tick is None else max(0, int(self._intervention_tick - 1))
+        before_ret = returns[:split] if split is not None else returns
+        after_ret = returns[split:] if split is not None else []
+        before_abuse = abuse[:split] if split is not None else abuse
+        after_abuse = abuse[split:] if split is not None else []
+
+        before = _metrics(before_ret, before_abuse)
+        after = _metrics(after_ret, after_abuse)
+        payload = {
+            "intervention_active": bool(self._intervention_active),
+            "intervention_tick": self._intervention_tick,
+            "before": before,
+            "after": after,
+            "delta": {
+                "volatility": float(after["volatility"] - before["volatility"]),
+                "mean_abs_return": float(after["mean_abs_return"] - before["mean_abs_return"]),
+                "abuse_event_rate": float(after["abuse_event_rate"] - before["abuse_event_rate"]),
+            },
+        }
+        self.intervention_effect_report_path.parent.mkdir(parents=True, exist_ok=True)
+        self.intervention_effect_report_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        return self.intervention_effect_report_path
+
+    def _record_ecology_metrics(
+        self,
+        *,
+        actions_by_agent: Dict[str, Any],
+        market_return: float,
+    ) -> Dict[str, float]:
+        labels: List[str] = []
+        shares: List[float] = []
+        sentiments: Dict[str, float] = {}
+        for agent_id, action in actions_by_agent.items():
+            genome = self._agent_genomes.get(agent_id)
+            if genome is not None:
+                labels.append(genome.signature_key())
+            qty = float(getattr(action, "amount", 0.0) or 0.0)
+            if qty > 0:
+                shares.append(qty)
+        for node_id, node in self.social_graph.nodes.items():
+            sentiments[node_id] = float(node.sentiment)
+        coalition = build_sentiment_coalitions(sentiments)
+        modularity = approx_modularity(self.social_graph.adjacency, coalition)
+
+        prev_row = self.ecology_tracker.rows[-1] if self.ecology_tracker.rows else None
+        entropy_val = entropy_from_labels(labels)
+        hhi_val = hhi_from_shares(shares)
+        persistence = (
+            coalition_persistence(
+                {k: int(v) for k, v in getattr(self, "_prev_coalition", {}).items()},
+                coalition,
+            )
+            if hasattr(self, "_prev_coalition")
+            else 0.0
+        )
+        phase_score = (
+            phase_change_score(prev_row.entropy, entropy_val, getattr(self, "_prev_market_return", 0.0), market_return)
+            if prev_row is not None
+            else 0.0
+        )
+        row = EcologyMetricsRow(
+            tick=self.simulation_time,
+            entropy=float(entropy_val),
+            hhi=float(hhi_val),
+            modularity=float(modularity),
+            phase_changes=float(phase_score),
+            coalition_persistence=float(persistence),
+        )
+        self.ecology_tracker.record(row)
+        self.ecology_tracker.save_csv(self.ecology_metrics_path)
+        self._prev_coalition = coalition
+        self._prev_market_return = float(market_return)
+        return self.ecology_tracker.latest()
 
     async def simulation_step(self) -> Dict[str, Any]:
         """Execute one full simulation step with macro-social-micro coupling."""
@@ -230,6 +745,9 @@ class MarketEnvironment:
         }
 
         async def process_agent(agent: TradingAgent):
+            behavioral_state = self._behavioral_state_for_agent(agent)
+            genome = self._genome_for_agent(agent)
+            behavioral_state = self._apply_genome_behavior_overlay(behavioral_state, genome)
             query_text = (
                 f"price={self.current_price:.2f}; tick={self.simulation_time}; "
                 f"{macro_context.to_prompt_context()}"
@@ -245,13 +763,33 @@ class MarketEnvironment:
                     )
                 except Exception:
                     retrieved_context = ""
-            return await agent.generate_trading_decision(market_data, retrieved_context)
+            payload = dict(market_data)
+            payload["behavioral_context"] = behavioral_state
+            payload["risk_appetite"] = behavioral_state.get("risk_appetite", 0.5)
+            payload["trading_intent"] = behavioral_state.get("trading_intent", 0.0)
+            payload["loss_aversion_intensity"] = behavioral_state.get("loss_aversion_intensity", 2.25)
+            payload["strategy_genome"] = {
+                "analyst_weight_vector": list(genome.normalized_weights()),
+                "memory_span": int(genome.memory_span),
+                "stop_loss_threshold": float(genome.stop_loss_threshold),
+                "order_aggressiveness": float(genome.order_aggressiveness),
+                "social_susceptibility": float(genome.social_susceptibility),
+                "risk_aversion": float(genome.risk_aversion),
+                "debate_participation": float(genome.debate_participation),
+            }
+            return await agent.generate_trading_decision(payload, retrieved_context)
 
         logger.info("Collecting agent decisions: %s agents", len(self.agents))
         agent_actions = await asyncio.gather(*(process_agent(agent) for agent in self.agents))
+        actions_by_agent: Dict[str, Any] = {
+            str(getattr(agent, "agent_id", f"agent_{idx}")): action
+            for idx, (agent, action) in enumerate(zip(self.agents, agent_actions))
+        }
 
         # 5) trading intent
         self.last_stage_order.append("trading intent")
+        malicious_intents, rumor_shock = self._generate_malicious_intents(self.simulation_time)
+        self._inject_rumor_sentiment(rumor_shock)
         buy_volume = 0.0
         sell_volume = 0.0
         for action in agent_actions:
@@ -261,10 +799,19 @@ class MarketEnvironment:
                 buy_volume += amount
             elif action_type == "SELL":
                 sell_volume += amount
+        for intent in malicious_intents:
+            side = str(intent.side).upper()
+            if str(intent.intent_type).lower() != "order":
+                continue
+            if side == "BUY":
+                buy_volume += float(intent.quantity)
+            elif side == "SELL":
+                sell_volume += float(intent.quantity)
 
         # 6) IPC matching
         self.last_stage_order.append("IPC matching")
         old_price = self.current_price
+        cross_returns = self._cross_sectional_action_returns(agent_actions, old_price)
         trade_count = 0
         buffered_intents = 0
         matching_mode = "impact_model"
@@ -288,7 +835,19 @@ class MarketEnvironment:
                         price=max(0.01, intent_price),
                         symbol=self.runner_symbol,
                         activate_step=self.simulation_time,
+                        intent_type="order",
+                        metadata={"abuse_tag": "organic"},
                     )
+                    self._register_order_submission(intent, tick=self.simulation_time)
+                    ack = self.simulation_runner.submit_intent(intent)
+                    buffered_intents = max(buffered_intents, int(ack.get("buffer_size", 0)))
+
+                for intent in malicious_intents:
+                    if intent.symbol != self.runner_symbol:
+                        intent.symbol = self.runner_symbol
+                    if intent.activate_step is None:
+                        intent.activate_step = self.simulation_time
+                    self._register_order_submission(intent, tick=self.simulation_time)
                     ack = self.simulation_runner.submit_intent(intent)
                     buffered_intents = max(buffered_intents, int(ack.get("buffer_size", 0)))
 
@@ -297,15 +856,66 @@ class MarketEnvironment:
                 if snapshot.get("last_price") is not None:
                     self.current_price = float(snapshot["last_price"])
                 buffered_intents = int(snapshot.get("buffer_size", buffered_intents))
+                abuse_detection = self._consume_matching_snapshot_for_abuse(snapshot)
             except Exception as exc:
                 logger.exception("isolated matching failed; fallback to impact model: %s", exc)
                 matching_mode = "fallback_impact_model"
                 self.current_price = calculate_new_price(buy_volume, sell_volume, self.current_price)
+                abuse_detection = self.abuse_sandbox.detect(self.simulation_time)
         else:
             self.current_price = calculate_new_price(buy_volume, sell_volume, self.current_price)
+            for intent in malicious_intents:
+                self._register_order_submission(intent, tick=self.simulation_time)
+                if str(intent.intent_type).lower() == "cancel" or str(intent.side).lower() == "cancel":
+                    self.abuse_sandbox.register_cancellation(
+                        agent_id=str(intent.agent_id),
+                        target_order_id=str(intent.metadata.get("target_order_id", "")),
+                        tick=self.simulation_time,
+                        successful=True,
+                    )
+            abuse_detection = self.abuse_sandbox.detect(self.simulation_time)
+
+        exo_point = self._exogenous_point_for_tick(self.simulation_time) if self.hybrid_replay else None
+        if exo_point is not None:
+            self.current_price = blend_price_with_backdrop(
+                old_price=old_price,
+                endogenous_price=self.current_price,
+                exogenous_price=exo_point.get("price"),
+                exogenous_volume=exo_point.get("volume", 0.0),
+                backdrop_weight=self.hybrid_backdrop_weight,
+            )
+        self._abuse_event_count_series.append(int(abuse_detection.get("events_detected", 0)))
+        if abuse_detection.get("events_detected", 0) and not self._intervention_active:
+            self._intervention_active = True
+            self._intervention_tick = self.simulation_time
+            self._abuse_agent_scale = max(0.25, self._abuse_agent_scale * 0.5)
+            self.rumor_manipulator_agent.intensity = self._abuse_agent_scale
+            self.spoofing_agent.intensity = self._abuse_agent_scale
 
         # 7) metrics update
         self.last_stage_order.append("metrics update")
+        self._update_disposition_book(agent_actions, old_price)
+
+        market_return = (self.current_price - old_price) / old_price if old_price > 0 else 0.0
+        csad_value = calculate_csad(np.asarray(cross_returns, dtype=float), float(market_return))
+        prev_max = max(self.price_history) if self.price_history else self.current_price
+        is_all_time_high = bool(self.current_price >= prev_max)
+        loss_intensity = (
+            float(np.mean([s.get("loss_aversion_intensity", 2.25) for s in self._agent_behavioral_state.values()]))
+            if self._agent_behavioral_state
+            else 2.25
+        )
+        self.stylized_facts_tracker.record_step(
+            price=self.current_price,
+            market_return=float(market_return),
+            csad=float(csad_value),
+            cross_returns=cross_returns,
+            is_all_time_high=is_all_time_high,
+            loss_aversion_intensity=loss_intensity,
+        )
+        ecology_metrics = self._record_ecology_metrics(actions_by_agent=actions_by_agent, market_return=float(market_return))
+        intervention_report_path = self._save_intervention_effect_report()
+
         self.price_history.append(self.current_price)
         if len(self.price_history) > 500:
             self.price_history = self.price_history[-500:]
@@ -349,7 +959,40 @@ class MarketEnvironment:
             "social_mean_sentiment": contagion.mean_sentiment,
             "policy_transmission_chain": policy_chain,
             "macro_context": macro_context.to_payload(),
+            "behavioral_diagnostics": {
+                "csad": float(csad_value),
+                "loss_aversion_intensity": float(loss_intensity),
+                "all_time_high": bool(is_all_time_high),
+            },
+            "ecology_metrics": ecology_metrics,
+            "abuse_detection": abuse_detection,
+            "hybrid_replay": {
+                "enabled": bool(self.hybrid_replay),
+                "backdrop_weight": float(self.hybrid_backdrop_weight),
+                "point": self._latest_hybrid_point,
+            },
+            "intervention": {
+                "active": bool(self._intervention_active),
+                "tick": self._intervention_tick,
+            },
         }
+        self.last_step_report["stylized_facts_snapshot"] = self.stylized_facts_tracker.report()
+        try:
+            saved = self.stylized_facts_tracker.save_json(self.stylized_facts_report_path)
+            self.last_step_report["stylized_facts_report_path"] = str(saved)
+        except Exception as exc:
+            logger.warning("Failed to persist stylized facts report at tick %s: %s", self.simulation_time, exc)
+        try:
+            self.last_step_report["ecology_metrics_path"] = str(self.ecology_tracker.save_csv(self.ecology_metrics_path))
+        except Exception as exc:
+            logger.warning("Failed to persist ecology metrics at tick %s: %s", self.simulation_time, exc)
+        try:
+            self.last_step_report["market_abuse_report_path"] = str(
+                self.abuse_sandbox.save_report(self.market_abuse_report_path)
+            )
+        except Exception as exc:
+            logger.warning("Failed to persist abuse report at tick %s: %s", self.simulation_time, exc)
+        self.last_step_report["intervention_effect_report_path"] = str(intervention_report_path)
         self._update_wealth_history()
 
         if self.simulation_time % self.steps_per_day == 0:
@@ -595,7 +1238,7 @@ class MarketEnvironment:
                 self._wealth_history[agent.agent_id] = history[-max_len:]
 
     def _evolution_step(self) -> Dict[str, Any]:
-        """Apply selection + mutation to maintain adaptive population."""
+        """Apply genome-level evolutionary operators."""
         if not self.agents:
             return {"status": "skipped", "reason": "no_agents"}
 
@@ -604,7 +1247,7 @@ class MarketEnvironment:
         freed_capital = 0.0
 
         for agent in self.agents:
-            agent_id = agent.agent_id
+            agent_id = str(agent.agent_id)
             history = self._wealth_history.get(agent_id, [])
             initial_cash = self._initial_cash.get(agent_id, float(getattr(agent, "cash", 0.0)))
             if not history or initial_cash <= 0:
@@ -616,64 +1259,152 @@ class MarketEnvironment:
             end_val = history[-1]
             ret = (end_val / start_val - 1.0) if start_val > 0 else 0.0
             returns[agent_id] = ret
-
             if end_val <= initial_cash * self.bankruptcy_threshold or ret < self.low_return_threshold:
                 to_remove.append(agent)
                 freed_capital += max(0.0, end_val)
 
         self.agents = [a for a in self.agents if a not in to_remove]
-        top_agents = sorted(self.agents, key=lambda a: returns.get(a.agent_id, 0.0), reverse=True)
+        for removed in to_remove:
+            self._agent_genomes.pop(str(removed.agent_id), None)
+        survivor_ids = [str(a.agent_id) for a in self.agents]
+        selected_ids = self._evolution_ops.selection({aid: returns.get(aid, 0.0) for aid in survivor_ids}, survival_rate=0.5)
+        if not selected_ids and survivor_ids:
+            selected_ids = survivor_ids[:1]
 
+        # Local diffusion over existing topology
+        adjacency = {node_id: list(nei) for node_id, nei in self.social_graph.adjacency.items()}
+        diffused = self._evolution_ops.local_diffusion(self._agent_genomes, adjacency, strength=0.06)
+
+        # Mutate selected survivors
+        mutated_ids: List[str] = []
+        for aid in selected_ids:
+            genome = self._agent_genomes.get(aid)
+            if genome is None:
+                continue
+            self._agent_genomes[aid] = self._evolution_ops.mutation(genome)
+            mutated_ids.append(aid)
+
+        # Crossover + mutation to spawn replacements
+        offspring: List[TradingAgent] = []
+        if to_remove and selected_ids:
+            n_offspring = max(1, len(to_remove))
+            budget = freed_capital * 0.25 if freed_capital > 0 else 0.0
+            per_capital = budget / n_offspring if n_offspring > 0 else 0.0
+            id_to_agent = {str(a.agent_id): a for a in self.agents}
+            for _ in range(n_offspring):
+                pa_id = random.choice(selected_ids)
+                pb_id = random.choice(selected_ids)
+                pa = self._agent_genomes.get(pa_id, StrategyGenome.random())
+                pb = self._agent_genomes.get(pb_id, StrategyGenome.random())
+                child_genome = self._evolution_ops.mutation(self._evolution_ops.crossover(pa, pb))
+                parent = id_to_agent.get(pa_id) or (self.agents[0] if self.agents else None)
+                if parent is None:
+                    continue
+                parent_persona = getattr(parent, "persona", None)
+                try:
+                    new_persona = Persona(
+                        risk_tolerance=float(_clip(1.0 - child_genome.risk_aversion, 0.0, 1.0)),
+                        cognitive_bias=getattr(parent_persona, "cognitive_bias"),
+                        investment_horizon=getattr(parent_persona, "investment_horizon"),
+                        policy_sensitivity=float(_clip(getattr(parent_persona, "policy_sensitivity", 0.5), 0.0, 1.0)),
+                    )
+                except Exception:
+                    new_persona = parent_persona
+                child_agent = TradingAgent(agent_id=f"Genome_{uuid.uuid4().hex[:8]}", persona=new_persona)
+                child_agent.cash = max(0.0, per_capital)
+                setattr(child_agent, "strategy_genome", child_genome)
+                self._agent_genomes[str(child_agent.agent_id)] = child_genome
+                offspring.append(child_agent)
+
+        if offspring:
+            self.agents.extend(offspring)
+            for child in offspring:
+                self.social_graph.ensure_node(child.agent_id)
+                existing = [node_id for node_id in self.social_graph.nodes.keys() if node_id != child.agent_id]
+                if existing:
+                    peer = random.choice(existing)
+                    self.social_graph.add_edge(child.agent_id, peer, bidirectional=True)
+
+        # Selection pressure capital redistribution
+        top_agents = sorted(self.agents, key=lambda a: returns.get(str(a.agent_id), 0.0), reverse=True)
         if freed_capital > 0 and top_agents:
-            scores = [max(returns.get(a.agent_id, 0.0), -0.5) for a in top_agents]
+            scores = [max(returns.get(str(a.agent_id), 0.0), -0.5) for a in top_agents]
             exps = [math.exp(s) for s in scores]
             total = sum(exps) if exps else 1.0
             for agent, weight in zip(top_agents, exps):
-                grant = freed_capital * (weight / total)
-                agent.cash = float(getattr(agent, "cash", 0.0)) + grant
-
-        mutants: List[TradingAgent] = []
-        if to_remove and top_agents:
-            n_mutants = max(1, int(len(to_remove) * self.mutation_rate))
-            budget = freed_capital * 0.2 if freed_capital > 0 else 0.0
-            per_capital = budget / n_mutants if n_mutants > 0 else 0.0
-
-            for _ in range(n_mutants):
-                parent = random.choice(top_agents)
-                parent_persona = parent.persona
-                new_risk = float(
-                    np.clip(
-                        parent_persona.risk_tolerance + random.uniform(-self.mutation_scale, self.mutation_scale),
-                        0.0,
-                        1.0,
-                    )
-                )
-                new_persona = Persona(
-                    risk_tolerance=new_risk,
-                    cognitive_bias=parent_persona.cognitive_bias,
-                    investment_horizon=parent_persona.investment_horizon,
-                    policy_sensitivity=parent_persona.policy_sensitivity,
-                )
-                new_agent = TradingAgent(agent_id=f"Mutant_{uuid.uuid4().hex[:8]}", persona=new_persona)
-                new_agent.cash = max(0.0, per_capital)
-                mutants.append(new_agent)
-
-        if mutants:
-            self.agents.extend(mutants)
-            for mutant in mutants:
-                self.social_graph.ensure_node(mutant.agent_id)
-                existing = [node_id for node_id in self.social_graph.nodes.keys() if node_id != mutant.agent_id]
-                if existing:
-                    peer = random.choice(existing)
-                    self.social_graph.add_edge(mutant.agent_id, peer, bidirectional=True)
+                agent.cash = float(getattr(agent, "cash", 0.0)) + freed_capital * (weight / total)
 
         return {
             "status": "ok",
             "removed": [a.agent_id for a in to_remove],
-            "mutants": [a.agent_id for a in mutants],
-            "freed_capital": freed_capital,
+            "offspring": [a.agent_id for a in offspring],
+            "selection": selected_ids,
+            "mutation": mutated_ids,
+            "local_diffusion": list(diffused.keys()),
+            "freed_capital": float(freed_capital),
             "survivors": len(self.agents),
         }
+
+    def run_parameter_sensitivity_scan(
+        self,
+        *,
+        loss_aversion_grid: Sequence[float] = (1.8, 2.25, 3.0),
+        reference_adaptivity_grid: Sequence[float] = (0.3, 0.6, 0.9),
+        edge_weight_grid: Sequence[float] = (0.6, 1.0, 1.4),
+        output_csv: str | Path = Path("outputs") / "parameter_sensitivity.csv",
+    ) -> Path:
+        rows: List[Dict[str, float]] = []
+        base_price = max(1e-6, float(self.current_price))
+        for loss_aversion in loss_aversion_grid:
+            for adaptivity in reference_adaptivity_grid:
+                for edge_weight in edge_weight_grid:
+                    refs = initialize_reference_points(base_price)
+                    risk_hist: List[float] = []
+                    intent_hist: List[float] = []
+                    loss_hist: List[float] = []
+                    for step in range(1, 21):
+                        sentiment = _clip((math.sin(step / 3.0) * 0.6) * edge_weight, -1.0, 1.0)
+                        price = base_price * (1.0 + 0.001 * step * (1.0 - adaptivity))
+                        update = behavioral_update_step(
+                            sentiment=sentiment,
+                            current_price=price,
+                            reference_points=refs,
+                            base_risk_appetite=0.5,
+                            peer_anchor=price * (1.0 + 0.03 * edge_weight),
+                            policy_anchor=price * (1.0 + 0.02 * sentiment),
+                            policy_shock=sentiment * 0.5,
+                            loss_aversion=float(loss_aversion),
+                        )
+                        refs = update.reference_points
+                        risk_hist.append(float(update.risk_appetite))
+                        intent_hist.append(float(update.trading_intent))
+                        loss_hist.append(float(update.loss_aversion_intensity))
+                    rows.append(
+                        {
+                            "loss_aversion": float(loss_aversion),
+                            "reference_adaptivity": float(adaptivity),
+                            "edge_weight": float(edge_weight),
+                            "avg_risk_appetite": float(np.mean(risk_hist)),
+                            "avg_trading_intent": float(np.mean(intent_hist)),
+                            "avg_loss_aversion_intensity": float(np.mean(loss_hist)),
+                            "intent_volatility": float(np.std(intent_hist)),
+                        }
+                    )
+
+        output_path = Path(output_csv)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        import csv
+
+        with output_path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()) if rows else [])
+            if rows:
+                writer.writeheader()
+                writer.writerows(rows)
+
+        summary_path = output_path.with_name("parameter_sensitivity_summary.json")
+        summary_path.write_text(json.dumps({"rows": rows, "n": len(rows)}, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.last_step_report["parameter_sensitivity_path"] = str(output_path)
+        return output_path
 
 
 if __name__ == "__main__":

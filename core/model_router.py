@@ -1,405 +1,518 @@
 # file: core/model_router.py
-"""
-多模型路由器 - 统一管理 DeepSeek 和 混元 API 调用
+"""Unified model router with fallback, local cache, and deterministic stub."""
 
-设计原则：
-1. DeepSeek 为必选，混元为可选增强
-2. 支持自动降级和故障转移
-3. 实时监控响应时间，智能调度
-"""
+from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import re
 import time
-from typing import Dict, List, Tuple, Optional, Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from openai import OpenAI, AsyncOpenAI, APIConnectionError, APITimeoutError, RateLimitError
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+from openai import AsyncOpenAI, APIConnectionError, APITimeoutError, RateLimitError
 
 from config import GLOBAL_CONFIG
 
 
 class ModelType(Enum):
-    """模型类型枚举"""
-    REASONER = "reasoner"  # 推理模型（CoT）
-    CHAT = "chat"  # 对话模型
-    FLASH = "flash"  # 快速模型
+    """Model class used for routing heuristics."""
+
+    REASONER = "reasoner"
+    CHAT = "chat"
+    FLASH = "flash"
 
 
 @dataclass
 class ModelInfo:
-    """模型信息"""
     name: str
-    provider: str  # "deepseek" | "zhipu"
+    provider: str
     model_type: ModelType
     base_url: str
     timeout: float
-    
-    
+
+
 @dataclass
 class ModelStats:
-    """模型统计信息"""
     call_count: int = 0
     total_time: float = 0.0
     error_count: int = 0
     last_error: Optional[str] = None
-    
+
     @property
     def avg_time(self) -> float:
-        if self.call_count == 0:
-            return 0.0
-        return self.total_time / self.call_count
-    
+        return 0.0 if self.call_count == 0 else self.total_time / self.call_count
+
     @property
     def success_rate(self) -> float:
-        if self.call_count == 0:
-            return 1.0
-        return 1.0 - (self.error_count / self.call_count)
+        return 1.0 if self.call_count == 0 else 1.0 - (self.error_count / self.call_count)
 
 
 class ModelRouter:
-    """
-    多模型路由器
-    
-    职责：
-    1. 管理多个API客户端
-    2. 根据优先级和可用性选择模型
-    3. 自动降级和故障转移
-    4. 统计响应时间用于智能调度
-    """
-    
-    # 模型注册表
+    """Multi-provider router for all LLM calls in Civitas."""
+
     MODEL_REGISTRY: Dict[str, ModelInfo] = {
         "deepseek-reasoner": ModelInfo(
             name="deepseek-reasoner",
             provider="deepseek",
             model_type=ModelType.REASONER,
             base_url=GLOBAL_CONFIG.API_BASE_URL,
-            timeout=GLOBAL_CONFIG.API_TIMEOUT_REASONER
+            timeout=GLOBAL_CONFIG.API_TIMEOUT_REASONER,
         ),
         "deepseek-chat": ModelInfo(
             name="deepseek-chat",
             provider="deepseek",
             model_type=ModelType.CHAT,
             base_url=GLOBAL_CONFIG.API_BASE_URL,
-            timeout=GLOBAL_CONFIG.API_TIMEOUT_CHAT
+            timeout=GLOBAL_CONFIG.API_TIMEOUT_CHAT,
         ),
-        # 智谱GLM模型 (快速模式专用)
         "glm-4-flashx": ModelInfo(
             name="glm-4-flashx",
             provider="zhipu",
             model_type=ModelType.FLASH,
             base_url=GLOBAL_CONFIG.ZHIPU_API_BASE_URL,
-            timeout=GLOBAL_CONFIG.API_TIMEOUT_FLASH
+            timeout=GLOBAL_CONFIG.API_TIMEOUT_FLASH,
         ),
         "glm-4-flashx-250414": ModelInfo(
             name="glm-4-flashx-250414",
             provider="zhipu",
             model_type=ModelType.FLASH,
             base_url=GLOBAL_CONFIG.ZHIPU_API_BASE_URL,
-            timeout=GLOBAL_CONFIG.API_TIMEOUT_FLASH
+            timeout=GLOBAL_CONFIG.API_TIMEOUT_FLASH,
         ),
     }
-    
-    def __init__(self, deepseek_key: str, zhipu_key: Optional[str] = None):
-        """
-        初始化路由器
-        
-        Args:
-            deepseek_key: DeepSeek API密钥
-            zhipu_key: 智谱API密钥（用于自动降级）
-        """
+
+    def __init__(
+        self,
+        deepseek_key: str,
+        zhipu_key: Optional[str] = None,
+        local_cache_path: Optional[str] = None,
+    ):
         self.deepseek_key = deepseek_key
         self.zhipu_key = zhipu_key
-        
-        # 初始化客户端
+
         self.clients: Dict[str, AsyncOpenAI] = {}
         self._init_clients()
-        
-        # 统计信息
-        self.stats: Dict[str, ModelStats] = {
-            model: ModelStats() for model in self.MODEL_REGISTRY
-        }
-        
-        # 可用模型列表（基于API密钥）
+
+        self.stats: Dict[str, ModelStats] = {model: ModelStats() for model in self.MODEL_REGISTRY}
         self.available_models = self._get_available_models()
-        
-        # 降级事件记录（用于前端弹窗提示）
-        self.fallback_events: List[Dict] = []
-        
-        # 标记是否有DeepSeek可用
+
+        self.fallback_events: List[Dict[str, Any]] = []
         self.has_deepseek = bool(deepseek_key)
         self.has_zhipu = bool(zhipu_key)
-        
+
+        default_cache_path = Path("data") / "cache" / "model_router_cache.json"
+        self.local_cache_path = Path(local_cache_path) if local_cache_path else default_cache_path
+        self.local_cache: Dict[str, Dict[str, Any]] = {}
+        self._load_local_cache()
+
     def _init_clients(self):
-        """初始化API客户端"""
-        # DeepSeek 客户端（必需）
         if self.deepseek_key:
             self.clients["deepseek"] = AsyncOpenAI(
                 api_key=self.deepseek_key,
                 base_url=GLOBAL_CONFIG.API_BASE_URL,
-                timeout=GLOBAL_CONFIG.API_TIMEOUT_REASONER
+                timeout=GLOBAL_CONFIG.API_TIMEOUT_REASONER,
             )
-        
-        # 智谱客户端（可选，快速模式专用）
         if self.zhipu_key:
             self.clients["zhipu"] = AsyncOpenAI(
                 api_key=self.zhipu_key,
                 base_url=GLOBAL_CONFIG.ZHIPU_API_BASE_URL,
-                timeout=GLOBAL_CONFIG.API_TIMEOUT_FLASH
+                timeout=GLOBAL_CONFIG.API_TIMEOUT_FLASH,
             )
-    
+
     def _get_available_models(self) -> List[str]:
-        """获取可用模型列表"""
-        available = []
-        
-        # DeepSeek 模型（必需）
+        available: List[str] = []
         if self.deepseek_key:
             available.extend(["deepseek-reasoner", "deepseek-chat"])
-        
-        # 智谱GLM模型（可选，快速模式专用）
         if self.zhipu_key:
             available.extend(["glm-4-flashx", "glm-4-flashx-250414"])
-        
         return available
-    
+
+    def _build_cache_key(self, messages: List[Dict], priority_models: List[str]) -> str:
+        payload = {"messages": messages, "priority_models": priority_models}
+        encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    def _load_local_cache(self):
+        try:
+            if not self.local_cache_path.exists():
+                return
+            raw = json.loads(self.local_cache_path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                self.local_cache = raw
+        except Exception:
+            self.local_cache = {}
+
+    def _persist_local_cache(self):
+        try:
+            self.local_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            self.local_cache_path.write_text(
+                json.dumps(self.local_cache, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def _read_local_cache(self, cache_key: Optional[str]) -> Optional[Tuple[str, Optional[str], str]]:
+        if not cache_key:
+            return None
+        item = self.local_cache.get(cache_key)
+        if not item:
+            return None
+        return (
+            str(item.get("content", "")),
+            item.get("reasoning"),
+            str(item.get("model_used", "local_cache")),
+        )
+
+    def _write_local_cache(
+        self,
+        cache_key: Optional[str],
+        content: str,
+        reasoning: Optional[str],
+        model_used: str,
+    ):
+        if not cache_key:
+            return
+        self.local_cache[cache_key] = {
+            "content": content,
+            "reasoning": reasoning,
+            "model_used": model_used,
+            "timestamp": time.time(),
+        }
+        self._persist_local_cache()
+
+    def register_local_response(
+        self,
+        cache_key: str,
+        content: str,
+        reasoning: Optional[str] = None,
+        model_used: str = "local_cache",
+    ):
+        self._write_local_cache(cache_key, content, reasoning, model_used)
+
+    def _build_deterministic_stub(self, messages: List[Dict], error: Optional[str]) -> str:
+        seed_text = json.dumps(messages, ensure_ascii=False, sort_keys=True, default=str)
+        digest = hashlib.sha256(seed_text.encode("utf-8")).hexdigest()
+        score = int(digest[:2], 16) / 255.0
+        if score > 0.66:
+            action, qty = "BUY", 120
+        elif score < 0.33:
+            action, qty = "SELL", 80
+        else:
+            action, qty = "HOLD", 0
+        payload = {
+            "action": action,
+            "qty": qty,
+            "confidence": round(abs(score - 0.5) * 2, 3),
+            "error": error or "MODEL_UNAVAILABLE",
+            "mode": "deterministic_stub",
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
     def get_model_priority(self, mode: str) -> List[str]:
-        """
-        获取模型优先级列表：始终优先 deepseek-chat，降级至 glm-4-flashx
-        """
         base_priority = ["deepseek-chat", "glm-4-flashx"]
-        
         if mode == "FAST":
             base_priority = ["glm-4-flashx", "deepseek-chat"]
-            
         return [m for m in base_priority if m in self.available_models]
-    
+
     async def call_with_fallback(
         self,
         messages: List[Dict],
         priority_models: List[str],
         timeout_budget: float = 15.0,
-        fallback_response: Optional[str] = None
+        fallback_response: Optional[str] = None,
+        cache_key: Optional[str] = None,
     ) -> Tuple[str, Optional[str], str]:
-        """
-        带降级的模型调用
-        
-        Args:
-            messages: 对话消息列表
-            priority_models: 按优先级排序的模型列表
-            timeout_budget: 总超时预算（秒）
-            
-        Returns:
-            (content, reasoning_content, model_used)
-        """
+        if not priority_models:
+            priority_models = self.get_model_priority("SMART") or ["deepseek-chat", "glm-4-flashx"]
+
+        resolved_cache_key = cache_key or self._build_cache_key(messages, priority_models)
+        cached = self._read_local_cache(resolved_cache_key)
+        if cached:
+            self.fallback_events.append(
+                {"type": "cache_hit", "timestamp": time.time(), "message": "local cache hit"}
+            )
+            return cached
+
         start_time = time.time()
         last_error = None
-        
+
         for model_name in priority_models:
-            # 检查剩余时间
             elapsed = time.time() - start_time
             remaining = timeout_budget - elapsed
-            
             if remaining <= 1.0:
-                # 时间不足，使用最后一个模型的降级响应
                 break
-            
+
             model_info = self.MODEL_REGISTRY.get(model_name)
             if not model_info:
                 continue
-            
             client = self.clients.get(model_info.provider)
             if not client:
                 continue
-            
-            # 计算此次调用的超时
-            # 为避免首个选中的模型(如DeepSeek)因堵塞耗尽所有 budget，需基于 model_info.timeout 设定合理上限
-            if model_name == priority_models[-1]:
-                call_timeout = remaining  # 最后一个降级模型可用尽剩余预算
-            else:
-                call_timeout = min(model_info.timeout * 2.5, remaining)
-            
+
+            call_timeout = remaining if model_name == priority_models[-1] else min(model_info.timeout * 2.5, remaining)
+
             try:
-                result = await self._call_model(
-                    client, model_name, messages, call_timeout
-                )
-                
-                # 更新统计
-                call_time = time.time() - start_time
-                self._update_stats(model_name, call_time, success=True)
-                
-                return result + (model_name,)
-                
+                content, reasoning = await self._call_model(client, model_name, messages, call_timeout)
+                self._update_stats(model_name, time.time() - start_time, success=True)
+                self._write_local_cache(resolved_cache_key, content, reasoning, model_name)
+                return content, reasoning, model_name
             except asyncio.TimeoutError:
-                last_error = f"{model_name}: 超时"
+                last_error = f"{model_name}: timeout"
                 self._update_stats(model_name, 0, success=False, error="timeout")
-                
-                # 记录降级事件（用于前端提示）
-                if "deepseek" in model_name and len(priority_models) > 1:
-                    next_model = priority_models[priority_models.index(model_name) + 1] if priority_models.index(model_name) + 1 < len(priority_models) else "fallback"
-                    self.fallback_events.append({
-                        "type": "timeout_fallback",
-                        "from_model": model_name,
-                        "to_model": next_model,
-                        "timestamp": time.time(),
-                        "message": f"DeepSeek推理超时，已自动降级到{next_model}"
-                    })
                 continue
-                
             except (APIConnectionError, APITimeoutError, RateLimitError) as e:
                 last_error = f"{model_name}: {type(e).__name__}"
                 self._update_stats(model_name, 0, success=False, error=str(e))
-                
-                # 记录降级事件
-                if "deepseek" in model_name:
-                    self.fallback_events.append({
-                        "type": "api_error_fallback",
-                        "from_model": model_name,
-                        "error": type(e).__name__,
-                        "timestamp": time.time(),
-                        "message": f"DeepSeek API错误({type(e).__name__})，已自动降级"
-                    })
                 continue
-                
             except Exception as e:
                 last_error = f"{model_name}: {str(e)}"
                 self._update_stats(model_name, 0, success=False, error=str(e))
                 continue
-        
-        # 全部失败，返回降级响应
-        return self._fallback_response(last_error, fallback_content=fallback_response)
-    
+
+        return self._fallback_response(
+            error=last_error,
+            fallback_content=fallback_response,
+            messages=messages,
+            cache_key=resolved_cache_key,
+        )
+
     def sync_call_with_fallback(
         self,
         messages: List[Dict],
         priority_models: List[str] = None,
         timeout_budget: float = 30.0,
-        fallback_response: Optional[str] = None
+        fallback_response: Optional[str] = None,
+        cache_key: Optional[str] = None,
     ) -> Tuple[str, Optional[str], str]:
-        """
-        供同步代码调用的代理方法
-        """
-        import asyncio
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # 如果在现有的事件循环内(即环境本身已异步)，使用 create_task 
-                # 但这通常需要 await，所以我们应当使用嵌套 asyncio
                 import nest_asyncio
+
                 nest_asyncio.apply()
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
+
         if not priority_models:
             priority_models = ["deepseek-chat", "glm-4-flashx"]
-            
+
         return loop.run_until_complete(
-            self.call_with_fallback(messages, priority_models, timeout_budget, fallback_response)
+            self.call_with_fallback(
+                messages,
+                priority_models,
+                timeout_budget,
+                fallback_response,
+                cache_key,
+            )
         )
-    
+
+    def _extract_json_object(self, raw: str) -> Optional[Dict[str, Any]]:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+        match = re.search(r"\{[\s\S]*\}", raw or "")
+        if not match:
+            return None
+        try:
+            parsed = json.loads(match.group(0))
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            return None
+
+    def _build_schema_fallback(self, json_schema: Dict[str, Any], fallback_obj: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        if isinstance(fallback_obj, dict):
+            return dict(fallback_obj)
+        properties = json_schema.get("properties", {}) if isinstance(json_schema, dict) else {}
+        output: Dict[str, Any] = {}
+        for key, spec in properties.items():
+            if not isinstance(spec, dict):
+                output[key] = None
+                continue
+            if "default" in spec:
+                output[key] = spec["default"]
+                continue
+            typ = spec.get("type")
+            if typ == "string":
+                output[key] = ""
+            elif typ == "number":
+                output[key] = 0.0
+            elif typ == "integer":
+                output[key] = 0
+            elif typ == "boolean":
+                output[key] = False
+            elif typ == "array":
+                output[key] = []
+            elif typ == "object":
+                output[key] = {}
+            else:
+                output[key] = None
+        return output
+
+    async def call_with_schema(
+        self,
+        *,
+        messages: List[Dict[str, Any]],
+        json_schema: Dict[str, Any],
+        priority_models: Optional[List[str]] = None,
+        timeout_budget: float = 15.0,
+        fallback_obj: Optional[Dict[str, Any]] = None,
+        cache_key: Optional[str] = None,
+    ) -> Tuple[Dict[str, Any], str, str]:
+        """
+        Call LLM with fallback and coerce output into a JSON object schema.
+
+        Returns (parsed_object, model_used, raw_content).
+        """
+        selected_models = priority_models or self.get_model_priority("SMART")
+        schema_hint = {
+            "type": "json_schema",
+            "json_schema": json_schema,
+        }
+        schema_messages = list(messages) + [
+            {
+                "role": "system",
+                "content": f"Return strictly valid JSON matching this schema hint: {json.dumps(schema_hint, ensure_ascii=False)}",
+            }
+        ]
+        raw_content, _, model_used = await self.call_with_fallback(
+            messages=schema_messages,
+            priority_models=selected_models,
+            timeout_budget=timeout_budget,
+            cache_key=cache_key,
+        )
+        parsed = self._extract_json_object(raw_content)
+        if parsed is None:
+            parsed = self._build_schema_fallback(json_schema, fallback_obj=fallback_obj)
+            model_used = f"{model_used}+schema_fallback"
+        return parsed, model_used, raw_content
+
+    def sync_call_with_schema(
+        self,
+        *,
+        messages: List[Dict[str, Any]],
+        json_schema: Dict[str, Any],
+        priority_models: Optional[List[str]] = None,
+        timeout_budget: float = 15.0,
+        fallback_obj: Optional[Dict[str, Any]] = None,
+        cache_key: Optional[str] = None,
+    ) -> Tuple[Dict[str, Any], str, str]:
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import nest_asyncio
+
+                nest_asyncio.apply()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        return loop.run_until_complete(
+            self.call_with_schema(
+                messages=messages,
+                json_schema=json_schema,
+                priority_models=priority_models,
+                timeout_budget=timeout_budget,
+                fallback_obj=fallback_obj,
+                cache_key=cache_key,
+            )
+        )
+
     async def _call_model(
         self,
         client: AsyncOpenAI,
         model_name: str,
         messages: List[Dict],
-        timeout: float
+        timeout: float,
     ) -> Tuple[str, Optional[str]]:
-        """
-        调用单个模型
-        
-        Returns:
-            (content, reasoning_content)
-        """
         response = await asyncio.wait_for(
             client.chat.completions.create(
                 model=model_name,
                 messages=messages,
-                temperature=0.6
+                temperature=0.6,
             ),
-            timeout=timeout
+            timeout=timeout,
         )
-        
         message = response.choices[0].message
         content = message.content or ""
-        
-        # 提取推理内容（如果有）
-        reasoning = getattr(message, 'reasoning_content', None)
-        
+        reasoning = getattr(message, "reasoning_content", None)
         return content, reasoning
-    
-    def _update_stats(
-        self, 
-        model_name: str, 
-        call_time: float, 
-        success: bool,
-        error: Optional[str] = None
-    ):
-        """更新模型统计信息"""
+
+    def _update_stats(self, model_name: str, call_time: float, success: bool, error: Optional[str] = None):
         stats = self.stats.get(model_name)
-        if stats:
-            stats.call_count += 1
-            if success:
-                stats.total_time += call_time
-            else:
-                stats.error_count += 1
-                stats.last_error = error
-    
+        if not stats:
+            return
+        stats.call_count += 1
+        if success:
+            stats.total_time += call_time
+        else:
+            stats.error_count += 1
+            stats.last_error = error
+
     def _fallback_response(
-        self, 
+        self,
         error: Optional[str] = None,
-        fallback_content: Optional[str] = None
+        fallback_content: Optional[str] = None,
+        messages: Optional[List[Dict]] = None,
+        cache_key: Optional[str] = None,
     ) -> Tuple[str, Optional[str], str]:
-        """降级响应"""
-        content = fallback_content if fallback_content else '{"action": "HOLD", "qty": 0, "error": "MODEL_UNAVAILABLE"}'
+        self.fallback_events.append(
+            {
+                "type": "fallback",
+                "timestamp": time.time(),
+                "message": f"model fallback engaged: {error or 'all models unavailable'}",
+            }
+        )
+        if fallback_content is not None:
+            content = fallback_content
+            model_used = "fallback"
+        else:
+            content = self._build_deterministic_stub(messages or [], error)
+            model_used = "deterministic_stub"
+        self._write_local_cache(cache_key, content, f"fallback: {error}" if error else "fallback", model_used)
         return (
             content,
-            f"所有模型调用失败: {error}" if error else "所有模型不可用",
-            "fallback"
+            f"all model calls failed: {error}" if error else "all models unavailable",
+            model_used,
         )
-    
+
     def get_stats_summary(self) -> Dict[str, Any]:
-        """获取统计摘要"""
         return {
             model: {
                 "calls": stats.call_count,
                 "avg_time": f"{stats.avg_time:.2f}s",
                 "success_rate": f"{stats.success_rate:.1%}",
-                "last_error": stats.last_error
+                "last_error": stats.last_error,
             }
             for model, stats in self.stats.items()
             if stats.call_count > 0
         }
-    
+
     def get_recommended_model(self, time_budget: float) -> str:
-        """
-        根据时间预算推荐模型
-        
-        基于历史响应时间，选择最可能在预算内完成的模型。
-        """
-        candidates = []
-        
+        candidates: List[Tuple[str, float]] = []
         for model_name in self.available_models:
             stats = self.stats.get(model_name)
             if stats and stats.call_count > 0:
-                # 使用历史平均时间 + 20% 余量
                 estimated_time = stats.avg_time * 1.2
-                if estimated_time <= time_budget:
-                    candidates.append((model_name, estimated_time))
             else:
-                # 新模型，使用默认估计
-                model_info = self.MODEL_REGISTRY.get(model_name)
-                if model_info:
-                    if model_info.model_type == ModelType.REASONER:
-                        estimated_time = 15.0  # 推理模型默认估计
-                    else:
-                        estimated_time = 3.0  # 对话模型默认估计
-                    if estimated_time <= time_budget:
-                        candidates.append((model_name, estimated_time))
-        
+                info = self.MODEL_REGISTRY.get(model_name)
+                if not info:
+                    continue
+                estimated_time = 15.0 if info.model_type == ModelType.REASONER else 3.0
+            if estimated_time <= time_budget:
+                candidates.append((model_name, estimated_time))
+
         if not candidates:
-            # 没有合适的，返回最快的
-            return "deepseek-chat" if "deepseek-chat" in self.available_models else self.available_models[0]
-        
-        # 按预估时间排序，返回最快的
+            return "deepseek-chat" if "deepseek-chat" in self.available_models else (self.available_models[0] if self.available_models else "fallback")
+
         candidates.sort(key=lambda x: x[1])
         return candidates[0][0]

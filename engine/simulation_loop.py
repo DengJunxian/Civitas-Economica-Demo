@@ -1,11 +1,4 @@
-"""
-Civitas-Economica 核心仿真循环 (Simulation Loop)
-
-重构目标：
-1. 将慢速 LLM 决策与快速撮合引擎解耦。
-2. 通过 SimulationRunner 将撮合放到独立进程，避免主线程阻塞。
-3. 保留旧的价格冲击模型作为降级路径，保证可用性。
-"""
+"""Core simulation loop with macro-social-micro coupling."""
 
 from __future__ import annotations
 
@@ -14,31 +7,60 @@ import logging
 import math
 import random
 import uuid
-from typing import Any, Dict, List, Optional
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
-from agents.trading_agent_core import GLOBAL_CONFIG, TradingAgent, Persona
+from agents.trading_agent_core import GLOBAL_CONFIG, Persona, TradingAgent
+from core.macro.bank import BankAgent
+from core.macro.firm import FirmAgent, FirmSignal
+from core.macro.government import GovernmentAgent, PolicyShock
+from core.macro.household import HouseholdAgent, HouseholdSignal
+from core.macro.state import MacroContextDTO, MacroState
+from core.social.contagion import ContagionSnapshot, SocialContagionEngine
+from core.social.graph_state import SocialGraphState
+from core.world.event_bus import EventBus
 from engine.market_match import calculate_new_price
 from policy.policy_engine import PolicyEngine
 from simulation_runner import BufferedIntent, SimulationRunner
 
+
 logger = logging.getLogger("civitas.engine.simulation")
 logger.setLevel(logging.INFO)
-_handler = logging.StreamHandler()
-_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
 if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
     logger.addHandler(_handler)
+
+
+def _clip(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, float(value)))
 
 
 class MarketEnvironment:
     """
-    宏观仿真控制器。
+    Macro-social-micro market environment.
 
-    关键改动：
-    - LLM 只生成交易意图，不直接执行撮合。
-    - 意图先进入 IPC 缓冲，再由独立 OASIS Runner 按离散时间执行。
+    Stage order per simulation step:
+    1) policy
+    2) macro update
+    3) social contagion
+    4) agent cognition
+    5) trading intent
+    6) IPC matching
+    7) metrics update
     """
+
+    STAGE_ORDER = [
+        "policy",
+        "macro update",
+        "social contagion",
+        "agent cognition",
+        "trading intent",
+        "IPC matching",
+        "metrics update",
+    ]
 
     def __init__(
         self,
@@ -53,6 +75,14 @@ class MarketEnvironment:
         low_return_threshold: float = -0.2,
         mutation_rate: float = 0.2,
         mutation_scale: float = 0.15,
+        macro_state: Optional[MacroState] = None,
+        event_bus: Optional[EventBus] = None,
+        households: Optional[Sequence[HouseholdAgent]] = None,
+        firms: Optional[Sequence[FirmAgent]] = None,
+        social_graph: Optional[SocialGraphState] = None,
+        government: Optional[GovernmentAgent] = None,
+        bank: Optional[BankAgent] = None,
+        contagion_engine: Optional[SocialContagionEngine] = None,
     ):
         self.agents = agents
         self.simulation_time = 0
@@ -62,6 +92,7 @@ class MarketEnvironment:
         self.use_isolated_matching = use_isolated_matching
         self.runner_symbol = runner_symbol
         self.last_step_report: Dict[str, Any] = {}
+        self.last_stage_order: List[str] = []
         self.steps_per_day = max(1, int(steps_per_day))
         self.evolution_interval_days = max(1, int(evolution_interval_days))
         self.bankruptcy_threshold = float(bankruptcy_threshold)
@@ -72,6 +103,17 @@ class MarketEnvironment:
         self._initial_cash: Dict[str, float] = {}
         self._wealth_history: Dict[str, List[float]] = {}
         self._policy_shocks: List[str] = []
+        self.policy_transmission_history: List[Dict[str, Any]] = []
+        self._last_social_mean: float = 0.0
+
+        self.macro_state = macro_state or MacroState()
+        self.event_bus = event_bus or EventBus()
+        self.government = government or GovernmentAgent()
+        self.bank = bank or BankAgent()
+        self.contagion_engine = contagion_engine or SocialContagionEngine()
+        self.households = list(households) if households is not None else self._build_default_households(24)
+        self.firms = list(firms) if firms is not None else self._build_default_firms()
+        self.social_graph = social_graph or self._build_default_social_graph()
 
         self._owns_runner = simulation_runner is None
         self.simulation_runner = simulation_runner or SimulationRunner(
@@ -88,8 +130,50 @@ class MarketEnvironment:
             self.use_isolated_matching,
         )
 
+    def _build_default_households(self, n: int) -> List[HouseholdAgent]:
+        households: List[HouseholdAgent] = []
+        for idx in range(max(1, n)):
+            households.append(
+                HouseholdAgent(
+                    household_id=f"hh_{idx:03d}",
+                    income=10_000.0 + (idx % 5) * 1_300.0,
+                    propensity_to_consume=0.56 + (idx % 7) * 0.03,
+                    savings=20_000.0 + (idx % 6) * 4_000.0,
+                    risk_preference=0.35 + (idx % 8) * 0.06,
+                    news_exposure=0.30 + (idx % 4) * 0.15,
+                    social_exposure=0.35 + (idx % 3) * 0.20,
+                )
+            )
+        return households
+
+    def _build_default_firms(self) -> List[FirmAgent]:
+        sectors = ("金融", "科技", "消费", "制造", "能源")
+        firms: List[FirmAgent] = []
+        for idx, sector in enumerate(sectors):
+            firms.append(
+                FirmAgent(
+                    firm_id=f"firm_{idx:02d}",
+                    sector=sector,
+                    earnings_expectation=0.05 if sector in {"科技", "消费"} else 0.01,
+                    hiring_plan=0.0,
+                    inventory=100.0 + idx * 25.0,
+                    financing_cost=0.03 + idx * 0.003,
+                    sector_outlook=0.0,
+                )
+            )
+        return firms
+
+    def _build_default_social_graph(self) -> SocialGraphState:
+        node_ids = [getattr(agent, "agent_id", f"agent_{idx}") for idx, agent in enumerate(self.agents)]
+        if not node_ids:
+            node_ids = [household.household_id for household in self.households[:12]]
+        graph = SocialGraphState.ring(node_ids)
+        for node in graph.nodes.values():
+            node.sentiment = random.uniform(-0.05, 0.05)
+        return graph
+
     def close(self) -> None:
-        """显式释放子进程资源。"""
+        """Release subprocess resources if this environment owns the runner."""
         if not self.use_isolated_matching:
             return
         if self._owns_runner:
@@ -105,10 +189,7 @@ class MarketEnvironment:
             pass
 
     def schedule_policy_shock(self, policy_text: str) -> None:
-        """
-        提供给外部系统的“宏观扰动注入”接口。
-        对应 FinEvo 的 Perturbation：定期向系统注入黑天鹅冲击。
-        """
+        """Inject an external policy text that will be compiled next step."""
         if policy_text:
             self._policy_shocks.append(str(policy_text))
 
@@ -118,42 +199,41 @@ class MarketEnvironment:
         return self._policy_shocks.pop(0)
 
     async def simulation_step(self) -> Dict[str, Any]:
-        """
-        执行单个仿真步。
-
-        返回结构化报告，便于 UI/调度器直接消费。
-        """
+        """Execute one full simulation step with macro-social-micro coupling."""
         self.simulation_time += 1
+        self.last_stage_order = []
         logger.info("--- Start simulation tick %s ---", self.simulation_time)
 
-        new_policy = self._consume_policy_shock() or self.policy_engine.emit_policy(self.simulation_time)
-        if new_policy:
-            logger.warning("[Policy Broadcast] %s", new_policy)
-            for agent in self.agents:
-                # 兼容部分轻量测试替身 Agent，不强制要求实现完整 memory_bank
-                if not hasattr(agent, "memory_bank"):
-                    continue
-                try:
-                    memory_strength = agent.memory_bank.calculate_memory_strength(new_policy, agent.persona)
-                    agent.memory_bank.add_memory(
-                        timestamp=self.simulation_time,
-                        content=new_policy,
-                        content_embedding=None,
-                        memory_strength=memory_strength,
-                    )
-                except Exception as exc:
-                    logger.debug("memory update skipped for agent=%s, reason=%s", getattr(agent, "agent_id", "?"), exc)
+        # 1) policy
+        self.last_stage_order.append("policy")
+        policy_text = self._consume_policy_shock() or self.policy_engine.emit_policy(self.simulation_time)
+        policy_shock = self._compile_policy(policy_text)
 
+        # 2) macro update
+        self.last_stage_order.append("macro update")
+        household_signals, firm_signals, bank_signal = self._update_macro(policy_shock, policy_text)
+
+        # 3) social contagion
+        self.last_stage_order.append("social contagion")
+        contagion = self._run_social_contagion(policy_shock)
+
+        # 4) agent cognition
+        self.last_stage_order.append("agent cognition")
+        macro_context = self._build_macro_context(policy_text, household_signals, firm_signals, contagion)
         market_data = {
             "tick": self.simulation_time,
             "current_price": self.current_price,
-            "latest_broadcast": new_policy if new_policy else "market_stable",
+            "latest_broadcast": policy_text if policy_text else "market_stable",
             "price_history": list(self.price_history),
             "symbol": self.runner_symbol,
+            "macro_context": macro_context.to_payload(),
         }
 
         async def process_agent(agent: TradingAgent):
-            query_text = f"在价格 {self.current_price:.2f} 下的应对策略及近期冲击回顾"
+            query_text = (
+                f"price={self.current_price:.2f}; tick={self.simulation_time}; "
+                f"{macro_context.to_prompt_context()}"
+            )
             retrieved_context = ""
             if hasattr(agent, "memory_bank"):
                 try:
@@ -170,6 +250,8 @@ class MarketEnvironment:
         logger.info("Collecting agent decisions: %s agents", len(self.agents))
         agent_actions = await asyncio.gather(*(process_agent(agent) for agent in self.agents))
 
+        # 5) trading intent
+        self.last_stage_order.append("trading intent")
         buy_volume = 0.0
         sell_volume = 0.0
         for action in agent_actions:
@@ -180,6 +262,8 @@ class MarketEnvironment:
             elif action_type == "SELL":
                 sell_volume += amount
 
+        # 6) IPC matching
+        self.last_stage_order.append("IPC matching")
         old_price = self.current_price
         trade_count = 0
         buffered_intents = 0
@@ -196,8 +280,6 @@ class MarketEnvironment:
 
                     target_price = getattr(action, "target_price", None)
                     intent_price = float(target_price) if target_price else float(self.current_price)
-
-                    # 交易意图异步入缓冲；撮合只在独立进程中发生
                     intent = BufferedIntent(
                         intent_id=str(uuid.uuid4()),
                         agent_id=getattr(self.agents[idx], "agent_id", f"agent_{idx}"),
@@ -222,13 +304,29 @@ class MarketEnvironment:
         else:
             self.current_price = calculate_new_price(buy_volume, sell_volume, self.current_price)
 
+        # 7) metrics update
+        self.last_stage_order.append("metrics update")
         self.price_history.append(self.current_price)
         if len(self.price_history) > 500:
             self.price_history = self.price_history[-500:]
 
         price_change = ((self.current_price - old_price) / old_price) * 100 if old_price > 0 else 0.0
+        policy_chain = self._build_policy_transmission_chain(
+            policy_text=policy_text,
+            household_signals=household_signals,
+            firm_signals=firm_signals,
+            contagion=contagion,
+            buy_volume=buy_volume,
+            sell_volume=sell_volume,
+            trade_count=trade_count,
+            matching_mode=matching_mode,
+        )
+        self.policy_transmission_history.append(policy_chain)
+        if len(self.policy_transmission_history) > 200:
+            self.policy_transmission_history = self.policy_transmission_history[-200:]
+
         logger.info(
-            "[Macro State] Tick %s settled | BuyVol=%.2f | SellVol=%.2f | NewPrice=%.2f (%+.2f%%)",
+            "[Tick %s] BuyVol=%.2f | SellVol=%.2f | NewPrice=%.2f (%+.2f%%)",
             self.simulation_time,
             buy_volume,
             sell_volume,
@@ -246,8 +344,12 @@ class MarketEnvironment:
             "matching_mode": matching_mode,
             "trade_count": trade_count,
             "buffered_intents": buffered_intents,
+            "stage_order": list(self.last_stage_order),
+            "macro_state": self.macro_state.to_dict(),
+            "social_mean_sentiment": contagion.mean_sentiment,
+            "policy_transmission_chain": policy_chain,
+            "macro_context": macro_context.to_payload(),
         }
-
         self._update_wealth_history()
 
         if self.simulation_time % self.steps_per_day == 0:
@@ -256,10 +358,229 @@ class MarketEnvironment:
                 evo_report = self._evolution_step()
                 self.last_step_report["evolution"] = evo_report
 
+        self.event_bus.publish(
+            event_type="metrics",
+            stage="metrics_update",
+            tick=self.simulation_time,
+            payload=self.last_step_report,
+        )
         return dict(self.last_step_report)
 
+    def _compile_policy(self, policy_text: Optional[str]) -> Optional[PolicyShock]:
+        if not policy_text:
+            return None
+        shock = self.government.compile_policy_text(policy_text, tick=self.simulation_time)
+        self.event_bus.publish(
+            event_type="policy_compiled",
+            stage="policy",
+            tick=self.simulation_time,
+            payload=shock.to_dict(),
+        )
+        # Optional memory broadcast for agents with memory banks.
+        for agent in self.agents:
+            if not hasattr(agent, "memory_bank"):
+                continue
+            try:
+                memory_strength = agent.memory_bank.calculate_memory_strength(policy_text, agent.persona)
+                agent.memory_bank.add_memory(
+                    timestamp=self.simulation_time,
+                    content=policy_text,
+                    content_embedding=None,
+                    memory_strength=memory_strength,
+                )
+            except Exception:
+                continue
+        return shock
+
+    def _update_macro(
+        self, policy_shock: Optional[PolicyShock], policy_text: Optional[str]
+    ) -> tuple[List[HouseholdSignal], List[FirmSignal], Dict[str, float]]:
+        if policy_shock is not None:
+            self.government.apply_policy_shock(self.macro_state, policy_shock)
+
+        liquidity_shock = policy_shock.liquidity_injection if policy_shock else 0.0
+        sentiment_shock = (
+            (policy_shock.sentiment_delta + policy_shock.rumor_shock) if policy_shock else 0.0
+        )
+        bank_signal = self.bank.step(
+            self.macro_state,
+            liquidity_shock=liquidity_shock,
+            sentiment_shock=sentiment_shock,
+        ).to_dict()
+
+        household_signals = [
+            household.step(self.macro_state, self._last_social_mean, policy_text or "")
+            for household in self.households
+        ]
+        mean_consumption = (
+            sum(item.consumption for item in household_signals) / len(household_signals)
+            if household_signals
+            else 0.0
+        )
+        mean_risk_pref = (
+            sum(item.risk_preference for item in household_signals) / len(household_signals)
+            if household_signals
+            else 0.5
+        )
+
+        firm_signals = [
+            firm.step(self.macro_state, self._last_social_mean, mean_consumption)
+            for firm in self.firms
+        ]
+        mean_hiring = (
+            sum(item.hiring_plan for item in firm_signals) / len(firm_signals)
+            if firm_signals
+            else 0.0
+        )
+        mean_sector = (
+            sum(item.sector_outlook for item in firm_signals) / len(firm_signals)
+            if firm_signals
+            else 0.0
+        )
+
+        self.macro_state.apply_delta(
+            unemployment=-0.0030 * mean_hiring + 0.0010 * (0.5 - mean_risk_pref),
+            wage_growth=0.0016 * mean_hiring - 0.0005 * self.macro_state.unemployment,
+            inflation=0.0005 * (mean_consumption / 10_000.0 - 1.0),
+            sentiment_index=0.030 * (mean_risk_pref - 0.5) + 0.025 * mean_sector,
+        )
+        self.event_bus.publish(
+            event_type="macro_state",
+            stage="macro_update",
+            tick=self.simulation_time,
+            payload={
+                "macro_state": self.macro_state.to_dict(),
+                "bank_signal": bank_signal,
+                "household_count": len(household_signals),
+                "firm_count": len(firm_signals),
+            },
+        )
+        return household_signals, firm_signals, bank_signal
+
+    def _run_social_contagion(self, policy_shock: Optional[PolicyShock]) -> ContagionSnapshot:
+        rumor = policy_shock.rumor_shock if policy_shock else 0.0
+        contagion = self.contagion_engine.step(self.social_graph, self.macro_state, rumor_shock=rumor)
+        self._last_social_mean = contagion.mean_sentiment
+        self.macro_state.sentiment_index = _clip(
+            0.75 * self.macro_state.sentiment_index + 0.25 * ((contagion.mean_sentiment + 1.0) * 0.5),
+            0.0,
+            1.0,
+        )
+        self.event_bus.publish(
+            event_type="social_contagion",
+            stage="social_contagion",
+            tick=self.simulation_time,
+            payload=contagion.to_dict(),
+        )
+        return contagion
+
+    def _build_macro_context(
+        self,
+        policy_text: Optional[str],
+        household_signals: Sequence[HouseholdSignal],
+        firm_signals: Sequence[FirmSignal],
+        contagion: ContagionSnapshot,
+    ) -> MacroContextDTO:
+        sector_groups: Dict[str, List[float]] = defaultdict(list)
+        for signal in firm_signals:
+            sector_groups[signal.sector].append(signal.sector_outlook)
+        sector_outlook = {
+            sector: sum(values) / len(values)
+            for sector, values in sector_groups.items()
+            if values
+        }
+        household_risk_shift = (
+            sum(item.risk_preference for item in household_signals) / len(household_signals) - 0.5
+            if household_signals
+            else 0.0
+        )
+        firm_hiring_signal = (
+            sum(item.hiring_plan for item in firm_signals) / len(firm_signals)
+            if firm_signals
+            else 0.0
+        )
+        return MacroContextDTO(
+            tick=self.simulation_time,
+            macro_state=MacroState.from_mapping(self.macro_state.to_dict()),
+            policy_summary=policy_text or "no_policy",
+            social_sentiment=contagion.mean_sentiment,
+            sector_outlook=sector_outlook,
+            household_risk_shift=household_risk_shift,
+            firm_hiring_signal=firm_hiring_signal,
+        )
+
+    def _build_policy_transmission_chain(
+        self,
+        *,
+        policy_text: Optional[str],
+        household_signals: Sequence[HouseholdSignal],
+        firm_signals: Sequence[FirmSignal],
+        contagion: ContagionSnapshot,
+        buy_volume: float,
+        sell_volume: float,
+        trade_count: int,
+        matching_mode: str,
+    ) -> Dict[str, Any]:
+        avg_news = (
+            sum(item.news_exposure for item in household_signals) / len(household_signals)
+            if household_signals
+            else 0.0
+        )
+        avg_social_exposure = (
+            sum(item.social_exposure for item in household_signals) / len(household_signals)
+            if household_signals
+            else 0.0
+        )
+        avg_household_risk = (
+            sum(item.risk_preference for item in household_signals) / len(household_signals)
+            if household_signals
+            else 0.0
+        )
+        avg_hiring = (
+            sum(item.hiring_plan for item in firm_signals) / len(firm_signals)
+            if firm_signals
+            else 0.0
+        )
+        sector_groups: Dict[str, List[float]] = defaultdict(list)
+        for signal in firm_signals:
+            sector_groups[signal.sector].append(signal.sector_outlook)
+
+        return {
+            "policy": policy_text or "no_policy",
+            "macro_variables": {
+                "inflation": self.macro_state.inflation,
+                "unemployment": self.macro_state.unemployment,
+                "wage_growth": self.macro_state.wage_growth,
+                "credit_spread": self.macro_state.credit_spread,
+                "liquidity_index": self.macro_state.liquidity_index,
+                "policy_rate": self.macro_state.policy_rate,
+                "fiscal_stimulus": self.macro_state.fiscal_stimulus,
+                "sentiment_index": self.macro_state.sentiment_index,
+            },
+            "social_sentiment": {
+                "mean": contagion.mean_sentiment,
+                "stressed_nodes": list(contagion.stressed_nodes),
+                "avg_news_exposure": avg_news,
+                "avg_social_exposure": avg_social_exposure,
+            },
+            "industry_agent": {
+                "avg_household_risk": avg_household_risk,
+                "avg_firm_hiring": avg_hiring,
+                "sector_outlook": {
+                    sector: sum(values) / len(values) for sector, values in sector_groups.items() if values
+                },
+            },
+            "market_microstructure": {
+                "buy_volume": buy_volume,
+                "sell_volume": sell_volume,
+                "trade_count": int(trade_count),
+                "matching_mode": matching_mode,
+                "price": self.current_price,
+            },
+        }
+
     def _update_wealth_history(self) -> None:
-        """记录每个 Agent 的财富轨迹（现金 + 持仓市值）。"""
+        """Track each agent wealth path: cash + holdings market value."""
         for agent in self.agents:
             if agent.agent_id not in self._initial_cash:
                 self._initial_cash[agent.agent_id] = float(getattr(agent, "cash", 0.0))
@@ -274,9 +595,7 @@ class MarketEnvironment:
                 self._wealth_history[agent.agent_id] = history[-max_len:]
 
     def _evolution_step(self) -> Dict[str, Any]:
-        """
-        FinEvo 演化步骤：选择（Selection）/ 创新（Innovation）/ 扰动（Perturbation）。
-        """
+        """Apply selection + mutation to maintain adaptive population."""
         if not self.agents:
             return {"status": "skipped", "reason": "no_agents"}
 
@@ -302,10 +621,9 @@ class MarketEnvironment:
                 to_remove.append(agent)
                 freed_capital += max(0.0, end_val)
 
-        survivors = [a for a in self.agents if a not in to_remove]
-        self.agents = survivors
+        self.agents = [a for a in self.agents if a not in to_remove]
+        top_agents = sorted(self.agents, key=lambda a: returns.get(a.agent_id, 0.0), reverse=True)
 
-        top_agents = sorted(survivors, key=lambda a: returns.get(a.agent_id, 0.0), reverse=True)
         if freed_capital > 0 and top_agents:
             scores = [max(returns.get(a.agent_id, 0.0), -0.5) for a in top_agents]
             exps = [math.exp(s) for s in scores]
@@ -323,7 +641,13 @@ class MarketEnvironment:
             for _ in range(n_mutants):
                 parent = random.choice(top_agents)
                 parent_persona = parent.persona
-                new_risk = float(np.clip(parent_persona.risk_tolerance + random.uniform(-self.mutation_scale, self.mutation_scale), 0.0, 1.0))
+                new_risk = float(
+                    np.clip(
+                        parent_persona.risk_tolerance + random.uniform(-self.mutation_scale, self.mutation_scale),
+                        0.0,
+                        1.0,
+                    )
+                )
                 new_persona = Persona(
                     risk_tolerance=new_risk,
                     cognitive_bias=parent_persona.cognitive_bias,
@@ -336,6 +660,12 @@ class MarketEnvironment:
 
         if mutants:
             self.agents.extend(mutants)
+            for mutant in mutants:
+                self.social_graph.ensure_node(mutant.agent_id)
+                existing = [node_id for node_id in self.social_graph.nodes.keys() if node_id != mutant.agent_id]
+                if existing:
+                    peer = random.choice(existing)
+                    self.social_graph.add_edge(mutant.agent_id, peer, bidirectional=True)
 
         return {
             "status": "ok",
@@ -344,3 +674,27 @@ class MarketEnvironment:
             "freed_capital": freed_capital,
             "survivors": len(self.agents),
         }
+
+
+if __name__ == "__main__":
+    from agents.trading_agent_core import CognitiveBias, InvestmentHorizon
+
+    async def _demo() -> None:
+        agents = [
+            TradingAgent(
+                agent_id="demo_1",
+                persona=Persona(
+                    risk_tolerance=0.6,
+                    cognitive_bias=CognitiveBias.Herding,
+                    investment_horizon=InvestmentHorizon.Short_term,
+                    policy_sensitivity=0.7,
+                ),
+            )
+        ]
+        env = MarketEnvironment(agents, use_isolated_matching=False)
+        env.schedule_policy_shock("印花税下调并流动性注入")
+        report = await env.simulation_step()
+        print(report["stage_order"])
+        print(report["policy_transmission_chain"])
+
+    asyncio.run(_demo())

@@ -5,11 +5,20 @@ import os
 import re
 import time
 import numpy as np
+import math
 from typing import Dict, List, Any, Optional, Tuple, Callable
 from dataclasses import dataclass, field
 from openai import OpenAI, APIConnectionError, APITimeoutError, RateLimitError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from config import GLOBAL_CONFIG
+from core.validator import (
+    PolicyCommittee,
+    RiskCommittee,
+    aggregate_analyst_cards,
+    coerce_analyst_card,
+    export_decision_trace,
+    validate_analyst_card,
+)
 
 # --- 1. 向量记忆模块 (Vector Memory) ---
 
@@ -250,6 +259,8 @@ class DeepSeekBrain:
                 zhipu_key=GLOBAL_CONFIG.ZHIPU_API_KEY
             )
         self._api_healthy = True
+        self.risk_committee = RiskCommittee()
+        self.policy_committee = PolicyCommittee()
     
     def _generate_cache_key(self, market_state: Dict, account_state: Dict) -> str:
         """
@@ -571,84 +582,225 @@ JSON 格式示例：
     
     # --- 新增：异步思考方法（支持多模型路由） ---
     
+    def _build_local_analyst_cards(
+        self,
+        market_state: Dict[str, Any],
+        account_state: Dict[str, Any],
+        emotional_state: str,
+        social_signal: str,
+    ) -> List[Dict[str, Any]]:
+        """Build deterministic analyst cards used by the manager aggregation layer."""
+        price = float(market_state.get("price", market_state.get("last_price", 0.0)) or 0.0)
+        panic = float(market_state.get("panic_level", 0.0) or 0.0)
+        trend = str(market_state.get("trend", "neutral")).lower()
+        pnl_pct = float(account_state.get("pnl_pct", 0.0) or 0.0)
+        sentiment = float(market_state.get("text_sentiment_score", 0.0) or 0.0)
+        liquidity = float(market_state.get("liquidity_index", 1.0) or 1.0)
+
+        news_action = "buy" if ("up" in trend or "上涨" in trend or sentiment > 0.15) else "sell" if ("down" in trend or "下跌" in trend or sentiment < -0.15) else "hold"
+        macro_action = "buy" if liquidity > 1.05 and panic < 0.4 else "reduce_risk" if panic > 0.6 else "hold"
+        risk_action = "reduce_risk" if panic > 0.55 or pnl_pct < -0.08 else "hold"
+
+        cards = [
+            {
+                "analyst_id": f"{self.agent_id}_news_analyst",
+                "thesis": f"News/price combined view at price={price:.2f}, trend={trend}",
+                "evidence": [
+                    {"type": "news", "content": str(market_state.get("news", "no_news")), "weight": 0.7},
+                    {"type": "price", "content": f"trend={trend}, sentiment={sentiment:.2f}", "weight": 0.6},
+                ],
+                "time_horizon": "intraday",
+                "risk_tags": ["panic"] if panic > 0.5 else [],
+                "confidence": 0.55 + min(0.35, abs(sentiment)),
+                "counterarguments": ["headline risk can reverse quickly", "microstructure noise"],
+                "recommended_action": news_action,
+            },
+            {
+                "analyst_id": f"{self.agent_id}_macro_analyst",
+                "thesis": "Macro and policy transmission analysis",
+                "evidence": [
+                    {"type": "macro", "content": f"liquidity={liquidity:.2f}", "weight": 0.7},
+                    {"type": "macro", "content": f"panic={panic:.2f}", "weight": 0.6},
+                ],
+                "time_horizon": "weekly",
+                "risk_tags": ["liquidity"] if liquidity < 0.9 else [],
+                "confidence": 0.50 + 0.30 * max(0.0, min(1.0, liquidity - 0.8)),
+                "counterarguments": ["macro impulses can lag", "policy implementation uncertainty"],
+                "recommended_action": macro_action,
+            },
+            {
+                "analyst_id": f"{self.agent_id}_risk_analyst",
+                "thesis": f"Risk-first view under emotion={emotional_state}, social={social_signal}",
+                "evidence": [
+                    {"type": "risk", "content": f"pnl_pct={pnl_pct:.3f}", "weight": 0.8},
+                    {"type": "social", "content": str(social_signal), "weight": 0.6},
+                ],
+                "time_horizon": "intraday",
+                "risk_tags": ["panic", "overcrowding"] if panic > 0.45 else ["liquidity"] if liquidity < 0.9 else [],
+                "confidence": 0.60 + 0.30 * max(0.0, min(1.0, panic)),
+                "counterarguments": ["defensive posture can miss rebounds"],
+                "recommended_action": risk_action,
+            },
+        ]
+        return [coerce_analyst_card(card, analyst_id=card.get("analyst_id", "analyst")) for card in cards]
+
+    def _decision_from_manager_card(
+        self,
+        manager_card: Dict[str, Any],
+        account_state: Dict[str, Any],
+        market_state: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Map manager final card into order-like decision payload."""
+        action_map = {"buy": "BUY", "sell": "SELL", "hold": "HOLD", "reduce_risk": "SELL"}
+        final_action = str(manager_card.get("recommended_action", "hold")).lower()
+        action = action_map.get(final_action, "HOLD")
+        price = float(market_state.get("price", market_state.get("last_price", 0.0)) or 0.0)
+        if price <= 0:
+            return {"action": "HOLD", "qty": 0, "price": 0.0}
+        cash = float(account_state.get("cash", 0.0) or 0.0)
+        market_value = float(account_state.get("market_value", 0.0) or 0.0)
+
+        if action == "BUY":
+            qty = int(max(0.0, (cash * 0.12) / price))
+        elif final_action == "reduce_risk":
+            qty = int(max(0.0, (market_value * 0.30) / price))
+        elif action == "SELL":
+            qty = int(max(0.0, (market_value * 0.20) / price))
+        else:
+            qty = 0
+        return {
+            "action": action,
+            "qty": qty,
+            "price": price,
+            "confidence": float(manager_card.get("calibrated_confidence", 0.5)),
+        }
+
     async def think_async(
-        self, 
-        market_state: Dict, 
+        self,
+        market_state: Dict,
         account_state: Dict,
         model_priority: List[str] = None,
         timeout_budget: float = 15.0,
         emotional_state: str = "Neutral",
         social_signal: str = "Neutral"
     ) -> Dict:
-        """
-        异步执行思考过程 - 支持多模型优先级调用及认知增强
-        
-        Args:
-            market_state: 市场状态
-            account_state: 账户状态
-            model_priority: 模型优先级列表
-            timeout_budget: 总超时预算
-            emotional_state: Agent 当前情绪状态 (如 "Anxious", "Greedy")
-            social_signal: 社交信号 (如 "Peers are panic selling")
-            
-        Returns:
-            Dict: 决策结果与思维链
-        """
-        # 构建消息
-        messages = [
-            {"role": "system", "content": self._build_system_prompt()},
-            {"role": "user", "content": self._build_user_prompt(
-                market_state, account_state, emotional_state, social_signal
-            )}
+        """Structured evidence flow: analyst cards -> manager card -> calibrated decision."""
+        analyst_schema = {
+            "type": "object",
+            "properties": {
+                "thesis": {"type": "string", "default": "neutral thesis"},
+                "evidence": {"type": "array", "default": []},
+                "time_horizon": {"type": "string", "default": "swing"},
+                "risk_tags": {"type": "array", "default": []},
+                "confidence": {"type": "number", "default": 0.5},
+                "counterarguments": {"type": "array", "default": []},
+                "recommended_action": {"type": "string", "default": "hold"},
+            },
+        }
+        local_cards = self._build_local_analyst_cards(market_state, account_state, emotional_state, social_signal)
+        analyst_cards: List[Dict[str, Any]] = []
+        model_used = "local_structured"
+
+        role_prompts = [
+            ("news_analyst", "Focus on news and price evidence. Output only strict JSON."),
+            ("macro_analyst", "Focus on macro and policy evidence. Output only strict JSON."),
+            ("risk_analyst", "Focus on risk and social evidence. Output only strict JSON."),
         ]
-        
-        # 使用模型路由器调用
-        if self.model_router:
-            # 优先使用实例级别的 priority，否则使用传入的 (通常为空)，最后默认
-            priority = self.model_priority or model_priority or ["deepseek-reasoner", "deepseek-chat"]
-            content, reasoning, model_used = await self.model_router.call_with_fallback(
-                messages=messages,
-                priority_models=priority,
-                timeout_budget=timeout_budget
-            )
+        priority = self.model_priority or model_priority or ["deepseek-reasoner", "deepseek-chat", "glm-4-flashx"]
+
+        if self.model_router and hasattr(self.model_router, "call_with_schema"):
+            for idx, (role_name, role_prompt) in enumerate(role_prompts):
+                fallback_card = local_cards[idx] if idx < len(local_cards) else local_cards[-1]
+                messages = [
+                    {"role": "system", "content": role_prompt},
+                    {
+                        "role": "user",
+                        "content": self._build_user_prompt(market_state, account_state, emotional_state, social_signal),
+                    },
+                ]
+                try:
+                    parsed_card, sub_model_used, _ = await self.model_router.call_with_schema(
+                        messages=messages,
+                        json_schema=analyst_schema,
+                        priority_models=priority,
+                        timeout_budget=max(4.0, timeout_budget / 3.0),
+                        fallback_obj=fallback_card,
+                    )
+                    parsed_card["analyst_id"] = f"{self.agent_id}_{role_name}"
+                    normalized_card = coerce_analyst_card(parsed_card, analyst_id=parsed_card["analyst_id"])
+                    valid, _ = validate_analyst_card(normalized_card)
+                    analyst_cards.append(normalized_card if valid else fallback_card)
+                    model_used = sub_model_used
+                except Exception:
+                    analyst_cards.append(fallback_card)
         else:
-            # 降级：使用同步客户端 (暂不支持新参数，仅作为兜底)
-            return self.think(market_state, account_state)
-        
-        # 解析决策
-        decision_json = self._extract_json(content)
-        
-        # 处理空推理内容
-        if not reasoning:
-            # 去除 JSON 部分，剩余内容作为思维链
-            reasoning = re.sub(r'```json.*?```', '', content, flags=re.DOTALL).strip()
-            if not reasoning:
-                reasoning = content
-        
-        # 情绪分析 (结合自身情绪状态)
+            analyst_cards = local_cards
+
+        risk_metrics = {
+            "cvar": float(market_state.get("risk_cvar", account_state.get("pnl_pct", 0.0) - 0.02)),
+            "max_drawdown": float(market_state.get("max_drawdown", account_state.get("pnl_pct", 0.0))),
+            "turnover": float(market_state.get("turnover", abs(float(market_state.get("panic_level", 0.0))) * 1.2)),
+            "crowding": float(market_state.get("crowding", min(1.0, abs(float(market_state.get("panic_level", 0.0)))))),
+            "volatility_spike": float(market_state.get("volatility_spike", 1.0 + abs(float(market_state.get("panic_level", 0.0))) * 2.0)),
+        }
+        risk_alert = self.risk_committee.assess(risk_metrics).to_dict()
+
+        policy_event = str(market_state.get("policy_description", "") or market_state.get("news", ""))
+        policy_update = self.policy_committee.translate(policy_event)
+
+        manager_final_card = aggregate_analyst_cards(analyst_cards, risk_alert=risk_alert)
+        decision_json = self._decision_from_manager_card(manager_final_card, account_state, market_state)
+
+        reasoning = (
+            f"manager_action={manager_final_card.get('recommended_action', 'hold')}; "
+            f"signal={manager_final_card.get('aggregated_signal', 0.0):.3f}; "
+            f"calibrated_conf={manager_final_card.get('calibrated_confidence', 0.0):.3f}; "
+            f"risk_level={risk_alert.get('level', 'normal')}"
+        )
         emotion_score = self._analyze_emotion(reasoning, decision_json)
-        
-        # 记录思维链历史
+
+        decision_trace = {
+            "agent_id": self.agent_id,
+            "timestamp": time.time(),
+            "market_state": market_state,
+            "account_state": account_state,
+            "analyst_cards": analyst_cards,
+            "manager_final_card": manager_final_card,
+            "contradiction_matrix": manager_final_card.get("contradiction_matrix", {}),
+            "risk_alert": risk_alert,
+            "policy_conditions": policy_update,
+            "decision": decision_json,
+            "model_used": model_used,
+        }
+        trace_path = export_decision_trace(decision_trace)
+
         thought_record = ThoughtRecord(
             agent_id=self.agent_id,
             timestamp=time.time(),
             reasoning_content=reasoning,
             emotion_score=emotion_score,
             decision=decision_json,
-            market_context=market_state
+            market_context=market_state,
         )
         DeepSeekBrain.thought_history[self.agent_id].append(thought_record)
         if len(DeepSeekBrain.thought_history[self.agent_id]) > 20:
             DeepSeekBrain.thought_history[self.agent_id].pop(0)
-        
+
         return {
             "decision": decision_json,
             "reasoning": reasoning,
-            "raw_content": content,
+            "raw_content": json.dumps({"manager_final_card": manager_final_card}, ensure_ascii=False),
             "emotion_score": emotion_score,
-            "model_used": model_used
+            "model_used": model_used,
+            "analyst_cards": analyst_cards,
+            "contradiction_matrix": manager_final_card.get("contradiction_matrix", {}),
+            "manager_final_card": manager_final_card,
+            "risk_alerts": risk_alert,
+            "policy_conditions": policy_update,
+            "calibration": manager_final_card.get("calibration", {}),
+            "decision_trace_path": trace_path,
         }
-    
+
     def _build_user_prompt(
         self, 
         market_state: Dict, 

@@ -1,0 +1,207 @@
+{
+  "agent_id": "demo_agent",
+  "timestamp": 1773577390.5663245,
+  "analyst_cards": [
+    {
+      "analyst_id": "demo_agent_news_analyst",
+      "thesis": "News-price thesis around current_price=100.00",
+      "evidence": [
+        {
+          "type": "news",
+          "content": "policy support and liquidity injection",
+          "weight": 0.7
+        },
+        {
+          "type": "price",
+          "content": "momentum=0.0000",
+          "weight": 0.58
+        }
+      ],
+      "time_horizon": "intraday",
+      "risk_tags": [],
+      "confidence": 0.712,
+      "counterarguments": [
+        "news impact may fade quickly",
+        "headline may be partially priced in"
+      ],
+      "recommended_action": "buy"
+    },
+    {
+      "analyst_id": "demo_agent_macro_analyst",
+      "thesis": "Macro-policy pass-through assessment",
+      "evidence": [
+        {
+          "type": "macro",
+          "content": "liquidity=1.200, credit_spread=0.018",
+          "weight": 0.72
+        },
+        {
+          "type": "macro",
+          "content": "unemployment=0.050, sentiment_index=0.600",
+          "weight": 0.64
+        }
+      ],
+      "time_horizon": "weekly",
+      "risk_tags": [],
+      "confidence": 0.5244,
+      "counterarguments": [
+        "macro effect has lag",
+        "policy execution uncertainty"
+      ],
+      "recommended_action": "buy"
+    },
+    {
+      "analyst_id": "demo_agent_risk_analyst",
+      "thesis": "Portfolio preservation and market micro risk assessment",
+      "evidence": [
+        {
+          "type": "risk",
+          "content": "panic_level=0.220, pnl_pct=0.010",
+          "weight": 0.78
+        },
+        {
+          "type": "social",
+          "content": "neutral",
+          "weight": 0.52
+        },
+        {
+          "type": "risk",
+          "content": "recent lesson: avoid chasing spikes",
+          "weight": 0.46
+        }
+      ],
+      "time_horizon": "intraday",
+      "risk_tags": [],
+      "confidence": 0.608,
+      "counterarguments": [
+        "defensive stance may miss rebound"
+      ],
+      "recommended_action": "hold"
+    }
+  ],
+  "manager_final_card": {
+    "recommended_action": "buy",
+    "aggregated_signal": 0.694864062122173,
+    "weighted_votes": [
+      {
+        "analyst_id": "demo_agent_news_analyst",
+        "recommended_action": "buy",
+        "weight": 0.4556799999999999,
+        "confidence": 0.712,
+        "evidence_strength": 0.6399999999999999
+      },
+      {
+        "analyst_id": "demo_agent_macro_analyst",
+        "recommended_action": "buy",
+        "weight": 0.35659199999999996,
+        "confidence": 0.5244,
+        "evidence_strength": 0.6799999999999999
+      },
+      {
+        "analyst_id": "demo_agent_risk_analyst",
+        "recommended_action": "hold",
+        "weight": 0.3566933333333333,
+        "confidence": 0.608,
+        "evidence_strength": 0.5866666666666667
+      }
+    ],
+    "contradiction_matrix": {
+      "analysts": [
+        "demo_agent_news_analyst",
+        "demo_agent_macro_analyst",
+        "demo_agent_risk_analyst"
+      ],
+      "matrix": [
+        [
+          0.0,
+          0.15,
+          0.6
+        ],
+        [
+          0.15,
+          0.0,
+          0.75
+        ],
+        [
+          0.6,
+          0.75,
+          0.0
+        ]
+      ],
+      "contradiction_index": 0.5
+    },
+    "raw_confidence": 0.6147999999999999,
+    "calibrated_confidence": 0.4457299999999999,
+    "calibration": {
+      "brier_like_score": 0.3072152329,
+      "confidence_drift": -0.16907,
+      "outcome_proxy": 1.0
+    }
+  },
+  "risk_alerts": {
+    "level": "normal",
+    "alerts": [],
+    "metrics": {
+      "cvar": -0.01,
+      "max_drawdown": 0.01,
+      "turnover": 1.308,
+      "crowding": 0.225,
+      "volatility_spike": 1.484
+    },
+    "recommended_action": "hold",
+    "risk_score": 0.0
+  },
+  "policy_conditions": {
+    "policy_event": "stamp tax cut and liquidity injection",
+    "regulatory_conditions": {
+      "tax_rate": 0.0005,
+      "circuit_breaker_pct": 0.1,
+      "leverage_limit": 2.0,
+      "market_making_obligation": 0.65
+    },
+    "applied_rules": [
+      "tax_rate_down",
+      "market_making_up"
+    ]
+  },
+  "market_data": {
+    "symbol": "TEST",
+    "current_price": 100.0,
+    "price_history": [
+      98,
+      99,
+      100,
+      101,
+      100
+    ],
+    "panic_level": 0.22,
+    "pnl_pct": 0.01,
+    "news": "policy support and liquidity injection",
+    "policy_description": "stamp tax cut and liquidity injection",
+    "macro_context": {
+      "tick": 1,
+      "policy_summary": "tax cut",
+      "social_sentiment": 0.2,
+      "sector_outlook": {},
+      "household_risk_shift": 0.0,
+      "firm_hiring_signal": 0.0,
+      "macro_state": {
+        "inflation": 0.02,
+        "unemployment": 0.05,
+        "wage_growth": 0.03,
+        "credit_spread": 0.018,
+        "liquidity_index": 1.2,
+        "policy_rate": 0.02,
+        "fiscal_stimulus": 0.01,
+        "sentiment_index": 0.6
+      }
+    }
+  },
+  "retrieved_context": "recent lesson: avoid chasing spikes",
+  "decision": {
+    "action": "BUY",
+    "amount": 102.0,
+    "target_price": 99.94610278883104,
+    "reasoning_chain": "意图=BUY/Low，FCN 映射执行。原因：manager_action=buy; signal=0.695; calibrated_confidence=0.446; risk_level=normal"
+  }
+}

@@ -9,8 +9,12 @@
 import numpy as np
 import pandas as pd
 from scipy import stats
-from typing import List, Dict, Tuple, Optional
+from datetime import datetime
+from pathlib import Path
+from typing import Any, List, Dict, Tuple, Optional
 from dataclasses import dataclass
+import json
+import uuid
 
 
 @dataclass
@@ -21,6 +25,405 @@ class ValidationResult:
     actual_value: float
     threshold: float
     description: str
+
+
+ANALYST_EVIDENCE_TYPES = {"news", "price", "macro", "social", "risk"}
+ANALYST_TIME_HORIZONS = {"intraday", "swing", "weekly", "macro"}
+ANALYST_ACTIONS = {"buy", "sell", "hold", "reduce_risk"}
+
+
+def _clip(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, float(value)))
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _normalize_action(action: Any) -> str:
+    action_text = str(action or "hold").strip().lower()
+    if action_text not in ANALYST_ACTIONS:
+        return "hold"
+    return action_text
+
+
+def _normalize_horizon(horizon: Any) -> str:
+    horizon_text = str(horizon or "swing").strip().lower()
+    if horizon_text not in ANALYST_TIME_HORIZONS:
+        return "swing"
+    return horizon_text
+
+
+def _normalize_evidence_type(value: Any) -> str:
+    evidence_type = str(value or "risk").strip().lower()
+    if evidence_type not in ANALYST_EVIDENCE_TYPES:
+        return "risk"
+    return evidence_type
+
+
+def coerce_analyst_card(card: Dict[str, Any], analyst_id: str = "analyst") -> Dict[str, Any]:
+    """
+    Coerce analyst output into the required structured schema.
+
+    Returns a normalized card with all mandatory fields.
+    """
+    card = dict(card or {})
+    evidence_items: List[Dict[str, Any]] = []
+    for raw in card.get("evidence", []) if isinstance(card.get("evidence"), list) else []:
+        if not isinstance(raw, dict):
+            continue
+        evidence_items.append(
+            {
+                "type": _normalize_evidence_type(raw.get("type")),
+                "content": str(raw.get("content", "")).strip()[:400],
+                "weight": _clip(_safe_float(raw.get("weight", 0.5), 0.5), 0.0, 1.0),
+            }
+        )
+    if not evidence_items:
+        evidence_items = [
+            {
+                "type": "risk",
+                "content": "fallback_evidence",
+                "weight": 0.5,
+            }
+        ]
+
+    risk_tags = card.get("risk_tags", [])
+    if not isinstance(risk_tags, list):
+        risk_tags = []
+    normalized_tags = [str(tag).strip().lower() for tag in risk_tags if str(tag).strip()]
+
+    counterarguments = card.get("counterarguments", [])
+    if not isinstance(counterarguments, list):
+        counterarguments = []
+    normalized_counterarguments = [str(item).strip()[:240] for item in counterarguments if str(item).strip()]
+
+    return {
+        "analyst_id": str(card.get("analyst_id", analyst_id)),
+        "thesis": str(card.get("thesis", "neutral thesis")).strip()[:400],
+        "evidence": evidence_items,
+        "time_horizon": _normalize_horizon(card.get("time_horizon")),
+        "risk_tags": normalized_tags,
+        "confidence": _clip(_safe_float(card.get("confidence", 0.5), 0.5), 0.0, 1.0),
+        "counterarguments": normalized_counterarguments,
+        "recommended_action": _normalize_action(card.get("recommended_action")),
+    }
+
+
+def validate_analyst_card(card: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    """
+    Validate analyst card schema and value ranges.
+
+    Returns: (is_valid, list_of_errors)
+    """
+    errors: List[str] = []
+    required_fields = (
+        "thesis",
+        "evidence",
+        "time_horizon",
+        "risk_tags",
+        "confidence",
+        "counterarguments",
+        "recommended_action",
+    )
+    for field_name in required_fields:
+        if field_name not in card:
+            errors.append(f"missing_field:{field_name}")
+
+    if not isinstance(card.get("evidence"), list) or len(card.get("evidence", [])) == 0:
+        errors.append("invalid_evidence")
+    else:
+        for idx, item in enumerate(card["evidence"]):
+            if not isinstance(item, dict):
+                errors.append(f"invalid_evidence_item:{idx}")
+                continue
+            if _normalize_evidence_type(item.get("type")) != item.get("type"):
+                errors.append(f"invalid_evidence_type:{idx}")
+            weight = _safe_float(item.get("weight", -1), -1)
+            if weight < 0.0 or weight > 1.0:
+                errors.append(f"invalid_evidence_weight:{idx}")
+
+    if _normalize_horizon(card.get("time_horizon")) != card.get("time_horizon"):
+        errors.append("invalid_time_horizon")
+    if _normalize_action(card.get("recommended_action")) != card.get("recommended_action"):
+        errors.append("invalid_recommended_action")
+
+    confidence = _safe_float(card.get("confidence", -1), -1)
+    if confidence < 0.0 or confidence > 1.0:
+        errors.append("invalid_confidence")
+
+    if not isinstance(card.get("risk_tags", []), list):
+        errors.append("invalid_risk_tags")
+    if not isinstance(card.get("counterarguments", []), list):
+        errors.append("invalid_counterarguments")
+
+    return len(errors) == 0, errors
+
+
+def build_contradiction_matrix(cards: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build pairwise contradiction matrix between analyst cards."""
+    normalized = [coerce_analyst_card(card, analyst_id=f"analyst_{idx}") for idx, card in enumerate(cards)]
+    n = len(normalized)
+    matrix: List[List[float]] = [[0.0 for _ in range(n)] for _ in range(n)]
+    action_to_score = {"buy": 1.0, "hold": 0.0, "reduce_risk": -0.5, "sell": -1.0}
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            action_i = action_to_score.get(normalized[i]["recommended_action"], 0.0)
+            action_j = action_to_score.get(normalized[j]["recommended_action"], 0.0)
+            action_conflict = min(1.0, abs(action_i - action_j))
+
+            tags_i = set(normalized[i].get("risk_tags", []))
+            tags_j = set(normalized[j].get("risk_tags", []))
+            if not tags_i and not tags_j:
+                risk_divergence = 0.0
+            else:
+                risk_divergence = 1.0 - (len(tags_i & tags_j) / max(1, len(tags_i | tags_j)))
+
+            horizon_conflict = 0.0 if normalized[i]["time_horizon"] == normalized[j]["time_horizon"] else 1.0
+            score = _clip(0.6 * action_conflict + 0.25 * risk_divergence + 0.15 * horizon_conflict, 0.0, 1.0)
+            matrix[i][j] = score
+            matrix[j][i] = score
+
+    upper = [matrix[i][j] for i in range(n) for j in range(i + 1, n)]
+    contradiction_index = float(sum(upper) / len(upper)) if upper else 0.0
+    return {
+        "analysts": [card.get("analyst_id", f"analyst_{idx}") for idx, card in enumerate(normalized)],
+        "matrix": matrix,
+        "contradiction_index": contradiction_index,
+    }
+
+
+def aggregate_analyst_cards(
+    cards: List[Dict[str, Any]],
+    risk_alert: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Manager aggregation over structured analyst cards.
+
+    Includes weighted aggregation, contradiction discount and confidence calibration.
+    """
+    normalized = [coerce_analyst_card(card, analyst_id=f"analyst_{idx}") for idx, card in enumerate(cards)]
+    if not normalized:
+        normalized = [coerce_analyst_card({}, analyst_id="fallback")]
+
+    action_to_score = {"buy": 1.0, "hold": 0.0, "reduce_risk": -0.5, "sell": -1.0}
+    votes: List[Dict[str, Any]] = []
+    weighted_signal = 0.0
+    total_weight = 0.0
+
+    for card in normalized:
+        evidence_weights = [float(item.get("weight", 0.5)) for item in card["evidence"]]
+        evidence_strength = float(sum(evidence_weights) / len(evidence_weights))
+        weight = float(card["confidence"]) * evidence_strength
+        action_score = action_to_score.get(card["recommended_action"], 0.0)
+        votes.append(
+            {
+                "analyst_id": card["analyst_id"],
+                "recommended_action": card["recommended_action"],
+                "weight": weight,
+                "confidence": card["confidence"],
+                "evidence_strength": evidence_strength,
+            }
+        )
+        weighted_signal += action_score * weight
+        total_weight += weight
+
+    if total_weight <= 1e-9:
+        normalized_signal = 0.0
+    else:
+        normalized_signal = weighted_signal / total_weight
+
+    contradiction = build_contradiction_matrix(normalized)
+    contradiction_index = float(contradiction["contradiction_index"])
+
+    raw_confidence = float(sum(card["confidence"] for card in normalized) / len(normalized))
+    calibrated_confidence = _clip(raw_confidence * (1.0 - 0.55 * contradiction_index), 0.0, 1.0)
+
+    risk_level = str((risk_alert or {}).get("level", "normal")).lower()
+    if risk_level in {"high", "critical"}:
+        calibrated_confidence = _clip(calibrated_confidence * 0.85, 0.0, 1.0)
+
+    if risk_level in {"high", "critical"}:
+        final_action = "reduce_risk"
+    elif normalized_signal >= 0.15:
+        final_action = "buy"
+    elif normalized_signal <= -0.25:
+        final_action = "sell"
+    elif normalized_signal <= -0.10:
+        final_action = "reduce_risk"
+    else:
+        final_action = "hold"
+
+    outcome_proxy = 1.0 if abs(normalized_signal) >= 0.25 else 0.0
+    brier_like = float((calibrated_confidence - outcome_proxy) ** 2)
+    confidence_drift = float(calibrated_confidence - raw_confidence)
+
+    return {
+        "recommended_action": final_action,
+        "aggregated_signal": float(normalized_signal),
+        "weighted_votes": votes,
+        "contradiction_matrix": contradiction,
+        "raw_confidence": raw_confidence,
+        "calibrated_confidence": calibrated_confidence,
+        "calibration": {
+            "brier_like_score": brier_like,
+            "confidence_drift": confidence_drift,
+            "outcome_proxy": outcome_proxy,
+        },
+    }
+
+
+@dataclass
+class RiskAlert:
+    """Structured risk alert emitted by the risk committee."""
+
+    level: str
+    alerts: List[str]
+    metrics: Dict[str, float]
+    recommended_action: str
+    risk_score: float
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "level": self.level,
+            "alerts": list(self.alerts),
+            "metrics": dict(self.metrics),
+            "recommended_action": self.recommended_action,
+            "risk_score": self.risk_score,
+        }
+
+
+class RiskCommittee:
+    """Risk committee that evaluates CVaR, drawdown, turnover, crowding and vol spike."""
+
+    def assess(self, metrics: Dict[str, Any]) -> RiskAlert:
+        normalized_metrics = {
+            "cvar": _safe_float(metrics.get("cvar", 0.0)),
+            "max_drawdown": _safe_float(metrics.get("max_drawdown", 0.0)),
+            "turnover": _safe_float(metrics.get("turnover", 0.0)),
+            "crowding": _safe_float(metrics.get("crowding", 0.0)),
+            "volatility_spike": _safe_float(metrics.get("volatility_spike", 1.0)),
+        }
+        alerts: List[str] = []
+        score = 0.0
+
+        if normalized_metrics["cvar"] <= -0.08:
+            alerts.append("cvar_breach")
+            score += 0.30
+        if normalized_metrics["max_drawdown"] <= -0.15:
+            alerts.append("drawdown_breach")
+            score += 0.25
+        if normalized_metrics["turnover"] >= 1.5:
+            alerts.append("turnover_spike")
+            score += 0.15
+        if normalized_metrics["crowding"] >= 0.70:
+            alerts.append("overcrowding")
+            score += 0.15
+        if normalized_metrics["volatility_spike"] >= 2.0:
+            alerts.append("volatility_spike")
+            score += 0.20
+
+        score = _clip(score, 0.0, 1.0)
+        if score >= 0.75:
+            level = "critical"
+            action = "reduce_risk"
+        elif score >= 0.45:
+            level = "high"
+            action = "reduce_risk"
+        elif score >= 0.20:
+            level = "medium"
+            action = "hold"
+        else:
+            level = "normal"
+            action = "hold"
+
+        return RiskAlert(
+            level=level,
+            alerts=alerts,
+            metrics=normalized_metrics,
+            recommended_action=action,
+            risk_score=score,
+        )
+
+
+class PolicyCommittee:
+    """Translate policy events into explicit regulatory condition changes."""
+
+    def translate(self, policy_event: str, baseline: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+        conditions = dict(
+            baseline
+            or {
+                "tax_rate": 0.001,
+                "circuit_breaker_pct": 0.10,
+                "leverage_limit": 2.0,
+                "market_making_obligation": 0.5,
+            }
+        )
+        event_text = str(policy_event or "")
+        event_lower = event_text.lower()
+        applied_rules: List[str] = []
+
+        def _contains_any(tokens: List[str]) -> bool:
+            return any((token in event_text) or (token in event_lower) for token in tokens)
+
+        tax_tokens = ["???", "stamp tax", "???", "?????"]
+        tax_down_tokens = ["??", "??", "??", "cut", "reduce", "lower", "???", "???", "???"]
+        tax_up_tokens = ["??", "??", "raise", "increase", "hike", "???", "???"]
+        breaker_tokens = ["??", "????", "?????", "circuit breaker", "trading halt", "??????", "???"]
+        leverage_tight_tokens = [
+            "????",
+            "?????",
+            "???",
+            "tighten leverage",
+            "margin increase",
+            "deleveraging",
+            "??????",
+            "????????",
+            "?????",
+        ]
+        leverage_loose_tokens = ["????", "?????", "leverage easing", "margin cut", "??????", "????????"]
+        making_tokens = ["????", "?????", "????", "market making", "liquidity injection", "??????", "????????", "??????"]
+
+        if _contains_any(tax_tokens) and _contains_any(tax_down_tokens):
+            conditions["tax_rate"] = _clip(conditions["tax_rate"] - 0.0005, 0.0, 0.01)
+            applied_rules.append("tax_rate_down")
+        if _contains_any(tax_tokens) and _contains_any(tax_up_tokens):
+            conditions["tax_rate"] = _clip(conditions["tax_rate"] + 0.0005, 0.0, 0.01)
+            applied_rules.append("tax_rate_up")
+        if _contains_any(breaker_tokens):
+            conditions["circuit_breaker_pct"] = _clip(conditions["circuit_breaker_pct"] - 0.02, 0.05, 0.20)
+            applied_rules.append("circuit_breaker_tighter")
+        if _contains_any(leverage_tight_tokens):
+            conditions["leverage_limit"] = _clip(conditions["leverage_limit"] - 0.3, 1.0, 5.0)
+            applied_rules.append("leverage_down")
+        if _contains_any(leverage_loose_tokens):
+            conditions["leverage_limit"] = _clip(conditions["leverage_limit"] + 0.3, 1.0, 5.0)
+            applied_rules.append("leverage_up")
+        if _contains_any(making_tokens):
+            conditions["market_making_obligation"] = _clip(
+                conditions["market_making_obligation"] + 0.15,
+                0.0,
+                1.0,
+            )
+            applied_rules.append("market_making_up")
+
+        return {
+            "policy_event": event_text,
+            "regulatory_conditions": conditions,
+            "applied_rules": applied_rules,
+        }
+def export_decision_trace(trace: Dict[str, Any], trace_dir: str = "artifacts/decision_trace") -> str:
+    """Persist one decision trace JSON and return the file path."""
+    path = Path(trace_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    filename = f"{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}.json"
+    file_path = path / filename
+    file_path.write_text(json.dumps(trace, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    return str(file_path)
 
 
 class StylizedFactsValidator:

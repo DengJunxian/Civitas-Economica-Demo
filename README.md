@@ -56,6 +56,25 @@ The news pipeline reuses the BettaSpider flow under `data_flywheel/` (crawl + NL
 pytest -q
 ```
 
+## 如何现场演示（答辩模式）
+
+1. 启动应用：
+```bash
+python main.py
+```
+2. 在左侧选择 `答辩场景`（可选：
+   `tax_cut_liquidity_boost` / `rumor_panic_selloff` / `regulator_stabilization_intervention`）。
+3. 点击 `答辩模式` 按钮：
+   - 自动切换到 `DEMO_MODE`
+   - 自动加载预生成的 analyst/manager JSON、narration、metrics
+   - 自动推进并回放关键讲解
+4. 在 `📈 市场走势` 页查看预计算指标轨迹；在 `🏠 系统导览` 查看当前 narration 与结构化输出。
+5. 演示结束后点击 `LIVE_MODE` 恢复实时模式。
+
+说明：
+- `DEMO_MODE` 不要求输入 DeepSeek/智谱 API Key。
+- 若非关键网络依赖失败，系统会显示黄色告警并继续运行，不会中断演示。
+
 ## Project Structure
 
 - `agents/`: agent implementations (manager, analysts, trading core, brains).

@@ -8,6 +8,9 @@ API 推理后端
 import os
 from typing import Optional, Dict, List, Any
 
+from config import GLOBAL_CONFIG
+from core.model_router import ModelRouter
+
 try:
     from openai import OpenAI
     OPENAI_AVAILABLE = True
@@ -38,6 +41,14 @@ class APIBackend:
         self.temperature = temperature
         
         self._client = None
+        self._router: Optional[ModelRouter] = None
+        try:
+            self._router = ModelRouter(
+                deepseek_key=self.api_key or "",
+                zhipu_key=GLOBAL_CONFIG.ZHIPU_API_KEY or None,
+            )
+        except Exception:
+            self._router = None
         
     def _get_client(self) -> "OpenAI":
         if self._client is None:
@@ -71,6 +82,24 @@ class APIBackend:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
+
+        if self._router is not None:
+            priority = [self.model, "deepseek-chat", "glm-4-flashx"]
+            ordered_priority = []
+            for item in priority:
+                if item and item not in ordered_priority:
+                    ordered_priority.append(item)
+            try:
+                content, _, _ = self._router.sync_call_with_fallback(
+                    messages=messages,
+                    priority_models=ordered_priority,
+                    timeout_budget=kwargs.get("timeout_budget", 30.0),
+                    fallback_response=kwargs.get("fallback_response"),
+                )
+                return content
+            except Exception:
+                # Fallback to legacy direct client path if router initialization/call fails.
+                pass
         
         try:
             response = client.chat.completions.create(

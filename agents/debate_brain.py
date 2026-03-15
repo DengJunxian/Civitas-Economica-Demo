@@ -18,6 +18,14 @@ from openai import APIConnectionError, APITimeoutError, RateLimitError
 
 from config import GLOBAL_CONFIG
 from agents.brain import DeepSeekBrain, ThoughtRecord, VectorMemory, AgentState
+from core.validator import (
+    RiskCommittee,
+    PolicyCommittee,
+    aggregate_analyst_cards,
+    coerce_analyst_card,
+    export_decision_trace,
+    validate_analyst_card,
+)
 
 
 class DebateRole(Enum):
@@ -112,6 +120,8 @@ class DebateBrain(DeepSeekBrain):
         
         # 辩论参数
         self.debate_rounds = 2
+        self.risk_committee = RiskCommittee()
+        self.policy_committee = PolicyCommittee()
     
     def _build_role_system_prompt(self, role: DebateRole) -> str:
         """构建角色系统提示词"""
@@ -284,107 +294,134 @@ class DebateBrain(DeepSeekBrain):
         return True, "✅ 风控通过"
     
     def think_with_debate(
-        self, 
-        market_state: Dict, 
+        self,
+        market_state: Dict,
         account_state: Dict
     ) -> Dict:
-        """
-        带辩论的思考决策
-        
-        流程:
-        1. Bull 陈述看多理由
-        2. Bear 反驳并陈述看空理由
-        3. Bull 再反驳
-        4. Bear 总结
-        5. 综合决策
-        6. 风控审核
-        
-        Returns:
-            包含决策、辩论记录和情绪分析的字典
-        """
+        """Debate flow upgraded to structured evidence cards + calibrated manager decision."""
         debate_messages: List[DebateMessage] = []
-        
-        # === Round 1: Bull 先发言 ===
+
         context = self._build_debate_context(market_state, account_state, [])
-        
         try:
-            bull_speech_1 = self._call_role_api(DebateRole.BULL, context + "\n\n作为看多派，请先陈述你的观点：")
-            debate_messages.append(DebateMessage(
-                role=DebateRole.BULL,
-                content=bull_speech_1,
-                emotion_score=0.5
-            ))
-        except Exception as e:
-            debate_messages.append(DebateMessage(
-                role=DebateRole.BULL,
-                content=f"[通信故障] {e}",
-                emotion_score=0.0
-            ))
-        
-        # === Round 1: Bear 反驳 ===
+            bull_speech = self._call_role_api(
+                DebateRole.BULL,
+                context + "\n\nProvide bullish case in concise form.",
+            )
+        except Exception as exc:
+            bull_speech = f"debate_error:{exc}"
+        debate_messages.append(DebateMessage(role=DebateRole.BULL, content=bull_speech, emotion_score=0.4))
+
         context = self._build_debate_context(market_state, account_state, debate_messages)
-        
         try:
-            bear_speech_1 = self._call_role_api(DebateRole.BEAR, context + "\n\n作为看空派，请反驳牛牛的观点并陈述你的担忧：")
-            debate_messages.append(DebateMessage(
-                role=DebateRole.BEAR,
-                content=bear_speech_1,
-                emotion_score=-0.5
-            ))
-        except Exception as e:
-            debate_messages.append(DebateMessage(
-                role=DebateRole.BEAR,
-                content=f"[通信故障] {e}",
-                emotion_score=0.0
-            ))
-        
-        # === Round 2: Bull 反驳 ===
+            bear_speech = self._call_role_api(
+                DebateRole.BEAR,
+                context + "\n\nProvide bearish case in concise form.",
+            )
+        except Exception as exc:
+            bear_speech = f"debate_error:{exc}"
+        debate_messages.append(DebateMessage(role=DebateRole.BEAR, content=bear_speech, emotion_score=-0.4))
+
         if self.debate_rounds >= 2:
             context = self._build_debate_context(market_state, account_state, debate_messages)
-            
             try:
-                bull_speech_2 = self._call_role_api(DebateRole.BULL, context + "\n\n请反驳空空的担忧，坚持你的看多立场：")
-                debate_messages.append(DebateMessage(
-                    role=DebateRole.BULL,
-                    content=bull_speech_2,
-                    emotion_score=0.3
-                ))
-            except Exception:
-                pass
-            
-            # === Round 2: Bear 总结 ===
-            context = self._build_debate_context(market_state, account_state, debate_messages)
-            
-            try:
-                bear_speech_2 = self._call_role_api(DebateRole.BEAR, context + "\n\n请做最后陈词，总结你的风险警示：")
-                debate_messages.append(DebateMessage(
-                    role=DebateRole.BEAR,
-                    content=bear_speech_2,
-                    emotion_score=-0.3
-                ))
-            except Exception:
-                pass
-        
-        # === 综合决策 ===
-        decision, reasoning_summary = self._synthesize_decision(
-            debate_messages, market_state, account_state
-        )
-        
-        # === 风控审核 ===
-        risk_approved, risk_reason = self._risk_review(
-            decision, account_state, debate_messages
-        )
-        
-        # 如果风控否决，强制改为 HOLD
+                risk_speech = self._call_role_api(
+                    DebateRole.RISK_MGR,
+                    context + "\n\nProvide risk committee perspective.",
+                )
+            except Exception as exc:
+                risk_speech = f"debate_error:{exc}"
+            debate_messages.append(DebateMessage(role=DebateRole.RISK_MGR, content=risk_speech, emotion_score=0.0))
+        else:
+            risk_speech = "risk_manager_not_activated"
+
+        panic = float(market_state.get('panic_level', 0.0) or 0.0)
+        pnl_pct = float(account_state.get('pnl_pct', 0.0) or 0.0)
+
+        analyst_cards = [
+            coerce_analyst_card(
+                {
+                    "analyst_id": f"{self.agent_id}_bull",
+                    "thesis": "Bull case from debate",
+                    "evidence": [
+                        {"type": "price", "content": bull_speech[:280], "weight": 0.70},
+                        {"type": "news", "content": str(market_state.get('news', '')), "weight": 0.55},
+                    ],
+                    "time_horizon": "intraday",
+                    "risk_tags": ["overcrowding"] if panic < 0.35 else [],
+                    "confidence": 0.62,
+                    "counterarguments": [bear_speech[:180]],
+                    "recommended_action": "buy",
+                },
+                analyst_id=f"{self.agent_id}_bull",
+            ),
+            coerce_analyst_card(
+                {
+                    "analyst_id": f"{self.agent_id}_bear",
+                    "thesis": "Bear case from debate",
+                    "evidence": [
+                        {"type": "risk", "content": bear_speech[:280], "weight": 0.72},
+                        {"type": "macro", "content": f"panic={panic:.2f}", "weight": 0.60},
+                    ],
+                    "time_horizon": "swing",
+                    "risk_tags": ["panic", "liquidity"] if panic > 0.45 else ["liquidity"],
+                    "confidence": 0.60,
+                    "counterarguments": [bull_speech[:180]],
+                    "recommended_action": "sell",
+                },
+                analyst_id=f"{self.agent_id}_bear",
+            ),
+            coerce_analyst_card(
+                {
+                    "analyst_id": f"{self.agent_id}_risk_committee",
+                    "thesis": "Risk manager synthesis",
+                    "evidence": [
+                        {"type": "risk", "content": risk_speech[:280], "weight": 0.80},
+                        {"type": "risk", "content": f"pnl_pct={pnl_pct:.3f}", "weight": 0.70},
+                    ],
+                    "time_horizon": "intraday",
+                    "risk_tags": ["panic", "liquidity", "overcrowding"],
+                    "confidence": 0.68,
+                    "counterarguments": ["debate may overfit current narrative"],
+                    "recommended_action": "reduce_risk" if panic > 0.5 or pnl_pct < -0.08 else "hold",
+                },
+                analyst_id=f"{self.agent_id}_risk_committee",
+            ),
+        ]
+        validated_cards: List[Dict] = []
+        for idx, card in enumerate(analyst_cards):
+            valid, _ = validate_analyst_card(card)
+            if valid:
+                validated_cards.append(card)
+            else:
+                validated_cards.append(
+                    coerce_analyst_card({}, analyst_id=f"{self.agent_id}_fallback_{idx}")
+                )
+        analyst_cards = validated_cards
+
+        risk_alert = self.risk_committee.assess(
+            {
+                "cvar": float(market_state.get("risk_cvar", pnl_pct - 0.02)),
+                "max_drawdown": float(market_state.get("max_drawdown", pnl_pct)),
+                "turnover": float(market_state.get("turnover", abs(panic) * 1.2)),
+                "crowding": float(market_state.get("crowding", abs(panic))),
+                "volatility_spike": float(market_state.get("volatility_spike", 1.0 + abs(panic) * 2.0)),
+            }
+        ).to_dict()
+        policy_update = self.policy_committee.translate(str(market_state.get("policy_description", "") or market_state.get("news", "")))
+
+        manager_final_card = aggregate_analyst_cards(analyst_cards, risk_alert=risk_alert)
+        decision = self._decision_from_manager_card(manager_final_card, account_state, market_state)
+
+        risk_approved, risk_reason = self._risk_review(decision, account_state, debate_messages)
         if not risk_approved:
-            decision = {"action": "HOLD", "qty": 0, "reason": risk_reason}
-            debate_messages.append(DebateMessage(
-                role=DebateRole.RISK_MGR,
-                content=risk_reason,
-                emotion_score=0.0
-            ))
-        
-        # 记录完整辩论
+            decision = {"action": "HOLD", "qty": 0, "price": float(market_state.get('last_price', 0.0) or 0.0)}
+
+        reasoning_summary = (
+            f"debate_manager_action={manager_final_card.get('recommended_action', 'hold')}; "
+            f"calibrated_conf={manager_final_card.get('calibrated_confidence', 0.0):.3f}; "
+            f"risk_level={risk_alert.get('level', 'normal')}"
+        )
+
         debate_record = DebateRecord(
             agent_id=self.agent_id,
             timestamp=time.time(),
@@ -392,41 +429,55 @@ class DebateBrain(DeepSeekBrain):
             debate_rounds=debate_messages,
             final_decision=decision,
             risk_approval=risk_approved,
-            reasoning_summary=reasoning_summary
+            reasoning_summary=reasoning_summary,
         )
-        
         DebateBrain.debate_history[self.agent_id].append(debate_record)
-        
-        # 保留最近10条辩论记录
         if len(DebateBrain.debate_history[self.agent_id]) > 10:
             DebateBrain.debate_history[self.agent_id].pop(0)
-        
-        # 计算综合情绪分数
-        if debate_messages:
-            avg_emotion = sum(m.emotion_score for m in debate_messages) / len(debate_messages)
-        else:
-            avg_emotion = 0.0
-        
-        # 同时记录到 ThoughtRecord（兼容 fMRI）
+
+        avg_emotion = sum(m.emotion_score for m in debate_messages) / len(debate_messages) if debate_messages else 0.0
         thought_record = ThoughtRecord(
             agent_id=self.agent_id,
             timestamp=time.time(),
             reasoning_content=self._format_debate_for_display(debate_messages),
             emotion_score=avg_emotion,
             decision=decision,
-            market_context=market_state
+            market_context=market_state,
         )
         DeepSeekBrain.thought_history[self.agent_id].append(thought_record)
-        
+
+        trace_path = export_decision_trace(
+            {
+                "agent_id": self.agent_id,
+                "timestamp": time.time(),
+                "debate_messages": [
+                    {"role": msg.role.value, "content": msg.content, "emotion_score": msg.emotion_score}
+                    for msg in debate_messages
+                ],
+                "analyst_cards": analyst_cards,
+                "manager_final_card": manager_final_card,
+                "risk_alert": risk_alert,
+                "policy_conditions": policy_update,
+                "decision": decision,
+            }
+        )
+
         return {
             "decision": decision,
             "debate_messages": debate_messages,
             "risk_approved": risk_approved,
             "risk_reason": risk_reason,
             "emotion_score": avg_emotion,
-            "reasoning": reasoning_summary
+            "reasoning": reasoning_summary,
+            "analyst_cards": analyst_cards,
+            "contradiction_matrix": manager_final_card.get("contradiction_matrix", {}),
+            "manager_final_card": manager_final_card,
+            "risk_alerts": risk_alert,
+            "policy_conditions": policy_update,
+            "calibration": manager_final_card.get("calibration", {}),
+            "decision_trace_path": trace_path,
         }
-    
+
     def _format_debate_for_display(self, messages: List[DebateMessage]) -> str:
         """格式化辩论记录供展示"""
         lines = ["=== 内心辩论记录 ===\n"]
@@ -459,5 +510,12 @@ class DebateBrain(DeepSeekBrain):
             "decision": result["decision"],
             "reasoning": result["reasoning"],
             "raw_content": self._format_debate_for_display(result["debate_messages"]),
-            "emotion_score": result["emotion_score"]
+            "emotion_score": result["emotion_score"],
+            "analyst_cards": result.get("analyst_cards", []),
+            "contradiction_matrix": result.get("contradiction_matrix", {}),
+            "manager_final_card": result.get("manager_final_card", {}),
+            "risk_alerts": result.get("risk_alerts", {}),
+            "policy_conditions": result.get("policy_conditions", {}),
+            "calibration": result.get("calibration", {}),
+            "decision_trace_path": result.get("decision_trace_path", ""),
         }

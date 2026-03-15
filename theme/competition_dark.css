@@ -1,0 +1,83 @@
+﻿:root {
+  --c-bg: #070b14;
+  --c-bg-elev: #0f1726;
+  --c-border: #1f2b44;
+  --c-text: #d8e2f2;
+  --c-muted: #8aa0c2;
+  --c-accent: #4da6ff;
+  --c-good: #22c55e;
+  --c-bad: #ef4444;
+  --c-warn: #f59e0b;
+}
+
+html, body, [class*="css"] {
+  font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+}
+
+.stApp {
+  background:
+    radial-gradient(circle at 15% 15%, rgba(77, 166, 255, 0.16), transparent 40%),
+    radial-gradient(circle at 85% 10%, rgba(34, 197, 94, 0.12), transparent 42%),
+    radial-gradient(circle at 50% 90%, rgba(245, 158, 11, 0.09), transparent 44%),
+    var(--c-bg);
+  color: var(--c-text);
+}
+
+.mode-pill {
+  margin-top: 10px;
+  margin-bottom: 14px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  display: inline-block;
+  font-size: 12px;
+  color: var(--c-text);
+  border: 1px solid var(--c-border);
+  background: linear-gradient(90deg, rgba(77,166,255,0.12), rgba(34,197,94,0.10));
+}
+
+.kpi-card {
+  min-height: 112px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: linear-gradient(160deg, rgba(18, 30, 52, 0.95), rgba(10, 19, 34, 0.95));
+  padding: 12px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+}
+
+.kpi-title {
+  font-size: 12px;
+  color: var(--c-muted);
+  letter-spacing: 0.4px;
+}
+
+.kpi-value {
+  margin-top: 8px;
+  font-size: 28px;
+  line-height: 1.1;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.kpi-note {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #93a7c6;
+}
+
+div.stButton > button {
+  border: 1px solid var(--c-border);
+  color: var(--c-text);
+  background: linear-gradient(180deg, rgba(22, 36, 61, 0.95), rgba(13, 23, 38, 0.95));
+}
+
+div.stButton > button:hover {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 1px rgba(77, 166, 255, 0.2) inset;
+}
+
+div[data-baseweb="select"] > div,
+div[data-baseweb="input"] > div,
+div[data-baseweb="textarea"] > div {
+  background-color: rgba(13, 23, 38, 0.95);
+  border-color: var(--c-border);
+}

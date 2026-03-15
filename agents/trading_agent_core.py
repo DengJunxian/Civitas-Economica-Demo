@@ -14,12 +14,22 @@ import json
 import logging
 import random
 import statistics
+import time
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from core.macro.state import MacroContextDTO
+from core.validator import (
+    PolicyCommittee,
+    RiskCommittee,
+    aggregate_analyst_cards,
+    coerce_analyst_card,
+    export_decision_trace,
+    validate_analyst_card,
+)
 
 # 配置模块级别的 Logger (按照要求提供清晰的日志追踪)
 logger = logging.getLogger("civitas.agents.trading_agent")
@@ -156,6 +166,9 @@ class TradingAgent:
         # 延迟到这里局部导入以避免潜在的循环依赖引用
         from agents.ebbinghaus_memory import EbbinghausMemoryBank
         self.memory_bank = EbbinghausMemoryBank(agent_id=self.agent_id)
+        self.risk_committee = RiskCommittee()
+        self.policy_committee = PolicyCommittee()
+        self.last_decision_artifacts: Dict[str, Any] = {}
 
         logger.info(f"Initialized TradingAgent {self.agent_id} with Persona: "
                     f"[{self.persona.cognitive_bias.value}, Risk: {self.persona.risk_tolerance}]")
@@ -267,78 +280,198 @@ class TradingAgent:
             reasoning_chain=f"意图={direction}/{urgency}，FCN 映射执行。原因：{reason}"
         )
 
+    def _build_structured_analyst_cards(
+        self,
+        market_data: Dict[str, Any],
+        macro_context: Optional[MacroContextDTO],
+        retrieved_context: str,
+    ) -> List[Dict[str, Any]]:
+        """Build analyst cards in required JSON schema."""
+        current_price = float(market_data.get("current_price", 0.0) or 0.0)
+        panic_level = float(market_data.get("panic_level", 0.0) or 0.0)
+        pnl_pct = float(market_data.get("pnl_pct", 0.0) or 0.0)
+        news_text = str(market_data.get("news", ""))
+        news_lower = news_text.lower()
+        policy_text = str(market_data.get("policy_description", ""))
+        macro_state = macro_context.macro_state if macro_context is not None else None
+
+        price_history = [float(x) for x in (market_data.get("price_history", []) or []) if x is not None]
+        momentum = 0.0
+        if len(price_history) >= 3 and abs(price_history[-3]) > 1e-9:
+            momentum = (price_history[-1] - price_history[-3]) / abs(price_history[-3])
+
+        news_sentiment = 0.0
+        if any(token in news_lower for token in ("beat", "support", "stimulus", "upside", "bull")):
+            news_sentiment += 0.35
+        if any(token in news_lower for token in ("panic", "default", "selloff", "downgrade", "risk")):
+            news_sentiment -= 0.35
+        news_sentiment -= 0.4 * panic_level
+
+        liquidity = float(macro_state.liquidity_index) if macro_state is not None else 1.0
+        unemployment = float(macro_state.unemployment) if macro_state is not None else 0.05
+        credit_spread = float(macro_state.credit_spread) if macro_state is not None else 0.02
+        sentiment_index = float(macro_state.sentiment_index) if macro_state is not None else 0.5
+
+        news_action = "buy" if news_sentiment > 0.08 else "sell" if news_sentiment < -0.08 else "hold"
+        macro_action = "buy" if (liquidity > 1.05 and credit_spread < 0.03) else "reduce_risk" if (unemployment > 0.08 or credit_spread > 0.05) else "hold"
+        risk_action = "reduce_risk" if (panic_level > 0.55 or pnl_pct < -0.08) else "hold"
+
+        cards = [
+            {
+                "analyst_id": f"{self.agent_id}_news_analyst",
+                "thesis": f"News-price thesis around current_price={current_price:.2f}",
+                "evidence": [
+                    {"type": "news", "content": news_text[:280] or "no_news", "weight": 0.70},
+                    {"type": "price", "content": f"momentum={momentum:.4f}", "weight": 0.58},
+                ],
+                "time_horizon": "intraday",
+                "risk_tags": ["panic"] if panic_level > 0.45 else [],
+                "confidence": min(0.92, 0.45 + abs(news_sentiment)),
+                "counterarguments": ["news impact may fade quickly", "headline may be partially priced in"],
+                "recommended_action": news_action,
+            },
+            {
+                "analyst_id": f"{self.agent_id}_macro_analyst",
+                "thesis": "Macro-policy pass-through assessment",
+                "evidence": [
+                    {"type": "macro", "content": f"liquidity={liquidity:.3f}, credit_spread={credit_spread:.3f}", "weight": 0.72},
+                    {"type": "macro", "content": f"unemployment={unemployment:.3f}, sentiment_index={sentiment_index:.3f}", "weight": 0.64},
+                ],
+                "time_horizon": "weekly",
+                "risk_tags": ["liquidity"] if liquidity < 0.9 else [],
+                "confidence": min(0.88, 0.48 + 0.22 * abs(liquidity - 1.0) + 0.20 * abs(credit_spread - 0.02)),
+                "counterarguments": ["macro effect has lag", "policy execution uncertainty"],
+                "recommended_action": macro_action,
+            },
+            {
+                "analyst_id": f"{self.agent_id}_risk_analyst",
+                "thesis": "Portfolio preservation and market micro risk assessment",
+                "evidence": [
+                    {"type": "risk", "content": f"panic_level={panic_level:.3f}, pnl_pct={pnl_pct:.3f}", "weight": 0.78},
+                    {"type": "social", "content": str(market_data.get("social_signal", "neutral"))[:220], "weight": 0.52},
+                    {"type": "risk", "content": str(retrieved_context or "no_memory_context")[:220], "weight": 0.46},
+                ],
+                "time_horizon": "intraday",
+                "risk_tags": ["liquidity", "panic", "overcrowding"] if panic_level > 0.50 else ["liquidity"] if panic_level > 0.30 else [],
+                "confidence": min(0.93, 0.52 + 0.40 * panic_level),
+                "counterarguments": ["defensive stance may miss rebound"],
+                "recommended_action": risk_action,
+            },
+        ]
+        return [coerce_analyst_card(card, analyst_id=card.get("analyst_id", "analyst")) for card in cards]
+
+    def _build_risk_metrics(self, market_data: Dict[str, Any], panic_level: float, pnl_pct: float) -> Dict[str, float]:
+        """Build committee-ready risk metrics payload."""
+        return {
+            "cvar": float(market_data.get("cvar", market_data.get("risk_cvar", pnl_pct - 0.02))),
+            "max_drawdown": float(market_data.get("max_drawdown", pnl_pct)),
+            "turnover": float(market_data.get("turnover", 1.0 + panic_level * 1.4)),
+            "crowding": float(market_data.get("crowding", min(1.0, panic_level + abs(pnl_pct) * 0.5))),
+            "volatility_spike": float(market_data.get("volatility_spike", 1.0 + panic_level * 2.2)),
+        }
+
+    def _manager_card_to_intent(
+        self,
+        manager_final_card: Dict[str, Any],
+        risk_alert: Dict[str, Any],
+    ) -> TradeIntent:
+        """Convert manager final card into execution intent."""
+        action = str(manager_final_card.get("recommended_action", "hold")).lower()
+        calibrated_conf = float(manager_final_card.get("calibrated_confidence", 0.5))
+        risk_level = str(risk_alert.get("level", "normal")).lower()
+
+        if action == "buy":
+            direction = "BUY"
+        elif action in {"sell", "reduce_risk"}:
+            direction = "SELL"
+        else:
+            direction = "HOLD"
+
+        if risk_level in {"high", "critical"} and direction == "SELL":
+            urgency = "High"
+        elif calibrated_conf >= 0.75:
+            urgency = "High"
+        elif calibrated_conf >= 0.45:
+            urgency = "Medium"
+        else:
+            urgency = "Low"
+
+        reason = (
+            f"manager_action={action}; signal={float(manager_final_card.get('aggregated_signal', 0.0)):.3f}; "
+            f"calibrated_confidence={calibrated_conf:.3f}; risk_level={risk_level}"
+        )
+        return TradeIntent(direction=direction, urgency=urgency, reason=reason)
+
     async def generate_trading_decision(self, market_data: Dict[str, Any], retrieved_context: str) -> TradeAction:
-        """
-        使用带有严格 Pydantic 输出解析的 LLM 模型来产生异步的交易指令。
-        
-        骨架方法：系统 Prompt 会被动态注入 Persona 的约束参数，再结合环境数据
-        与已检索的 ChromaDB 长期记忆让 LLM 一起推演决定。
+        """Generate orders from structured evidence flow with committee governance."""
+        logger.debug(f"[{self.agent_id}] running structured evidence flow")
 
-        Args:
-            market_data (Dict[str, Any]): 系统提供的当前市场报价和指令簿深度等信息。
-            retrieved_context (str): 智能体对过往市场的自我历史记忆及知识截面。
+        macro_context = MacroContextDTO.coerce(market_data.get("macro_context"))
+        market_payload = dict(market_data)
+        if macro_context is not None:
+            market_payload["macro_context"] = macro_context.to_payload()
 
-        Returns:
-            TradeAction: Pydantic 经过验证的数据结构实例，用来喂给撮合引擎 (Engine)。
-        """
-        logger.debug(f"[{self.agent_id}] 开始深入思考 (Reasoning) 并生成交易决策...")
+        panic_level = float(market_payload.get("panic_level", 0.0) or 0.0)
+        pnl_pct = float(market_payload.get("pnl_pct", 0.0) or 0.0)
 
-        # --- 动态生成的 System Prompt，预先设定身份 ---
-        llm_temp = GLOBAL_CONFIG.get("llm_temperature", 0.7)
-        prompt_template = f"""
-您是 Civitas-Economica 系统内高度特化的金融交易智能体。请严格基于自己特定的人格属性制定交易决策。
+        analyst_cards = self._build_structured_analyst_cards(market_payload, macro_context, retrieved_context)
+        valid_cards: List[Dict[str, Any]] = []
+        for idx, card in enumerate(analyst_cards):
+            is_valid, _ = validate_analyst_card(card)
+            if is_valid:
+                valid_cards.append(card)
+            else:
+                valid_cards.append(coerce_analyst_card({}, analyst_id=f"{self.agent_id}_fallback_{idx}"))
 
-【你的心理与行为特征】
-{self.persona.describe()}
+        risk_metrics = self._build_risk_metrics(market_payload, panic_level, pnl_pct)
+        risk_alert = self.risk_committee.assess(risk_metrics).to_dict()
 
-【历史记忆截面 (ChromaDB Vector)】
-{retrieved_context}
+        policy_text = str(
+            market_payload.get("policy_description")
+            or (macro_context.policy_summary if macro_context is not None else "")
+            or market_payload.get("news", "")
+        )
+        policy_conditions = self.policy_committee.translate(policy_text)
 
-【即时市场与行情数据】
-{json.dumps(market_data, indent=2, ensure_ascii=False)}
+        manager_final_card = aggregate_analyst_cards(valid_cards, risk_alert=risk_alert)
+        manager_intent = self._manager_card_to_intent(manager_final_card, risk_alert)
+        action_decision = self._intent_to_order(manager_intent, market_payload)
 
-请作为一个 {self.persona.cognitive_bias.value} 型投资者并结合宏观经济情况进行 {self.persona.investment_horizon.value} 分析。
-思考过程中请始终记住：您的决策不能明显违背您的「风险承受度」。
+        calibration = manager_final_card.get("calibration", {})
+        contradiction = manager_final_card.get("contradiction_matrix", {})
+        contradiction_idx = float(contradiction.get("contradiction_index", 0.0)) if isinstance(contradiction, dict) else 0.0
 
-请您严格按照给定的 JSON Schema 返回结果：包含 action (BUY/SELL/HOLD), amount, target_price，
-以及 reasoning_chain。
-"""
-        # 注意: 实际使用 LangChain 时，这里可以调用 `LLMChain` 或 `chat_model.agenerate`。
-        # 这里为保持骨架，使用异步延时模拟 LLM 请求响应，并强行构造符合 Pydantic 的返回值。
-        
-        await asyncio.sleep(0.1)  # 模拟 LLM 推理异步调度耗时
-        
-        try:
-            # 模拟 LLM 经过输出解析器(OutputParser)后得到的数据提取过程
-            # 现实操作中，这里是从 LLM 返回文本中提取出的 JSON/Dict
-            simulated_response = {
-                "direction": "BUY" if self.persona.risk_tolerance > 0.55 else "HOLD",
-                "urgency": "High" if self.persona.policy_sensitivity > 0.7 else "Medium",
-                "reason": f"受 {self.persona.cognitive_bias.value} 偏差影响的意图输出"
-            }
-            
-            # 使用 Pydantic 的严密校验解析字典。若字段缺失或类别错误将抛出 ValidationError
-            try:
-                intent = TradeIntent(**simulated_response)
-            except ValidationError:
-                intent = self._coerce_legacy_intent(simulated_response)
+        trace_payload = {
+            "agent_id": self.agent_id,
+            "timestamp": time.time(),
+            "analyst_cards": valid_cards,
+            "manager_final_card": manager_final_card,
+            "risk_alerts": risk_alert,
+            "policy_conditions": policy_conditions,
+            "market_data": market_payload,
+            "retrieved_context": str(retrieved_context),
+            "decision": action_decision.model_dump(),
+        }
+        trace_path = export_decision_trace(trace_payload)
 
-            action_decision = self._intent_to_order(intent, market_data)
-            
-            logger.info(f"[{self.agent_id}] 决定执行: {action_decision.action} {action_decision.amount}")
-            return action_decision
-            
-        except ValidationError as ve:
-            logger.error(f"[{self.agent_id}] 遇到了 LLM 输出格式幻觉 (Hallucination) 导致 Pydantic 校验失败: {ve}")
-            # Fallback 策略：一旦发现解析错误，自动回退到 HOLD 操作，保证仿真程序不崩溃
-            return TradeAction(
-                action="HOLD", 
-                amount=0.0, 
-                reasoning_chain="LLM 输出不合规或发生幻觉，已被安全回落机制拦截，执行 HOLD 策略。"
-            )
-        except Exception as e:
-            logger.error(f"[{self.agent_id}] 生成交易决策发生未知异常: {e}")
-            return TradeAction(action="HOLD", amount=0.0, reasoning_chain="未知错误导致的系统保护性 HOLD。")
+        self.last_decision_artifacts = {
+            "analyst_cards": valid_cards,
+            "manager_final_card": manager_final_card,
+            "risk_alerts": risk_alert,
+            "policy_conditions": policy_conditions,
+            "decision_trace_path": trace_path,
+        }
+
+        structured_summary = (
+            f"manager={manager_final_card.get('recommended_action', 'hold')}; "
+            f"conf={float(manager_final_card.get('calibrated_confidence', 0.0)):.3f}; "
+            f"contradiction={contradiction_idx:.3f}; "
+            f"brier_like={float(calibration.get('brier_like_score', 0.0)):.4f}; "
+            f"confidence_drift={float(calibration.get('confidence_drift', 0.0)):.4f}; "
+            f"trace={trace_path}"
+        )
+        action_decision.reasoning_chain = f"{action_decision.reasoning_chain} | {structured_summary}"
+        return action_decision
 
 
 # ----------------------------------------------------------------------------

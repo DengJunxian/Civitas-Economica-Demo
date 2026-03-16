@@ -1,6 +1,8 @@
 import sys
 import os
 import subprocess
+
+
 def check_environment():
     """检查运行环境依赖"""
     # 局部导入以避免提前加载
@@ -14,7 +16,12 @@ def check_environment():
     # 检查 API Key
     if not cfg.DEEPSEEK_API_KEY:
         print("\n[!] 警告: 未检测到 DEEPSEEK_API_KEY 环境变量。")
-        key = input("请输入 DeepSeek API Key (回车跳过使用默认/Mock): ").strip()
+        non_interactive = (not sys.stdin) or (not sys.stdin.isatty())
+        if non_interactive:
+            print("[*] 检测到非交互终端，自动跳过 API Key 输入并进入离线可演示模式。")
+            key = ""
+        else:
+            key = input("请输入 DeepSeek API Key (回车跳过使用默认/Mock): ").strip()
         if key:
             # 设置环境变量
             os.environ["DEEPSEEK_API_KEY"] = key

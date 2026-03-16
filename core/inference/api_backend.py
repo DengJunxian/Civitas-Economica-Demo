@@ -6,17 +6,19 @@ API 推理后端
 """
 
 import os
-from typing import Optional, Dict, List, Any
+from types import ModuleType
+from typing import Optional, List, Any, cast
 
 from config import GLOBAL_CONFIG
 from core.model_router import ModelRouter
 
+_openai_module: Optional[ModuleType]
 try:
-    from openai import OpenAI
+    import openai as _openai_module
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
-    OpenAI = None
+    _openai_module = None
 
 
 class APIBackend:
@@ -40,7 +42,7 @@ class APIBackend:
         self.max_tokens = max_tokens
         self.temperature = temperature
         
-        self._client = None
+        self._client: Optional[Any] = None
         self._router: Optional[ModelRouter] = None
         try:
             self._router = ModelRouter(
@@ -50,13 +52,16 @@ class APIBackend:
         except Exception:
             self._router = None
         
-    def _get_client(self) -> "OpenAI":
+    def _get_client(self) -> Any:
         if self._client is None:
             if not OPENAI_AVAILABLE:
                 raise ImportError("openai 库未安装，请运行: pip install openai")
             if not self.api_key:
                 raise ValueError("DEEPSEEK_API_KEY 未设置")
-            self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            module: Optional[ModuleType] = cast(Optional[ModuleType], _openai_module)
+            if module is None:
+                raise ImportError("openai 客户端不可用")
+            self._client = module.OpenAI(api_key=self.api_key, base_url=self.base_url)
         return self._client
     
     def generate(
@@ -104,7 +109,7 @@ class APIBackend:
         try:
             response = client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=cast(Any, messages),
                 max_tokens=kwargs.get("max_tokens", self.max_tokens),
                 temperature=kwargs.get("temperature", self.temperature)
             )

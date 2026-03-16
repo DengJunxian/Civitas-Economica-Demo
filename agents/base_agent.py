@@ -17,7 +17,6 @@ Agent 抽象基类 — Agentic Architecture 核心契约
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
-import time
 
 
 # ==========================================
@@ -85,7 +84,6 @@ class MarketSnapshot:
             "depth": self.depth,
             "volume": self.total_volume,
             "volatility": self.volatility,
-            "trend": self.market_trend,
             "trend": self.market_trend,
             "panic_level": self.panic_level,
             "policy_description": self.policy_description,

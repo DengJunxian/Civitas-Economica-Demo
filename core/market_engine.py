@@ -1,33 +1,24 @@
 # file: core/integrated_market_engine.py
 
-import heapq
 import time
 import random
-import re
-import math
-from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Dict, Any
+from dataclasses import dataclass
+from typing import List, Tuple, Optional, Dict, Any, TYPE_CHECKING
 from datetime import datetime, timedelta
 
 import pandas as pd
 import numpy as np
 import akshare as ak 
-from openai import OpenAI
-import httpx
 import uuid
 import os
-from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Dict, Any
-from datetime import datetime, timedelta
-
-import pandas as pd
-import numpy as np
-import akshare as ak 
-from openai import OpenAI
-import httpx
 
 from core.types import Order, Trade, Candle, OrderSide, OrderType, OrderStatus
 from core.time_manager import SimulationClock
+from core.policy import PolicyManager
+from core.regulation.risk_control import RiskEngine
+
+if TYPE_CHECKING:
+    from agents.base_agent import MarketSnapshot
 
 # Import C++ Optimized OrderBook
 try:
@@ -83,7 +74,7 @@ class ChinaTradingCalendar:
         """Returns the next valid A-share trading day."""
         try:
             curr = datetime.strptime(date_str, "%Y-%m-%d")
-        except:
+        except Exception:
             curr = datetime.now()
             
         while True:
@@ -525,7 +516,7 @@ class RealMarketLoader:
         for i, row in df.iterrows():
             o = float(row.get("open", row.get("Open", 3000.0)))
             h = float(row.get("high", row.get("High", 3000.0)))
-            l = float(row.get("low", row.get("Low", 3000.0)))
+            low_price = float(row.get("low", row.get("Low", 3000.0)))
             c = float(row.get("close", row.get("Close", 3000.0)))
             v = int(float(row.get("volume", row.get("Volume", 0.0))))
             d = str(row.get("date", row.get("Date", "2024-01-01")))
@@ -536,7 +527,7 @@ class RealMarketLoader:
                     timestamp=d,
                     open=o,
                     high=h,
-                    low=l,
+                    low=low_price,
                     close=c,
                     volume=v,
                     is_simulated=False,
@@ -585,16 +576,28 @@ class RealMarketLoader:
 
             try:
                 if ak is not None:
-                    spot_df = ak.stock_zh_index_spot()
-                    symbol_code = symbol.replace("sh", "").replace("sz", "")
-                    row_spot = spot_df[spot_df["代码"] == symbol_code]
-                    if not row_spot.empty:
-                        latest_price = float(row_spot.iloc[0]["最新价"])
-                        if candles and latest_price > 0:
-                            candles[-1].close = latest_price
-                            print(f"[*] Reconciled latest spot close for {symbol}: {latest_price}")
+                    # 兼容 akshare 不同版本的指数现货接口
+                    spot_fetcher = getattr(ak, "stock_zh_index_spot", None) or getattr(ak, "stock_zh_index_spot_em", None)
+                    if callable(spot_fetcher):
+                        spot_df = spot_fetcher()
+                        if isinstance(spot_df, pd.DataFrame) and not spot_df.empty:
+                            symbol_code = symbol.replace("sh", "").replace("sz", "")
+                            code_col = "代码" if "代码" in spot_df.columns else ("symbol" if "symbol" in spot_df.columns else "")
+                            if code_col:
+                                row_spot = spot_df[spot_df[code_col].astype(str).str.contains(symbol_code, na=False)]
+                                if not row_spot.empty:
+                                    price_col = ""
+                                    for candidate in ("最新价", "close", "收盘", "latest"):
+                                        if candidate in row_spot.columns:
+                                            price_col = candidate
+                                            break
+                                    if price_col:
+                                        latest_price = float(row_spot.iloc[0][price_col])
+                                        if candles and latest_price > 0:
+                                            candles[-1].close = latest_price
+                                            print(f"[*] Reconciled latest spot close for {symbol}: {latest_price}")
             except Exception as e:
-                print(f"[!] Spot reconciliation failed: {e}")
+                print(f"[!] Spot reconciliation skipped: {e}")
 
             print(f"[OK] Loaded {len(candles)} trading-day candles")
             return candles
@@ -735,9 +738,6 @@ class PolicyInterpreter:
 # (Integrated Logic)
 # ==========================================
 
-from core.policy import PolicyManager  
-from core.regulation.risk_control import RiskEngine
-
 class MarketDataManager:
     def __init__(self, api_key_or_router, load_real_data=True, clock: Optional[SimulationClock] = None, regulatory_module: Optional[Any] = None):
         self.policy = PolicyState()
@@ -861,7 +861,8 @@ class MarketDataManager:
 
     def calculate_csad(self, agent_returns):
         """Calculate Cross-Sectional Absolute Deviation to detect herd behavior."""
-        if agent_returns is None or len(agent_returns) == 0: return
+        if agent_returns is None or len(agent_returns) == 0:
+            return
         rm = np.mean(agent_returns)
         csad = np.mean(np.abs(agent_returns - rm))
         self.csad_history.append(csad)
@@ -1017,13 +1018,7 @@ class MarketDataManager:
         else:
             step_trades = trades
         
-        # 3. Calculate Limits (Visual/Logic consistency)
-        limit_rate = GLOBAL_CONFIG.PRICE_LIMIT
-        limit_up = self.engine.prev_close * (1.0 + limit_rate)
-        limit_down = self.engine.prev_close * (1.0 - limit_rate)
-
-        # 4. Generate Candle
-        # 4. Generate Candle
+        # 3. Generate Candle
         if not step_trades:
             # No trades: Simulate random drift based on panic
             drift = random.normalvariate(0, 0.003)

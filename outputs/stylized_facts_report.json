@@ -36,8 +36,8 @@
     "ath_outperformance": 0.05
   },
   "loss_aversion_intensity": {
-    "mean": 2.3200000000000003,
-    "p90": 2.3200000000000003,
+    "mean": 2.64,
+    "p90": 2.64,
     "n_obs": 1
   },
   "volatility clustering": {

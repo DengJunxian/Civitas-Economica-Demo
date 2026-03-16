@@ -1,8 +1,6 @@
 ﻿# file: agents/population.py
 
 import numpy as np
-import networkx as nx
-import pandas as pd
 from typing import List, Dict, Tuple, Optional, Any
 from dataclasses import dataclass, field
 import random
@@ -287,8 +285,12 @@ class StratifiedPopulation:
         rel_policy = (price - self.reference_points[:, 3]) / self.reference_points[:, 3]
 
         weighted_ref = 0.34 * rel_purchase + 0.26 * rel_high + 0.20 * rel_peer + 0.20 * rel_policy
-        gains = np.where(weighted_ref >= 0.0, np.power(weighted_ref, 0.88), 0.0)
-        losses = np.where(weighted_ref < 0.0, -2.25 * np.power(-weighted_ref, 0.88), 0.0)
+        # 避免 np.where 同时计算两侧分支导致负底数幂次告警
+        gain_base = np.clip(weighted_ref, 0.0, None)
+        loss_base = np.clip(-weighted_ref, 0.0, None)
+        gains = np.power(gain_base, 0.88)
+        losses = -2.25 * np.power(loss_base, 0.88)
+        losses = np.where(weighted_ref < 0.0, losses, 0.0)
         utility = gains + losses
         direction = np.tanh(utility * 8.0)
 
@@ -575,7 +577,6 @@ class StratifiedPopulation:
             prices: (N,) 鎸傚崟浠锋牸
         """
         self.update_behavioral_layer(current_price)
-        sentiment = self.state[:, self.IDX_SENTIMENT]
         intent = self.trading_intent_state
         risk_appetite = self.risk_appetite_state
         
@@ -632,11 +633,6 @@ class StratifiedPopulation:
         if len(executed_indices) == 0:
             return
             
-        # 鎻愬彇鐩稿叧琛?
-        subset_cash = self.state[executed_indices, self.IDX_CASH]
-        subset_holdings = self.state[executed_indices, self.IDX_HOLDINGS]
-        subset_cost = self.state[executed_indices, self.IDX_COST]
-        
         cost_val = executed_prices * executed_qtys
         
         # 鏇存柊璧勯噾 (涔板叆鍑忥紝鍗栧嚭鍔?
@@ -657,7 +653,6 @@ class StratifiedPopulation:
             b_prc = executed_prices[buy_indices_local]
             
             # 鍘熷鎸佷粨鍜屾垚鏈?
-            old_qty = subset_holdings[buy_indices_local] # 娉ㄦ剰: 杩欐槸鏇存柊鍓嶇殑鏁伴噺鍚? 涓嶏紝涓婇潰宸茬粡 += delta浜?
             # 淇: 搴旇鐢ㄦ洿鏂板墠鐨勬暟閲忋€傜敱浜庝笂闈㈠凡缁忓姞浜嗭紝杩欓噷瑕佸噺鍥炲幓绠楁棫鐨?
             cur_qty = self.state[g_idx, self.IDX_HOLDINGS]
             prev_qty = cur_qty - b_qty

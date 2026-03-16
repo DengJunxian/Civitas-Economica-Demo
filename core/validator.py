@@ -7,9 +7,8 @@
 """
 
 import numpy as np
-import pandas as pd
 from scipy import stats
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Dict, Tuple, Optional
 from dataclasses import dataclass
@@ -420,7 +419,7 @@ def export_decision_trace(trace: Dict[str, Any], trace_dir: str = "artifacts/dec
     """Persist one decision trace JSON and return the file path."""
     path = Path(trace_dir)
     path.mkdir(parents=True, exist_ok=True)
-    filename = f"{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}.json"
+    filename = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}.json"
     file_path = path / filename
     file_path.write_text(json.dumps(trace, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     return str(file_path)

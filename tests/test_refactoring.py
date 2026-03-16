@@ -1,10 +1,9 @@
 
 import unittest
 import os
-import shutil
-import time
+from unittest.mock import patch
 from core.time_manager import SimulationClock
-from core.market_engine import MarketDataManager, Order, MatchingEngine, OrderBookCPP
+from core.market_engine import MarketDataManager, Order
 from core.utils import PriceQuantizer
 from core.types import OrderSide, OrderType
 
@@ -25,19 +24,12 @@ class TestRefactoring(unittest.TestCase):
         
     def test_market_data_manager_caching(self):
         print("\n[Test] Market Data Caching")
-        start_time = time.time()
-        mdm = MarketDataManager(api_key_or_router="dummy", load_real_data=True, clock=self.clock)
-        first_load_time = time.time() - start_time
-        print(f"First load time (fetch): {first_load_time:.4f}s")
-        
+        MarketDataManager(api_key_or_router="dummy", load_real_data=True, clock=self.clock)
+
         self.assertTrue(os.path.exists("data/cache/sh000001_365.csv"))
-        
-        start_time = time.time()
-        mdm2 = MarketDataManager(api_key_or_router="dummy", load_real_data=True, clock=self.clock)
-        second_load_time = time.time() - start_time
-        print(f"Second load time (cache): {second_load_time:.4f}s")
-        
-        self.assertLess(second_load_time, first_load_time)
+        with patch("core.market_engine.RealMarketLoader._provider.get_ohlcv", side_effect=AssertionError("cache miss")):
+            # 第二次加载应直接命中本地缓存，不应再触发 provider 请求。
+            MarketDataManager(api_key_or_router="dummy", load_real_data=True, clock=self.clock)
         
     def test_order_timestamps(self):
         print("\n[Test] Order Timestamps")
@@ -57,7 +49,7 @@ class TestRefactoring(unittest.TestCase):
         )
         
         # Submit
-        trades = mdm.submit_agent_order(order)
+        mdm.submit_agent_order(order)
         # Verify order timestamp preserved
         pass 
         

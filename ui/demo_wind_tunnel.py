@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, MutableMapping, Optional, cast
 
 import pandas as pd
 import streamlit as st
@@ -133,12 +133,13 @@ def _handle_autoplay(scenario: Any) -> None:
     if now - last < AUTO_PLAY_INTERVAL_SECONDS:
         return
 
-    result = advance_competition_demo(st.session_state, steps=1)
+    state = cast(MutableMapping[str, Any], st.session_state)
+    result = advance_competition_demo(state, steps=1)
     hits = result.get("narration", [])
     if hits:
         st.session_state.demo_last_narration = hits[-1]
     else:
-        replay_next_narration(st.session_state)
+        replay_next_narration(state)
     st.session_state._demo_autoplay_time = now
 
     if not result.get("done", False):
@@ -177,12 +178,16 @@ def render_demo_tab(ctrl: Optional[Any] = None) -> None:
         reset_clicked = st.button("重置", use_container_width=True)
 
     if load_clicked:
-        bootstrap_competition_demo(st.session_state, selected, auto_play=True)
-        st.session_state.runtime_mode = DEMO_MODE
-        st.session_state.competition_mode = COMPETITION_DEMO_MODE
-        st.session_state._demo_autoplay_time = 0.0
-        st.success(f"场景 {selected} 已加载。")
-        st.rerun()
+        try:
+            state = cast(MutableMapping[str, Any], st.session_state)
+            bootstrap_competition_demo(state, selected, auto_play=True)
+            st.session_state.runtime_mode = DEMO_MODE
+            st.session_state.competition_mode = COMPETITION_DEMO_MODE
+            st.session_state._demo_autoplay_time = 0.0
+            st.success(f"场景 {selected} 已加载。")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"场景加载失败：{exc}")
 
     if play_clicked and st.session_state.get("demo_scenario") is not None:
         st.session_state.demo_autoplay = True
@@ -194,21 +199,26 @@ def render_demo_tab(ctrl: Optional[Any] = None) -> None:
         st.session_state.is_running = False
 
     if step_clicked and st.session_state.get("demo_scenario") is not None:
-        result = advance_competition_demo(st.session_state, steps=1)
+        state = cast(MutableMapping[str, Any], st.session_state)
+        result = advance_competition_demo(state, steps=1)
         hits = result.get("narration", [])
         if hits:
             st.session_state.demo_last_narration = hits[-1]
         else:
-            replay_next_narration(st.session_state)
+            replay_next_narration(state)
         st.rerun()
 
     if reset_clicked and st.session_state.get("demo_scenario") is not None:
-        bootstrap_competition_demo(st.session_state, selected, auto_play=False)
-        st.session_state.runtime_mode = DEMO_MODE
-        st.session_state.competition_mode = COMPETITION_DEMO_MODE
-        st.session_state.is_running = False
-        st.session_state.demo_autoplay = False
-        st.rerun()
+        try:
+            state = cast(MutableMapping[str, Any], st.session_state)
+            bootstrap_competition_demo(state, selected, auto_play=False)
+            st.session_state.runtime_mode = DEMO_MODE
+            st.session_state.competition_mode = COMPETITION_DEMO_MODE
+            st.session_state.is_running = False
+            st.session_state.demo_autoplay = False
+            st.rerun()
+        except Exception as exc:
+            st.error(f"场景重置失败：{exc}")
 
     scenario = st.session_state.get("demo_scenario")
     if scenario is None:
@@ -219,7 +229,8 @@ def render_demo_tab(ctrl: Optional[Any] = None) -> None:
 
     current_step = _current_step()
     if current_step <= 0:
-        preview = advance_competition_demo(st.session_state, steps=1)
+        state = cast(MutableMapping[str, Any], st.session_state)
+        preview = advance_competition_demo(state, steps=1)
         if preview.get("narration"):
             st.session_state.demo_last_narration = preview["narration"][-1]
         current_step = _current_step()

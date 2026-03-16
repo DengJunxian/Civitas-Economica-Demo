@@ -16,11 +16,10 @@ import asyncio
 import random
 import time
 from dataclasses import dataclass
-from typing import List, Dict, Optional, AsyncIterator
-from datetime import datetime, timedelta
+from typing import List, Optional, AsyncIterator
+from datetime import datetime
 
 import pandas as pd
-import numpy as np
 
 try:
     import akshare as ak
@@ -30,7 +29,7 @@ except ImportError:
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from core.exchange.order_book import OrderBook, Order, OrderSide, OrderType
+from core.exchange.order_book import OrderBook, Order
 
 
 # ==========================================
@@ -145,7 +144,7 @@ class MinuteDataLoader:
             )
             
             if df is None or df.empty:
-                print(f"[!] 未获取到数据")
+                print("[!] 未获取到数据")
                 return pd.DataFrame()
             
             # 标准化列名
@@ -213,7 +212,7 @@ class MinuteDataLoader:
             df = ak.stock_zh_index_daily(symbol=symbol)
             
             if df is None or df.empty:
-                print(f"[!] 未获取到数据")
+                print("[!] 未获取到数据")
                 return pd.DataFrame()
             
             # 取最近 N 天
@@ -281,7 +280,7 @@ class MarketReplay:
                 else:
                     dt = datetime.strptime(dt_str, "%Y-%m-%d")
                 ts = dt.timestamp()
-            except:
+            except Exception:
                 ts = time.time()
             
             tick = Tick(
@@ -367,7 +366,6 @@ class MarketReplay:
             ref_price = order_book.last_price or order_book.prev_close
         
         orders: List[Order] = []
-        tick_size = 0.01  # A 股最小价格变动
         spread = ref_price * spread_bps / 10000  # 转换为价格
         
         # 生成卖单 (高于参考价)

@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, MutableMapping, cast
 
 import pandas as pd
 import streamlit as st
@@ -99,9 +99,14 @@ def _render_top_entry_selector() -> None:
 def _ensure_demo_loaded() -> None:
     if st.session_state.get("demo_scenario") is None:
         name = st.session_state.get("demo_scenario_name", REQUIRED_SCENARIOS[0])
-        bootstrap_competition_demo(st.session_state, name, auto_play=False)
-        st.session_state.runtime_mode = DEMO_MODE
-        st.session_state.competition_mode = COMPETITION_DEMO_MODE
+        try:
+            state = cast(MutableMapping[str, Any], st.session_state)
+            bootstrap_competition_demo(state, name, auto_play=False)
+            st.session_state.runtime_mode = DEMO_MODE
+            st.session_state.competition_mode = COMPETITION_DEMO_MODE
+        except Exception as exc:
+            st.session_state.demo_scenario = None
+            st.error(f"场景加载失败：{exc}")
 
 
 def _material_summary_from_metrics(metrics: pd.DataFrame) -> Dict[str, float]:
@@ -239,12 +244,20 @@ def _render_sidebar_global() -> None:
                 options=scenarios,
                 index=scenarios.index(st.session_state.demo_scenario_name),
             )
+        else:
+            st.warning("未发现可用答辩场景，请检查 demo_scenarios 内容完整性。")
 
         if st.button("自动生成比赛材料", use_container_width=True):
             _ensure_demo_loaded()
-            file_map = _generate_competition_materials()
-            st.session_state.materials_last_export = {k: str(v) for k, v in file_map.items()}
-            st.success("比赛材料已生成。")
+            if st.session_state.get("demo_scenario") is None:
+                st.error("当前没有可用场景，无法生成比赛材料。")
+            else:
+                try:
+                    file_map = _generate_competition_materials()
+                    st.session_state.materials_last_export = {k: str(v) for k, v in file_map.items()}
+                    st.success("比赛材料已生成。")
+                except Exception as exc:
+                    st.error(f"比赛材料生成失败：{exc}")
 
         if st.session_state.materials_last_export:
             st.caption("最近生成文件")

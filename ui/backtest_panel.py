@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 import json
 
 import pandas as pd
@@ -247,9 +247,9 @@ def render_backtest_panel(ctrl: Any = None) -> None:
             )
             custom_window = st.checkbox("自定义日期窗口", value=cfg_state.get("custom_window", False))
             if custom_window:
-                d0, d1 = _default_window(int(cfg_state.get("period_days", 756)))
-                start_date = st.date_input("开始日期", value=cfg_state.get("start_date_obj", d0))
-                end_date = st.date_input("结束日期", value=cfg_state.get("end_date_obj", d1))
+                default_start_date, default_end_date = _default_window(int(cfg_state.get("period_days", 756)))
+                start_date = st.date_input("开始日期", value=cfg_state.get("start_date_obj", default_start_date))
+                end_date = st.date_input("结束日期", value=cfg_state.get("end_date_obj", default_end_date))
                 period_days = 0
             else:
                 start_date = None
@@ -354,8 +354,8 @@ def render_backtest_panel(ctrl: Any = None) -> None:
             "qlib_bundle_path": qlib_bundle_path,
         }
 
-        backtester = HistoricalBacktester(config)
-        st.session_state.backtester = backtester
+        run_backtester = HistoricalBacktester(config)
+        st.session_state.backtester = run_backtester
 
         progress = st.progress(0)
         status = st.empty()
@@ -376,18 +376,18 @@ def render_backtest_panel(ctrl: Any = None) -> None:
             except Exception:
                 market_manager = None
 
-        result = backtester.run_backtest(
+        run_result = run_backtester.run_backtest(
             population=population,
             market_manager=market_manager,
             progress_callback=_on_progress,
         )
         progress.empty()
         status.empty()
-        st.session_state.backtest_result = result
+        st.session_state.backtest_result = run_result
         st.session_state.policy_ab_compare = None
 
-        if result.total_days > 0:
-            st.success(f"回测完成: {result.total_days} 个交易日, {result.total_trades} 笔交易")
+        if run_result.total_days > 0:
+            st.success(f"回测完成: {run_result.total_days} 个交易日, {run_result.total_trades} 笔交易")
         else:
             st.error("回测未得到有效结果，请检查参数或数据窗口。")
 
@@ -430,13 +430,13 @@ def render_backtest_panel(ctrl: Any = None) -> None:
         st.download_button("下载回测摘要 JSON", data=payload_json, file_name="backtest_summary.json", mime="application/json", use_container_width=True)
     with dl_col3:
         if st.button("导出 Qlib 数据束", use_container_width=True):
-            backtester: Optional[HistoricalBacktester] = st.session_state.get("backtester")
-            if not backtester:
+            session_backtester: Optional[HistoricalBacktester] = st.session_state.get("backtester")
+            if not session_backtester:
                 st.error("未找到回测实例，请先运行回测。")
             else:
                 try:
                     target_dir = st.session_state.get("backtest_cfg", {}).get("qlib_bundle_path", "outputs/backtest_qlib_bundle")
-                    bundle_path = backtester.export_qlib_bundle(target_dir)
+                    bundle_path = session_backtester.export_qlib_bundle(target_dir)
                     st.success(f"已导出到: {bundle_path}")
                 except Exception as exc:
                     st.error(f"导出失败: {exc}")
@@ -453,23 +453,23 @@ def render_backtest_panel(ctrl: Any = None) -> None:
         run_compare = st.button("生成政策A/B自动对比报告", use_container_width=True)
 
     if run_compare:
-        backtester: Optional[HistoricalBacktester] = st.session_state.get("backtester")
-        if not backtester:
+        compare_backtester: Optional[HistoricalBacktester] = st.session_state.get("backtester")
+        if not compare_backtester:
             st.error("未找到回测实例，请先运行回测。")
         else:
             with st.spinner("正在生成政策A/B对比回测..."):
                 try:
-                    compare_bundle = _run_policy_ab_comparison(
-                        base_backtester=backtester,
+                    generated_compare_bundle = _run_policy_ab_comparison(
+                        base_backtester=compare_backtester,
                         policy_a=float(policy_a),
                         policy_b=float(policy_b),
                     )
-                    st.session_state.policy_ab_compare = compare_bundle
-                    st.success(f"已生成政策A/B对比报告，运行ID: {compare_bundle['run_id']}")
+                    st.session_state.policy_ab_compare = generated_compare_bundle
+                    st.success(f"已生成政策A/B对比报告，运行ID: {generated_compare_bundle['run_id']}")
                 except Exception as exc:
                     st.error(f"政策A/B自动对比失败: {exc}")
 
-    compare_bundle = st.session_state.get("policy_ab_compare")
+    compare_bundle: Any = st.session_state.get("policy_ab_compare")
     if compare_bundle:
         compare_df = compare_bundle.get("compare_df", pd.DataFrame())
         if isinstance(compare_df, pd.DataFrame) and not compare_df.empty:
@@ -477,8 +477,8 @@ def render_backtest_panel(ctrl: Any = None) -> None:
             csv_data = compare_df.to_csv(index=False).encode("utf-8-sig")
             json_data = compare_df.to_json(orient="records", force_ascii=False, indent=2).encode("utf-8")
 
-            d1, d2 = st.columns(2)
-            with d1:
+            dl_a, dl_b = st.columns(2)
+            with dl_a:
                 st.download_button(
                     "下载政策A/B对比 CSV",
                     data=csv_data,
@@ -486,7 +486,7 @@ def render_backtest_panel(ctrl: Any = None) -> None:
                     mime="text/csv",
                     use_container_width=True,
                 )
-            with d2:
+            with dl_b:
                 st.download_button(
                     "下载政策A/B对比 JSON",
                     data=json_data,

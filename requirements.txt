@@ -4,6 +4,7 @@ pandas>=2.0.0
 numpy>=1.24.0
 plotly>=5.18.0
 openai>=1.0.0
+pyyaml>=6.0.0
 # ai-agent-framework # 假设的内部库
 matplotlib>=3.7.0
 sortedcontainers>=2.4.0
@@ -15,10 +16,11 @@ tenacity>=8.2.0
 scipy
 pytest>=7.0.0
 nest_asyncio>=1.5.0
-mesa>=3.0
 # finrobot  # optional: CoT templates & financial prompts
 pybind11>=2.10.0
 setuptools>=42.0.0
+# 可选：启用 Plotly PNG 导出能力（若安装失败可暂时注释）
+# kaleido>=0.2.1
 # Optional analytics ecosystem (install on demand):
 # empyrical>=0.5.5
 # quantstats>=0.0.62

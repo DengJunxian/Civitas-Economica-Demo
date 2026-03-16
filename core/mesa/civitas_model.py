@@ -16,8 +16,6 @@ from core.society.network import SocialGraph, InformationDiffusion
 from agents.persona import Persona, PersonaGenerator, RiskAppetite
 from core.mesa.civitas_agent import CivitasAgent
 from agents.cognition.utility import InvestorType
-import time
-from core.market_engine import Order, OrderType
 from core.time_manager import SimulationClock
 from core.utils import truncate_text
 
@@ -447,7 +445,7 @@ class CivitasModel(Model):
                     from core.market_engine import Order, OrderType
                     try:
                         o_type = getattr(OrderType, action.order.order_type.upper())
-                    except:
+                    except Exception:
                         o_type = OrderType.LIMIT
                         
                     order = Order(
@@ -462,9 +460,12 @@ class CivitasModel(Model):
                     self.market_manager.submit_agent_order(order)
                     
                     side_str = action.order.side.lower()
-                    if "buy" in side_str: smart_actions.append(1)
-                    elif "sell" in side_str: smart_actions.append(-1)
-                    else: smart_actions.append(0)
+                    if "buy" in side_str:
+                        smart_actions.append(1)
+                    elif "sell" in side_str:
+                        smart_actions.append(-1)
+                    else:
+                        smart_actions.append(0)
                         
                 else:
                     smart_actions.append(0)
@@ -498,9 +499,12 @@ class CivitasModel(Model):
                     self.market_manager.submit_agent_order(order)
                     # Record action for Tier 2 sentiment
                     side_str = str(order.side).lower()
-                    if "buy" in side_str: smart_actions.append(1)
-                    elif "sell" in side_str: smart_actions.append(-1)
-                    else: smart_actions.append(0)
+                    if "buy" in side_str:
+                        smart_actions.append(1)
+                    elif "sell" in side_str:
+                        smart_actions.append(-1)
+                    else:
+                        smart_actions.append(0)
                 else:
                     smart_actions.append(0)
     
@@ -515,8 +519,10 @@ class CivitasModel(Model):
         # 闃舵 5.5: Tier 2 (Vectorized) 鍐崇瓥涓庢墽琛?
         # A. 鏇存柊鎯呯华
         trend_signal = 1.0 if self.trend == "涓婃定" else -1.0
-        if self.trend == "涓嬭穼": trend_signal = -1.0
-        elif self.trend == "闇囪崱": trend_signal = 0.0
+        if self.trend == "涓嬭穼":
+            trend_signal = -1.0
+        elif self.trend == "闇囪崱":
+            trend_signal = 0.0
         
         self.population.update_tier2_sentiment(smart_actions, trend_signal)
         

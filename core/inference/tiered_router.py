@@ -7,8 +7,7 @@
 
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Any, Callable
-from enum import Enum
+from typing import Dict, List, Optional, Any
 
 from core.inference.config import InferenceConfig, InferenceMode, AgentTier
 
@@ -49,9 +48,9 @@ class TieredRouter:
         self.config = config or InferenceConfig.from_env()
         
         # 后端实例 (懒加载)
-        self._api_backend = None
-        self._local_backend = None
-        self._vllm_backend = None
+        self._api_backend: Optional[Any] = None
+        self._local_backend: Optional[Any] = None
+        self._vllm_backend: Optional[Any] = None
         
         # 统计
         self.stats = {
@@ -238,6 +237,8 @@ class TieredRouter:
             model_used = "vllm"
         else:
             # Lite 模式或后端不可用，使用 API
+            if self._api_backend is None:
+                raise RuntimeError("API 后端未初始化")
             content = self._api_backend.generate(request.prompt)
             model_used = "api_fallback"
         
@@ -252,7 +253,8 @@ class TieredRouter:
     def _execute_tier_2(self, request: InferenceRequest) -> InferenceResult:
         """执行 Tier 2 推理 (云端 API)"""
         self.stats["tier_2_calls"] += 1
-        
+        if self._api_backend is None:
+            raise RuntimeError("API 后端未初始化")
         content = self._api_backend.generate(request.prompt)
         
         return InferenceResult(

@@ -31,6 +31,12 @@ REQUIRED_METRICS_COLUMNS = {
     "csad",
     "panic_level",
 }
+REQUIRED_SCENARIO_FILES = (
+    "initial_config.yaml",
+    "analyst_manager_output.json",
+    "narration.json",
+    "metrics.csv",
+)
 
 
 @dataclass
@@ -47,6 +53,14 @@ def _scenario_root(base_dir: Optional[Path] = None) -> Path:
     if base_dir is not None:
         return Path(base_dir)
     return Path(__file__).resolve().parents[1] / "demo_scenarios"
+
+
+def _scenario_missing_files(scenario_dir: Path) -> List[str]:
+    missing: List[str] = []
+    for name in REQUIRED_SCENARIO_FILES:
+        if not (scenario_dir / name).exists():
+            missing.append(name)
+    return missing
 
 
 def _parse_scalar(raw_value: str) -> Any:
@@ -99,11 +113,18 @@ def _minimal_yaml_load(path: Path) -> Dict[str, Any]:
         return result
 
 
-def list_competition_scenarios(base_dir: Optional[Path] = None) -> List[str]:
+def list_competition_scenarios(base_dir: Optional[Path] = None, *, only_valid: bool = True) -> List[str]:
     root = _scenario_root(base_dir)
     if not root.exists():
         return []
-    return sorted([item.name for item in root.iterdir() if item.is_dir()])
+    scenarios: List[str] = []
+    for item in root.iterdir():
+        if not item.is_dir():
+            continue
+        if only_valid and _scenario_missing_files(item):
+            continue
+        scenarios.append(item.name)
+    return sorted(scenarios)
 
 
 def load_competition_scenario(name: str, base_dir: Optional[Path] = None) -> DemoScenario:
@@ -111,15 +132,18 @@ def load_competition_scenario(name: str, base_dir: Optional[Path] = None) -> Dem
     scenario_dir = root / name
     if not scenario_dir.exists():
         raise FileNotFoundError(f"Scenario not found: {scenario_dir}")
+    missing = _scenario_missing_files(scenario_dir)
+    if missing:
+        raise FileNotFoundError(f"Scenario incomplete: {scenario_dir}, missing={missing}")
 
     config = _minimal_yaml_load(scenario_dir / "initial_config.yaml")
     analyst_manager_output = json.loads((scenario_dir / "analyst_manager_output.json").read_text(encoding="utf-8-sig"))
     narration = json.loads((scenario_dir / "narration.json").read_text(encoding="utf-8-sig"))
     metrics = pd.read_csv(scenario_dir / "metrics.csv")
 
-    missing = REQUIRED_METRICS_COLUMNS - set(metrics.columns)
-    if missing:
-        raise ValueError(f"Scenario metrics missing required columns: {sorted(missing)}")
+    missing_columns = REQUIRED_METRICS_COLUMNS - set(metrics.columns)
+    if missing_columns:
+        raise ValueError(f"Scenario metrics missing required columns: {sorted(missing_columns)}")
 
     metrics = metrics.sort_values("step").reset_index(drop=True)
     metrics["step"] = metrics["step"].astype(int)
@@ -150,12 +174,16 @@ def bootstrap_competition_demo(
     base_dir: Optional[Path] = None,
     auto_play: bool = True,
 ) -> DemoScenario:
-    scenario = load_competition_scenario(scenario_name, base_dir=base_dir)
+    available = list_competition_scenarios(base_dir=base_dir, only_valid=True)
+    selected_name = scenario_name if scenario_name in available else (available[0] if available else "")
+    if not selected_name:
+        raise FileNotFoundError("No valid competition scenario found.")
+    scenario = load_competition_scenario(selected_name, base_dir=base_dir)
 
     state["controller"] = None
     state["runtime_mode"] = DEMO_MODE
     state["competition_mode"] = COMPETITION_DEMO_MODE
-    state["demo_scenario_name"] = scenario_name
+    state["demo_scenario_name"] = selected_name
     state["demo_scenario"] = scenario
     state["demo_step_cursor"] = 0
     state["demo_narration_cursor"] = 0

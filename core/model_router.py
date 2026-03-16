@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from openai import AsyncOpenAI, APIConnectionError, APITimeoutError, RateLimitError
 
@@ -285,7 +285,7 @@ class ModelRouter:
     def sync_call_with_fallback(
         self,
         messages: List[Dict],
-        priority_models: List[str] = None,
+        priority_models: Optional[List[str]] = None,
         timeout_budget: float = 30.0,
         fallback_response: Optional[str] = None,
         cache_key: Optional[str] = None,
@@ -454,7 +454,7 @@ class ModelRouter:
         response = await asyncio.wait_for(
             client.chat.completions.create(
                 model=model_name,
-                messages=messages,
+                messages=cast(Any, messages),
                 temperature=0.6,
             ),
             timeout=timeout,

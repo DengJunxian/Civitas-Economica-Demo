@@ -4,12 +4,11 @@ import json
 import os
 import re
 import time
+from collections import OrderedDict, defaultdict, deque
 import numpy as np
-import math
-from typing import Dict, List, Any, Optional, Tuple, Callable
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
-from openai import OpenAI, APIConnectionError, APITimeoutError, RateLimitError
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from openai import OpenAI
 from config import GLOBAL_CONFIG
 from core.validator import (
     PolicyCommittee,
@@ -215,7 +214,6 @@ class DeepSeekBrain:
     
     # 类级别的思维链历史存储（用于fMRI可视化）
     # 使用 defaultdict 和 deque 自动管理内存，限制每个 Agent 保留最近 20 条记录
-    from collections import defaultdict, deque, OrderedDict
     thought_history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=20))
     
     # 类级别的决策缓存（相似市场状态复用决策）
@@ -473,7 +471,7 @@ JSON 格式示例：
         # 1. 检索记忆 (RAG)
         context_query = f"当前行情:{market_state['trend']}, 盈亏:{account_state['pnl_pct']:.2%}"
         past_lessons = self.memory.retrieve(context_query)
-        lessons_text = "\n".join([f"- {l}" for l in past_lessons]) if past_lessons else "无相关记忆。"
+        lessons_text = "\n".join([f"- {lesson}" for lesson in past_lessons]) if past_lessons else "无相关记忆。"
 
         # 2. 构建用户提示词
         # 获取政策分析 (如果有)
@@ -565,7 +563,7 @@ JSON 格式示例：
         try:
             # 尝试直接解析
             return json.loads(text)
-        except:
+        except Exception:
             pass
             
         try:
@@ -574,7 +572,7 @@ JSON 格式示例：
             if match:
                 clean_text = match.group(1).strip()
                 return json.loads(clean_text)
-        except:
+        except Exception:
             pass
             
         # 兜底策略
@@ -812,7 +810,7 @@ JSON 格式示例：
         # 检索记忆 (RAG)
         context_query = f"当前行情:{market_state.get('trend', '未知')}, 盈亏:{account_state.get('pnl_pct', 0):.2%}"
         past_lessons = self.memory.retrieve(context_query)
-        lessons_text = "\n".join([f"- {l}" for l in past_lessons]) if past_lessons else "无相关记忆。"
+        lessons_text = "\n".join([f"- {lesson}" for lesson in past_lessons]) if past_lessons else "无相关记忆。"
         
         policy_desc = market_state.get('policy_description', '无')
         policy_reasoning_raw = market_state.get('policy_reasoning', '')

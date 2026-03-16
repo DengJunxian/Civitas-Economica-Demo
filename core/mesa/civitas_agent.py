@@ -5,8 +5,10 @@ Mesa Agent 适配器
 将 TraderAgent (BaseAgent) 包装为 Mesa Agent，实现与 Mesa 调度器的兼容。
 """
 
+from __future__ import annotations
+
 from mesa import Agent
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, TYPE_CHECKING
 
 from agents.base_agent import BaseAgent, MarketSnapshot
 from agents.trader_agent import TraderAgent
@@ -14,6 +16,9 @@ from agents.cognition.utility import InvestorType
 from agents.persona import Persona
 from config import GLOBAL_CONFIG
 from core.types import Order
+
+if TYPE_CHECKING:
+    from core.mesa.civitas_model import CivitasModel
 
 class CivitasAgent(Agent):
     """

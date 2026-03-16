@@ -36,6 +36,18 @@ def test_competition_demo_scenarios_are_loadable():
         assert isinstance(loaded.narration, list)
 
 
+def test_competition_demo_filters_incomplete_scenarios():
+    scenarios = list_competition_scenarios()
+    assert "hybrid_replay_abuse_minimal" not in scenarios
+
+
+def test_competition_demo_bootstrap_fallback_to_first_valid():
+    state = {}
+    scenario = bootstrap_competition_demo(state, "unknown_scene_name", auto_play=False)
+    assert scenario.name in REQUIRED_SCENARIOS
+    assert state["demo_scenario_name"] == scenario.name
+
+
 def test_competition_demo_metrics_figure_renderable():
     state = {}
     scenario = bootstrap_competition_demo(state, "rumor_panic_selloff", auto_play=False)

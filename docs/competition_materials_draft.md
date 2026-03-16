@@ -11,7 +11,7 @@
 - 历史回测页：[C:\Users\Deng Junxian\Desktop\Civitas_new\ui\backtest_panel.py](C:\Users\Deng%20Junxian\Desktop\Civitas_new\ui\backtest_panel.py)
 - 安装验证：`pip install -r requirements.txt` 成功，`pip install pyzmq pytest-asyncio` 成功
 - 测试验证：`pytest -q tests/test_competition_demo_mode.py` 通过，共 5 项
-- 浏览器验收痕迹：`.playwright-cli/page-2026-03-15T18-22-22-228Z.yml` 等文件已看到五入口、答辩模式、KPI、A/B Compare、证据流、按钮状态
+- 浏览器验收痕迹：已通过 Streamlit 启动探活（HTTP 200）与答辩模式功能冒烟验证关键入口、KPI、A/B Compare、证据流与按钮状态。
 
 ---
 

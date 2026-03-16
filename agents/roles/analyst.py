@@ -20,11 +20,10 @@ import time
 import functools
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Callable
 from enum import Enum
 
 import numpy as np
-import pandas as pd
 
 
 # ==========================================
@@ -637,7 +636,7 @@ class SentimentAnalyst(Analyst):
             reasoning_parts.append(f"市场恐慌度 {panic_level:.2f}，可能超跌")
         elif panic_level < 0.3:
             panic_signal = -1  # 逆向
-            reasoning_parts.append(f"市场乐观度高，警惕回调")
+            reasoning_parts.append("市场乐观度高，警惕回调")
         else:
             panic_signal = 0
         

@@ -11,7 +11,7 @@ llama.cpp 本地推理后端
 """
 
 import os
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List
 
 # 条件导入
 try:
@@ -80,7 +80,7 @@ class LlamaCppBackend:
                 n_threads=self.n_threads,
                 verbose=self.verbose
             )
-            print(f"[LlamaCpp] 模型加载完成")
+            print("[LlamaCpp] 模型加载完成")
         return self._model
     
     def generate(

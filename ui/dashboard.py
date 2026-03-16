@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from io import StringIO
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np

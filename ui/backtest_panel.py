@@ -87,7 +87,7 @@ def _render_equity_chart(frame: pd.DataFrame) -> None:
         go.Scatter(x=frame["date"], y=frame["benchmark"], mode="lines", name="基准净值", line=dict(width=1.8, color="#2f80ed"))
     )
     fig.update_layout(template="plotly_dark", height=380, margin=dict(l=10, r=10, t=35, b=10), title="策略 vs 基准")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _render_risk_chart(frame: pd.DataFrame) -> None:
@@ -113,7 +113,7 @@ def _render_risk_chart(frame: pd.DataFrame) -> None:
         yaxis=dict(tickformat=".0%"),
         yaxis2=dict(overlaying="y", side="right", tickformat=".0%", showgrid=False),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _result_payload(result: BacktestResult) -> Dict[str, Any]:
@@ -306,7 +306,7 @@ def render_backtest_panel(ctrl: Any = None) -> None:
 
         export_qlib = st.checkbox("回测后自动导出 Qlib 研究数据束", value=bool(cfg_state.get("export_qlib_bundle", False)))
         qlib_bundle_path = st.text_input("Qlib 导出路径", value=str(cfg_state.get("qlib_bundle_path", "outputs/backtest_qlib_bundle")))
-        submitted = st.form_submit_button("运行历史回测", use_container_width=True)
+        submitted = st.form_submit_button("运行历史回测", width="stretch")
 
     if submitted:
         config = BacktestConfig(
@@ -410,10 +410,10 @@ def render_backtest_panel(ctrl: Any = None) -> None:
 
     if result.factor_snapshot:
         st.markdown("### 因子诊断")
-        st.dataframe(pd.DataFrame(result.factor_snapshot).head(20), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(result.factor_snapshot).head(20), width="stretch", hide_index=True)
     if result.trade_log:
         st.markdown("### 交易明细")
-        st.dataframe(pd.DataFrame(result.trade_log).tail(200), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(result.trade_log).tail(200), width="stretch", hide_index=True)
 
     st.markdown("### 回测报告")
     st.markdown(BacktestReportGenerator.generate_html_report(result), unsafe_allow_html=True)
@@ -425,11 +425,11 @@ def render_backtest_panel(ctrl: Any = None) -> None:
 
     dl_col1, dl_col2, dl_col3 = st.columns(3)
     with dl_col1:
-        st.download_button("下载绩效序列 CSV", data=perf_csv, file_name="backtest_performance.csv", mime="text/csv", use_container_width=True)
+        st.download_button("下载绩效序列 CSV", data=perf_csv, file_name="backtest_performance.csv", mime="text/csv", width="stretch")
     with dl_col2:
-        st.download_button("下载回测摘要 JSON", data=payload_json, file_name="backtest_summary.json", mime="application/json", use_container_width=True)
+        st.download_button("下载回测摘要 JSON", data=payload_json, file_name="backtest_summary.json", mime="application/json", width="stretch")
     with dl_col3:
-        if st.button("导出 Qlib 数据束", use_container_width=True):
+        if st.button("导出 Qlib 数据束", width="stretch"):
             session_backtester: Optional[HistoricalBacktester] = st.session_state.get("backtester")
             if not session_backtester:
                 st.error("未找到回测实例，请先运行回测。")
@@ -450,7 +450,7 @@ def render_backtest_panel(ctrl: Any = None) -> None:
     with p_col2:
         policy_b = st.number_input("政策B冲击", value=base_policy_shock + 0.30, step=0.05, key="policy_b_shock_input")
     with p_col3:
-        run_compare = st.button("生成政策A/B自动对比报告", use_container_width=True)
+        run_compare = st.button("生成政策A/B自动对比报告", width="stretch")
 
     if run_compare:
         compare_backtester: Optional[HistoricalBacktester] = st.session_state.get("backtester")
@@ -473,7 +473,7 @@ def render_backtest_panel(ctrl: Any = None) -> None:
     if compare_bundle:
         compare_df = compare_bundle.get("compare_df", pd.DataFrame())
         if isinstance(compare_df, pd.DataFrame) and not compare_df.empty:
-            st.dataframe(compare_df, use_container_width=True, hide_index=True)
+            st.dataframe(compare_df, width="stretch", hide_index=True)
             csv_data = compare_df.to_csv(index=False).encode("utf-8-sig")
             json_data = compare_df.to_json(orient="records", force_ascii=False, indent=2).encode("utf-8")
 
@@ -484,7 +484,7 @@ def render_backtest_panel(ctrl: Any = None) -> None:
                     data=csv_data,
                     file_name=f"policy_ab_compare_{compare_bundle['run_id']}.csv",
                     mime="text/csv",
-                    use_container_width=True,
+                    width="stretch",
                 )
             with dl_b:
                 st.download_button(
@@ -492,7 +492,7 @@ def render_backtest_panel(ctrl: Any = None) -> None:
                     data=json_data,
                     file_name=f"policy_ab_compare_{compare_bundle['run_id']}.json",
                     mime="application/json",
-                    use_container_width=True,
+                    width="stretch",
                 )
         files = compare_bundle.get("files", {})
         if files:

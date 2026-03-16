@@ -30,7 +30,7 @@ st.set_page_config(
     page_title="Civitas-Economica-Demo | 评委答辩模式",
     page_icon="🎯",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 
@@ -85,7 +85,7 @@ def _render_top_entry_selector() -> None:
     cols = st.columns(len(ENTRY_POINTS))
     for idx, entry in enumerate(ENTRY_POINTS):
         with cols[idx]:
-            if st.button(entry, key=f"entry_{entry}", use_container_width=True):
+            if st.button(entry, key=f"entry_{entry}", width="stretch"):
                 st.session_state.entry = entry
 
     st.markdown(
@@ -247,7 +247,7 @@ def _render_sidebar_global() -> None:
         else:
             st.warning("未发现可用答辩场景，请检查 demo_scenarios 内容完整性。")
 
-        if st.button("自动生成比赛材料", use_container_width=True):
+        if st.button("自动生成比赛材料", width="stretch"):
             _ensure_demo_loaded()
             if st.session_state.get("demo_scenario") is None:
                 st.error("当前没有可用场景，无法生成比赛材料。")

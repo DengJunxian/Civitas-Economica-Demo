@@ -10,7 +10,6 @@ vLLM 高性能推理后端
 适用于 Enterprise 模式 (24GB+ VRAM)。
 """
 
-import os
 from typing import Optional, Dict, List, Any
 
 # 条件导入
@@ -88,7 +87,7 @@ class VLLMBackend:
                 max_model_len=self.max_model_len,
                 trust_remote_code=self.trust_remote_code
             )
-            print(f"[vLLM] 模型加载完成")
+            print("[vLLM] 模型加载完成")
         return self._llm
     
     def generate(

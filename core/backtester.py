@@ -277,13 +277,13 @@ class HistoricalDataLoader:
         times = ["09:30", "10:30", "11:30", "13:30", "14:30", "15:00"]
         o = float(target_row["open"])
         h = float(target_row["high"])
-        l = float(target_row["low"])
+        low_price = float(target_row["low"])
         c = float(target_row["close"])
         prices = np.linspace(o, c, len(times))
         prices[1] = o + (h - o) * 0.45
         prices[2] = h
-        prices[3] = h - (h - l) * 0.35
-        prices[4] = l + (c - l) * 0.5
+        prices[3] = h - (h - low_price) * 0.35
+        prices[4] = low_price + (c - low_price) * 0.5
         prices[5] = c
         return pd.DataFrame(
             {

@@ -9,9 +9,8 @@
 """
 
 from enum import Enum
-from dataclasses import dataclass, field
-from typing import Optional, Dict, List, Tuple
-import numpy as np
+from dataclasses import dataclass
+from typing import Optional, Tuple
 
 # 复用 core.behavioral_finance 中的基础函数，但在本模块增强封装
 from core.behavioral_finance import ProspectTheoryParams, prospect_value, prospect_utility, probability_weight
@@ -162,10 +161,14 @@ class ConfidenceTracker:
             self.confidence = max(0.0, self.confidence - penalty)
             
     def get_description(self) -> str:
-        if self.confidence > 0.8: return "极度自信"
-        if self.confidence > 0.6: return "比较自信"
-        if self.confidence < 0.2: return "极度沮丧"
-        if self.confidence < 0.4: return "缺乏信心"
+        if self.confidence > 0.8:
+            return "极度自信"
+        if self.confidence > 0.6:
+            return "比较自信"
+        if self.confidence < 0.2:
+            return "极度沮丧"
+        if self.confidence < 0.4:
+            return "缺乏信心"
         return "心态平和"
 
 class AnchorTracker:

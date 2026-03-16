@@ -6,18 +6,13 @@
 通过多人格对抗提升决策质量和可解释性。
 """
 
-import asyncio
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import time
 
-from openai import OpenAI
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from openai import APIConnectionError, APITimeoutError, RateLimitError
 
-from config import GLOBAL_CONFIG
-from agents.brain import DeepSeekBrain, ThoughtRecord, VectorMemory, AgentState
+from agents.brain import DeepSeekBrain, ThoughtRecord
 from core.validator import (
     RiskCommittee,
     PolicyCommittee,

@@ -1,6 +1,6 @@
 import pytest
 import time
-from core.policy import CircuitBreaker, TransactionTax, PolicyManager, PolicyResult
+from core.policy import CircuitBreaker, TransactionTax, PolicyManager
 from core.types import Order, Trade, OrderSide, OrderType
 from core.mesa.civitas_model import CivitasModel
 
@@ -12,8 +12,8 @@ class TestCircuitBreaker:
         cb.update_reference_price(3000.0)
         
         # 5% move - within 10% threshold
-        assert cb.check_market_status(3150.0, time.time()) == True
-        assert cb.is_halted == False
+        assert cb.check_market_status(3150.0, time.time())
+        assert not cb.is_halted
     
     def test_halt_on_breach(self):
         """价格超过阈值，触发熔断"""
@@ -23,8 +23,8 @@ class TestCircuitBreaker:
         now = time.time()
         # 15% move - exceeds 10% threshold
         result = cb.check_market_status(3450.0, now)
-        assert result == False
-        assert cb.is_halted == True
+        assert not result
+        assert cb.is_halted
     
     def test_resume_after_duration(self):
         """熔断后经过冷却期恢复交易"""
@@ -33,12 +33,12 @@ class TestCircuitBreaker:
         
         now = time.time()
         cb.check_market_status(3450.0, now)  # Trigger halt
-        assert cb.is_halted == True
+        assert cb.is_halted
         
         # After 15 seconds, should resume
         result = cb.check_market_status(3100.0, now + 15)
-        assert result == True
-        assert cb.is_halted == False
+        assert result
+        assert not cb.is_halted
     
     def test_order_rejected_during_halt(self):
         """熔断期间拒绝订单"""
@@ -53,7 +53,7 @@ class TestCircuitBreaker:
             symbol="TEST", timestamp=time.time()
         )
         result = cb.check_order(order, {"last_price": 3100.0})
-        assert result.is_allowed == False
+        assert not result.is_allowed
         assert "Halted" in result.reason
 
 
@@ -114,7 +114,7 @@ class TestPolicyManager:
             symbol="TEST", timestamp=time.time()
         )
         result = pm.check_order(order, {"last_price": 3050.0})
-        assert result.is_allowed == True
+        assert result.is_allowed
 
 
 class TestCivitasModelPolicy:
@@ -124,8 +124,8 @@ class TestCivitasModelPolicy:
         
         # Get default status
         status = model.get_policy_status()
-        assert status["circuit_breaker"]["active"] == True
-        assert status["transaction_tax"]["active"] == True
+        assert status["circuit_breaker"]["active"]
+        assert status["transaction_tax"]["active"]
         assert status["transaction_tax"]["rate"] == 0.001
         
         # Change tax rate
@@ -136,4 +136,4 @@ class TestCivitasModelPolicy:
         # Disable circuit breaker
         model.set_policy("circuit_breaker", "active", False)
         status = model.get_policy_status()
-        assert status["circuit_breaker"]["active"] == False
+        assert not status["circuit_breaker"]["active"]

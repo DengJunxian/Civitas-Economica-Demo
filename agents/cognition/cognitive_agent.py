@@ -15,14 +15,13 @@
 
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from agents.cognition.utility import (
-    ProspectTheory, ProspectValue, InvestorType,
-    ConfidenceTracker, AnchorTracker,
-    create_panic_retail, create_normal_investor, create_disciplined_quant
+    ProspectTheory, InvestorType,
+    ConfidenceTracker, AnchorTracker
 )
 from agents.cognition.llm_brain import (
-    DeepSeekReasoner, LocalReasoner, ReasoningResult, Decision
+    DeepSeekReasoner, LocalReasoner, ReasoningResult
 )
 from agents.cognition.memory import TraumaMemory
 
@@ -230,7 +229,6 @@ class CognitiveAgent:
         
         # 3. 覆盖逻辑
         final_action = raw_decision.action
-        final_qty = raw_decision.quantity
         
         # 简单覆盖示例: 极度恐惧时强制卖出
         # (Simplified logic from original make_decision)
@@ -238,9 +236,7 @@ class CognitiveAgent:
             # Panic Sell
             if final_action != "SELL":
                 final_action = "SELL"
-                final_qty = account_state.get("position", 0)
         
-        from agents.cognition.llm_brain import Decision as LLMDecision
         # Convert back to internal CognitiveDecision or similar?
         # For now, return a named tuple or object expected by CivitasAgent
         # CivitasAgent expects an object with .final_action, .final_quantity, .greed_level...

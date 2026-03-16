@@ -193,11 +193,8 @@ def calculate_lsv_herding(
         return 0.0, 'none'
     
     buy_ratio = buy_counts[valid_mask] / total[valid_mask]
-    expected_ratio = np.mean(buy_ratio)
-    
     # LSV = |p(i) - E[p]| - AF
     # AF = Adjustment Factor for finite sample
-    af = np.mean(np.abs(buy_ratio - expected_ratio))
     
     # 简化：直接返回买入比例的偏差
     herding_score = np.mean(np.abs(buy_ratio - 0.5))

@@ -1,0 +1,462 @@
+- generic:
+  - generic [ref=e2]:
+    - generic [ref=e11]:
+      - heading "全局面板" [level=3] [ref=e16]
+      - alert [ref=e19]:
+        - paragraph [ref=e24]: 运行态：DEMO_MODE
+      - generic [ref=e26]:
+        - paragraph [ref=e30]: 默认答辩场景
+        - generic [ref=e32]:
+          - generic [ref=e33]:
+            - generic [ref=e34]: tax_cut_liquidity_boost
+            - combobox "Selected tax_cut_liquidity_boost. 默认答辩场景" [ref=e36]
+          - img "open" [ref=e38]
+      - button "自动生成比赛材料" [ref=e42] [cursor=pointer]:
+        - paragraph [ref=e46]: 自动生成比赛材料
+    - generic [ref=e3]:
+      - banner [ref=e49]:
+        - generic [ref=e52]:
+          - button "Deploy" [ref=e54] [cursor=pointer]:
+            - generic [ref=e56]: Deploy
+          - button [ref=e58] [cursor=pointer]:
+            - img [ref=e59]
+      - generic [ref=e62]:
+        - heading "Civitas-Economica-Demo" [level=2] [ref=e68]:
+          - text: Civitas-Economica-Demo
+          - generic [ref=e69]:
+            - link "Link to heading":
+              - /url: "#civitas-economica-demo"
+              - img
+        - paragraph [ref=e74]: 首页入口：答辩模式 / 专家模式 / 历史回测 / 行为金融诊断 / 系统说明
+        - generic [ref=e76]:
+          - button "答辩模式" [ref=e81] [cursor=pointer]:
+            - paragraph [ref=e85]: 答辩模式
+          - button "专家模式" [active] [ref=e90] [cursor=pointer]:
+            - paragraph [ref=e94]: 专家模式
+          - button "历史回测" [ref=e99] [cursor=pointer]:
+            - paragraph [ref=e103]: 历史回测
+          - button "行为金融诊断" [ref=e108] [cursor=pointer]:
+            - paragraph [ref=e112]: 行为金融诊断
+          - button "系统说明" [ref=e117] [cursor=pointer]:
+            - paragraph [ref=e121]: 系统说明
+        - generic [ref=e126]: 当前入口：专家模式 | 运行态：DEMO_MODE
+        - heading "专家模式" [level=2] [ref=e533]:
+          - text: 专家模式
+          - generic [ref=e133]:
+            - link "Link to heading":
+              - /url: "#6a3624d5"
+              - img
+        - paragraph [ref=e138]: 用于专家追问：证据、路径、风险和政策传导机制。
+        - heading "关键指标" [level=3] [ref=e539]:
+          - text: 关键指标
+          - generic [ref=e540]:
+            - link "Link to heading":
+              - /url: "#6f5c9b08"
+              - img
+        - generic [ref=e155]:
+          - generic [ref=e545]:
+            - generic [ref=e546]: 流动性
+            - generic [ref=e547]: "0.783"
+            - generic [ref=e548]: 越高越好
+          - generic [ref=e553]:
+            - generic [ref=e554]: 波动率
+            - generic [ref=e555]: 0.00%
+            - generic [ref=e556]: 越低越稳
+          - generic [ref=e561]:
+            - generic [ref=e562]: 羊群度
+            - generic [ref=e563]: "0.086"
+            - generic [ref=e564]: 高值代表拥挤交易
+          - generic [ref=e569]:
+            - generic [ref=e570]: 风险预警
+            - generic [ref=e571]: GREEN
+            - generic [ref=e572]: 系统风险灯
+          - generic [ref=e577]:
+            - generic [ref=e578]: 监管动作
+            - generic [ref=e579]: 专家复盘
+            - generic [ref=e580]: 当前干预状态
+        - heading "决策证据流" [level=3] [ref=e586]:
+          - text: 决策证据流
+          - generic [ref=e587]:
+            - link "Link to heading":
+              - /url: "#f8614d92"
+              - img
+        - heading "证据流" [level=3] [ref=e591]:
+          - text: 证据流
+          - generic [ref=e592]:
+            - link "Link to heading":
+              - /url: "#a4e44c2b"
+              - img
+        - paragraph [ref=e596]: 展示结构化证据卡、矛盾矩阵、经理最终卡、风控告警与校准指标。
+        - generic [ref=e598]:
+          - tablist [ref=e600]:
+            - tab "Analyst Cards" [selected] [ref=e601] [cursor=pointer]:
+              - paragraph [ref=e603]: Analyst Cards
+            - tab "Contradiction Matrix" [ref=e604] [cursor=pointer]:
+              - paragraph [ref=e606]: Contradiction Matrix
+            - tab "Manager Final Card" [ref=e607] [cursor=pointer]:
+              - paragraph [ref=e609]: Manager Final Card
+            - tab "Risk Alerts" [ref=e610] [cursor=pointer]:
+              - paragraph [ref=e612]: Risk Alerts
+            - tab "Calibration" [ref=e613] [cursor=pointer]:
+              - paragraph [ref=e615]: Calibration
+            - tab "Narration" [ref=e616] [cursor=pointer]:
+              - paragraph [ref=e618]: Narration
+          - tabpanel "Analyst Cards" [ref=e621]:
+            - generic [ref=e622]:
+              - group [ref=e625]:
+                - generic "keyboard_arrow_down news_analyst" [ref=e626] [cursor=pointer]:
+                  - generic [ref=e627]:
+                    - generic [ref=e629]: keyboard_arrow_down
+                    - generic [ref=e631]: news_analyst
+                - generic [ref=e639]:
+                  - generic [ref=e641] [cursor=pointer]:
+                    - img [ref=e644]
+                    - generic [ref=e646]: "{"
+                  - generic [ref=e648]:
+                    - generic [ref=e649]:
+                      - generic [ref=e650]:
+                        - generic [ref=e651]:
+                          - text: "\""
+                          - generic [ref=e652]: analyst_id
+                          - text: "\""
+                        - generic [ref=e653]: ":"
+                      - generic [ref=e656]: "\"news_analyst\""
+                    - generic [ref=e657]:
+                      - generic [ref=e658]:
+                        - generic [ref=e659]:
+                          - text: "\""
+                          - generic [ref=e660]: thesis
+                          - text: "\""
+                        - generic [ref=e661]: ":"
+                      - generic [ref=e664]: "\"news_analyst legacy output\""
+                    - generic [ref=e665]:
+                      - generic [ref=e667] [cursor=pointer]:
+                        - img [ref=e670]
+                        - generic [ref=e672]:
+                          - generic [ref=e673]: "\"evidence\""
+                          - generic [ref=e674]: ":"
+                        - generic [ref=e675]: "["
+                      - generic [ref=e678]:
+                        - generic [ref=e680] [cursor=pointer]:
+                          - img [ref=e683]
+                          - generic [ref=e685]:
+                            - text: "0"
+                            - generic [ref=e686]: ":"
+                          - generic [ref=e687]: "{"
+                        - generic [ref=e689]:
+                          - generic [ref=e690]:
+                            - generic [ref=e691]:
+                              - generic [ref=e692]:
+                                - text: "\""
+                                - generic [ref=e693]: type
+                                - text: "\""
+                              - generic [ref=e694]: ":"
+                            - generic [ref=e697]: "\"risk\""
+                          - generic [ref=e698]:
+                            - generic [ref=e699]:
+                              - generic [ref=e700]:
+                                - text: "\""
+                                - generic [ref=e701]: content
+                                - text: "\""
+                              - generic [ref=e702]: ":"
+                            - generic [ref=e705]: "\"{\"headline\": \"Tax cut + liquidity support announced\", \"sentiment_score\": 0.62, \"key_event\": \"Policy package reduces transaction friction\"}\""
+                          - generic [ref=e706]:
+                            - generic [ref=e707]:
+                              - generic [ref=e708]:
+                                - text: "\""
+                                - generic [ref=e709]: weight
+                                - text: "\""
+                              - generic [ref=e710]: ":"
+                            - generic [ref=e712] [cursor=pointer]: "0.5"
+                        - generic [ref=e714] [cursor=pointer]: "}"
+                      - generic [ref=e716] [cursor=pointer]: "]"
+                    - generic [ref=e717]:
+                      - generic [ref=e718]:
+                        - generic [ref=e719]:
+                          - text: "\""
+                          - generic [ref=e720]: time_horizon
+                          - text: "\""
+                        - generic [ref=e721]: ":"
+                      - generic [ref=e724]: "\"swing\""
+                    - generic [ref=e725]:
+                      - generic [ref=e727] [cursor=pointer]:
+                        - img [ref=e730]
+                        - generic [ref=e732]:
+                          - generic [ref=e733]: "\"risk_tags\""
+                          - generic [ref=e734]: ":"
+                        - generic [ref=e735]: "["
+                      - generic [ref=e737] [cursor=pointer]: "]"
+                    - generic [ref=e738]:
+                      - generic [ref=e739]:
+                        - generic [ref=e740]:
+                          - text: "\""
+                          - generic [ref=e741]: confidence
+                          - text: "\""
+                        - generic [ref=e742]: ":"
+                      - generic [ref=e744] [cursor=pointer]: "0.5"
+                    - generic [ref=e745]:
+                      - generic [ref=e747] [cursor=pointer]:
+                        - img [ref=e750]
+                        - generic [ref=e752]:
+                          - generic [ref=e753]: "\"counterarguments\""
+                          - generic [ref=e754]: ":"
+                        - generic [ref=e755]: "["
+                      - generic [ref=e757] [cursor=pointer]: "]"
+                    - generic [ref=e758]:
+                      - generic [ref=e759]:
+                        - generic [ref=e760]:
+                          - text: "\""
+                          - generic [ref=e761]: recommended_action
+                          - text: "\""
+                        - generic [ref=e762]: ":"
+                      - generic [ref=e765]: "\"hold\""
+                  - generic [ref=e767] [cursor=pointer]: "}"
+              - group [ref=e770]:
+                - generic "keyboard_arrow_right quant_analyst" [ref=e771] [cursor=pointer]:
+                  - generic [ref=e772]:
+                    - generic [ref=e774]: keyboard_arrow_right
+                    - generic [ref=e776]: quant_analyst
+              - group [ref=e779]:
+                - generic "keyboard_arrow_right risk_analyst" [ref=e780] [cursor=pointer]:
+                  - generic [ref=e781]:
+                    - generic [ref=e783]: keyboard_arrow_right
+                    - generic [ref=e785]: risk_analyst
+        - heading "专家图谱" [level=3] [ref=e791]:
+          - text: 专家图谱
+          - generic [ref=e792]:
+            - link "Link to heading":
+              - /url: "#bccdfd5f"
+              - img
+        - generic [ref=e794]:
+          - generic [ref=e796]:
+            - generic [ref=e802]:
+              - img:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic: −0.5
+                      - generic:
+                        - generic: "0"
+                      - generic:
+                        - generic: "0.5"
+                    - generic:
+                      - generic:
+                        - generic: −0.4
+                      - generic:
+                        - generic: −0.2
+                      - generic:
+                        - generic: "0"
+                      - generic:
+                        - generic: "0.2"
+                      - generic:
+                        - generic: "0.4"
+              - img:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic: "0"
+                      - generic:
+                        - generic: "0.2"
+                      - generic:
+                        - generic: "0.4"
+                      - generic:
+                        - generic: "0.6"
+                      - generic:
+                        - generic: "0.8"
+                      - generic:
+                        - generic: "1"
+                    - generic:
+                      - generic:
+                        - generic: 传播强度
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic: 社会传播网络热图
+                  - generic:
+                    - generic: 节点
+                  - generic:
+                    - generic: 节点
+              - toolbar [ref=e816]:
+                - button "Download plot as a PNG" [ref=e818] [cursor=pointer]:
+                  - img [ref=e819]
+                - generic [ref=e821]:
+                  - button "Zoom" [ref=e822] [cursor=pointer]:
+                    - img [ref=e823]
+                  - button "Pan" [ref=e825] [cursor=pointer]:
+                    - img [ref=e826]
+                - generic [ref=e828]:
+                  - button "Zoom in" [ref=e829] [cursor=pointer]:
+                    - img [ref=e830]
+                  - button "Zoom out" [ref=e832] [cursor=pointer]:
+                    - img [ref=e833]
+                  - button "Autoscale" [ref=e835] [cursor=pointer]:
+                    - img [ref=e836]
+                  - button "Reset axes" [ref=e838] [cursor=pointer]:
+                    - img [ref=e839]
+                - button "Fullscreen" [ref=e842] [cursor=pointer]:
+                  - img [ref=e843]
+              - img
+            - generic [ref=e846]:
+              - button "导出 PNG（缺少 kaleido）" [disabled] [ref=e851]:
+                - paragraph [ref=e855]: 导出 PNG（缺少 kaleido）
+              - button "导出 CSV" [ref=e860] [cursor=pointer]:
+                - paragraph [ref=e864]: 导出 CSV
+              - button "导出 JSON" [ref=e869] [cursor=pointer]:
+                - paragraph [ref=e873]: 导出 JSON
+            - generic [ref=e879]:
+              - img:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic: "3000"
+                      - generic:
+                        - generic: "3010"
+                      - generic:
+                        - generic: "3020"
+                    - generic:
+                      - generic:
+                        - generic: "0"
+                      - generic:
+                        - generic: "100"
+                      - generic:
+                        - generic: "200"
+                      - generic:
+                        - generic: "300"
+              - img:
+                - generic:
+                  - generic [ref=e896]:
+                    - generic [ref=e898]: 买盘深度
+                    - generic [ref=e905]: 卖盘深度
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic: LOB 深度动画（买卖盘结构）
+                  - generic:
+                    - generic: 价格
+                  - generic:
+                    - generic: 挂单量
+                - generic [ref=e911] [cursor=pointer]:
+                  - generic [ref=e914]: 播放
+                  - generic [ref=e917]: 暂停
+              - toolbar [ref=e918]:
+                - button "Download plot as a PNG" [ref=e920] [cursor=pointer]:
+                  - img [ref=e921]
+                - generic [ref=e923]:
+                  - button "Zoom" [ref=e924] [cursor=pointer]:
+                    - img [ref=e925]
+                  - button "Pan" [ref=e927] [cursor=pointer]:
+                    - img [ref=e928]
+                - generic [ref=e930]:
+                  - button "Zoom in" [ref=e931] [cursor=pointer]:
+                    - img [ref=e932]
+                  - button "Zoom out" [ref=e934] [cursor=pointer]:
+                    - img [ref=e935]
+                  - button "Autoscale" [ref=e937] [cursor=pointer]:
+                    - img [ref=e938]
+                  - button "Reset axes" [ref=e940] [cursor=pointer]:
+                    - img [ref=e941]
+                - button "Fullscreen" [ref=e944] [cursor=pointer]:
+                  - img [ref=e945]
+              - img
+            - generic [ref=e948]:
+              - button "导出 PNG（缺少 kaleido）" [disabled] [ref=e953]:
+                - paragraph [ref=e957]: 导出 PNG（缺少 kaleido）
+              - button "导出 CSV" [ref=e962] [cursor=pointer]:
+                - paragraph [ref=e966]: 导出 CSV
+              - button "导出 JSON" [ref=e971] [cursor=pointer]:
+                - paragraph [ref=e975]: 导出 JSON
+          - generic [ref=e977]:
+            - generic [ref=e983]:
+              - img:
+                - generic [ref=e992]:
+                  - generic [ref=e995]: 专家复盘 step=1
+                  - generic [ref=e998]: 宏观变量
+                  - generic [ref=e1001]: 社会情绪
+                  - generic [ref=e1004]: 行业/agent
+                  - generic [ref=e1007]: 市场微结构
+              - img:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic: 政策传导链：政策 -> 宏观变量 -> 社会情绪 -> 行业/agent -> 市场微结构
+              - toolbar [ref=e1008]:
+                - button "Download plot as a PNG" [ref=e1010] [cursor=pointer]:
+                  - img [ref=e1011]
+                - button "Reset view" [ref=e1014] [cursor=pointer]:
+                  - img [ref=e1015]
+                - button "Fullscreen" [ref=e1018] [cursor=pointer]:
+                  - img [ref=e1019]
+              - img
+            - generic [ref=e1022]:
+              - button "导出 PNG（缺少 kaleido）" [disabled] [ref=e1027]:
+                - paragraph [ref=e1031]: 导出 PNG（缺少 kaleido）
+              - button "导出 CSV" [ref=e1036] [cursor=pointer]:
+                - paragraph [ref=e1040]: 导出 CSV
+              - button "导出 JSON" [ref=e1045] [cursor=pointer]:
+                - paragraph [ref=e1049]: 导出 JSON
+            - generic [ref=e1055]:
+              - img:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic:
+                                - generic: 无高风险事件
+                    - generic:
+                      - generic:
+                        - generic: 23:59:59.999Mar 2, 2025
+                      - generic:
+                        - generic: 23:59:59.9995
+                      - generic:
+                        - generic: 00:00:00Mar 3, 2025
+                      - generic:
+                        - generic: 00:00:00.0005
+                    - generic:
+                      - generic:
+                        - generic: 低
+                      - generic:
+                        - generic: 中
+              - img:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic: 风险事件时间轴
+                  - generic:
+                    - generic: 时间
+                  - generic:
+                    - generic: 风险等级
+              - toolbar [ref=e1069]:
+                - button "Download plot as a PNG" [ref=e1071] [cursor=pointer]:
+                  - img [ref=e1072]
+                - generic [ref=e1074]:
+                  - button "Zoom" [ref=e1075] [cursor=pointer]:
+                    - img [ref=e1076]
+                  - button "Pan" [ref=e1078] [cursor=pointer]:
+                    - img [ref=e1079]
+                - generic [ref=e1081]:
+                  - button "Zoom in" [ref=e1082] [cursor=pointer]:
+                    - img [ref=e1083]
+                  - button "Zoom out" [ref=e1085] [cursor=pointer]:
+                    - img [ref=e1086]
+                  - button "Autoscale" [ref=e1088] [cursor=pointer]:
+                    - img [ref=e1089]
+                  - button "Reset axes" [ref=e1091] [cursor=pointer]:
+                    - img [ref=e1092]
+                - button "Fullscreen" [ref=e1095] [cursor=pointer]:
+                  - img [ref=e1096]
+              - img
+            - generic [ref=e1099]:
+              - button "导出 PNG（缺少 kaleido）" [disabled] [ref=e1104]:
+                - paragraph [ref=e1108]: 导出 PNG（缺少 kaleido）
+              - button "导出 CSV" [ref=e1113] [cursor=pointer]:
+                - paragraph [ref=e1117]: 导出 CSV
+              - button "导出 JSON" [ref=e1122] [cursor=pointer]:
+                - paragraph [ref=e1126]: 导出 JSON
+  - img [ref=e1127]

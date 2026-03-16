@@ -21,6 +21,19 @@ PLOTLY_DARK_LAYOUT = dict(
 )
 
 
+def _json_default(value: Any) -> Any:
+    """
+    统一处理导出 JSON 时的非常规类型，避免前端导出按钮触发序列化异常。
+    """
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (pd.Timestamp, pd.Timedelta)):
+        return str(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
 def metric_value_text(value: float, as_percent: bool = False) -> str:
     if as_percent:
         return f"{value:.2%}"
@@ -69,7 +82,7 @@ def export_plot_bundle(
         payload = fig_json if fig_json is not None else fig.to_dict()
         st.download_button(
             "导出 JSON",
-            data=json.dumps(payload, ensure_ascii=False, indent=2),
+            data=json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default),
             file_name=f"{title_prefix}.json",
             mime="application/json",
             key=f"{key_prefix}_json",

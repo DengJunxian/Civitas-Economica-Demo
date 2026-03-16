@@ -254,11 +254,15 @@ def render_backtest_panel(ctrl: Any = None) -> None:
             else:
                 start_date = None
                 end_date = None
+                # Streamlit 的 slider 默认值必须与 step 对齐，否则前端会出现告警。
+                raw_period_days = int(cfg_state.get("period_days", 756))
+                clipped_period_days = max(180, min(2000, raw_period_days))
+                period_days_default = 180 + round((clipped_period_days - 180) / 10) * 10
                 period_days = st.slider(
                     "回看天数",
                     min_value=180,
                     max_value=2000,
-                    value=int(cfg_state.get("period_days", 756)),
+                    value=period_days_default,
                     step=10,
                 )
 
@@ -496,4 +500,3 @@ def render_backtest_panel(ctrl: Any = None) -> None:
                 "Tear sheet 已写入: "
                 f"{files.get('policy_a_html', '')} | {files.get('policy_b_html', '')}"
             )
-

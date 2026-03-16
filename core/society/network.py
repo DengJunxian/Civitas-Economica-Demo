@@ -564,6 +564,9 @@ class InformationDiffusion:
         if state == SentimentState.INFECTED:
             # 感染者恢复概率随持续时间上升，但在强回音壁中会被抑制
             diagnostics = self.compute_infection_signal(agent.node_id)
+            # 至少经历一个完整传播周期后再允许恢复，避免种子节点首轮即回落
+            if agent.state_duration <= 0:
+                return state, diagnostics
             echo_strength = min(1.0, np.mean(list(agent.source_exposure_count.values())) / 8.0) if agent.source_exposure_count else 0.0
             recovery_prob = self.gamma * (1 + agent.state_duration * 0.1) * (1.0 - 0.4 * echo_strength)
             recovery_prob = float(np.clip(recovery_prob, 0.0, 1.0))
@@ -624,7 +627,10 @@ class InformationDiffusion:
             "current_stats": self.history[-1],
         }
 
-    def simulate(self, n_ticks: int = 100, initial_infected: int = 10) -> List[Dict]:
+    def simulate(self, n_ticks: int = 100, initial_infected: int = 10, seed: int = 42) -> List[Dict]:
+        # 固定随机种子，避免测试和演示中的传播结果抖动
+        random.seed(seed)
+        np.random.seed(seed)
         self.inject_panic(initial_infected, method="influential")
         for _ in range(n_ticks):
             self.update_sentiment_propagation()

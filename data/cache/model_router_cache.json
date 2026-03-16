@@ -40,5 +40,17 @@
     "reasoning": "fallback: glm-4-flashx: Timeout should be used inside a task",
     "model_used": "deterministic_stub",
     "timestamp": 1773579566.5753634
+  },
+  "ba4641d00f911bb9a16c6f0409df1044e74716fad114abbfc248115b6a3c44c5": {
+    "content": "{\"action\": \"BUY\", \"qty\": 120, \"confidence\": 0.325, \"error\": \"glm-4-flashx: Timeout should be used inside a task\", \"mode\": \"deterministic_stub\"}",
+    "reasoning": "fallback: glm-4-flashx: Timeout should be used inside a task",
+    "model_used": "deterministic_stub",
+    "timestamp": 1773588283.6949418
+  },
+  "371e9d0feb6b59b32d4e42e7e6b0220efef315dd36c266fcde29176aaa2b5702": {
+    "content": "{\"action\": \"SELL\", \"qty\": 80, \"confidence\": 0.937, \"error\": \"glm-4-flashx: Timeout should be used inside a task\", \"mode\": \"deterministic_stub\"}",
+    "reasoning": "fallback: glm-4-flashx: Timeout should be used inside a task",
+    "model_used": "deterministic_stub",
+    "timestamp": 1773588399.7343476
   }
 }

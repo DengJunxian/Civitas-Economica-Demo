@@ -1,0 +1,17 @@
+watchdog timeout reached
+Current thread 0x0000a364 [Thread-1] (most recent call first):
+  File "C:\Users\Deng Junxian\Desktop\Civitas_new\artifacts\debug_async_step_watchdog.py", line 12 in watchdog
+  File "C:\Users\Deng Junxian\AppData\Local\Programs\Python\Python314\Lib\threading.py", line 1385 in run
+  File "C:\Users\Deng Junxian\AppData\Local\Programs\Python\Python314\Lib\threading.py", line 1082 in _bootstrap_inner
+  File "C:\Users\Deng Junxian\AppData\Local\Programs\Python\Python314\Lib\threading.py", line 1044 in _bootstrap
+
+Thread 0x00000a58 (most recent call first):
+  File "C:\Users\Deng Junxian\AppData\Local\Programs\Python\Python314\Lib\asyncio\windows_events.py", line 775 in _poll
+  File "C:\Users\Deng Junxian\AppData\Local\Programs\Python\Python314\Lib\asyncio\windows_events.py", line 446 in select
+  File "C:\Users\Deng Junxian\AppData\Local\Programs\Python\Python314\Lib\site-packages\nest_asyncio.py", line 115 in _run_once
+  File "C:\Users\Deng Junxian\AppData\Local\Programs\Python\Python314\Lib\site-packages\nest_asyncio.py", line 92 in run_until_complete
+  File "C:\Users\Deng Junxian\AppData\Local\Programs\Python\Python314\Lib\asyncio\runners.py", line 215 in _cancel_all_tasks
+  File "C:\Users\Deng Junxian\AppData\Local\Programs\Python\Python314\Lib\asyncio\runners.py", line 71 in close
+  File "C:\Users\Deng Junxian\AppData\Local\Programs\Python\Python314\Lib\asyncio\runners.py", line 63 in __exit__
+  File "C:\Users\Deng Junxian\AppData\Local\Programs\Python\Python314\Lib\asyncio\runners.py", line 203 in run
+  File "C:\Users\Deng Junxian\Desktop\Civitas_new\artifacts\debug_async_step_watchdog.py", line 25 in <module>

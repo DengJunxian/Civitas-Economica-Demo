@@ -1,68 +1,109 @@
-# file: core/types.py
+﻿# file: core/types.py
 """
-统一的数据类型定义
-Order, Trade, Candle 等核心数据结构
+统一的核心数据类型定义。
+包含订单、成交和K线等结构。
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
 from enum import Enum
+from typing import Optional
+import time
 import uuid
-import time # Fallback for creation time if clock is not available, but should be avoided in simulation context
+
 
 class OrderSide(str, Enum):
-    """订单方向"""
+    """订单方向。"""
+
     BUY = "buy"
     SELL = "sell"
 
+
 class OrderType(str, Enum):
-    """订单类型"""
+    """订单类型。"""
+
     LIMIT = "limit"
     MARKET = "market"
 
+
 class OrderStatus(str, Enum):
-    """订单状态"""
+    """订单状态。"""
+
     PENDING = "pending"
     PARTIAL = "partial"
     FILLED = "filled"
     CANCELLED = "cancelled"
     REJECTED = "rejected"
 
+
 @dataclass
 class Order:
-    """
-    通用订单对象
-    """
+    """通用订单对象。"""
+
     symbol: str
     price: float
     quantity: int
     side: OrderSide
     order_type: OrderType
     agent_id: str
-    timestamp: float # 仿真逻辑时间 (SimulationClock time)
+    timestamp: float
     order_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     status: OrderStatus = OrderStatus.PENDING
-    reason: str = "" # 订单原因 (如 MARGIN_CALL) 或 拒绝原因
+    reason: str = ""
     filled_qty: int = 0
-    
+
     @property
     def remaining_qty(self) -> int:
         return self.quantity - self.filled_qty
-    
+
     @property
     def is_filled(self) -> bool:
         return self.filled_qty >= self.quantity
 
     @property
     def value(self) -> float:
-        """订单总价值"""
+        """订单总价值。"""
         return self.price * self.quantity
+
+    @property
+    def action(self) -> str:
+        """
+        兼容旧字段：部分旧测试与脚本使用 `order.action` 表示买卖方向。
+        """
+        return self.side.value.upper()
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        agent_id: str,
+        symbol: str,
+        side: str | OrderSide,
+        order_type: str | OrderType,
+        price: float,
+        quantity: int,
+        timestamp: Optional[float] = None,
+    ) -> "Order":
+        """
+        兼容旧接口的订单工厂方法。
+        支持字符串或枚举输入，未传时间戳时使用当前时间。
+        """
+        side_enum = side if isinstance(side, OrderSide) else OrderSide(str(side).lower())
+        type_enum = order_type if isinstance(order_type, OrderType) else OrderType(str(order_type).lower())
+        return cls(
+            symbol=str(symbol),
+            price=float(price),
+            quantity=int(quantity),
+            side=side_enum,
+            order_type=type_enum,
+            agent_id=str(agent_id),
+            timestamp=float(time.time() if timestamp is None else timestamp),
+        )
+
 
 @dataclass
 class Trade:
-    """
-    成交记录
-    """
+    """成交记录。"""
+
     trade_id: str
     price: float
     quantity: int
@@ -70,33 +111,33 @@ class Trade:
     taker_id: str
     maker_agent_id: str
     taker_agent_id: str
-    buyer_agent_id: str # 明确的买方 ID
-    seller_agent_id: str # 明确的卖方 ID
-    timestamp: float # 仿真逻辑时间
+    buyer_agent_id: str = ""
+    seller_agent_id: str = ""
+    timestamp: float = field(default_factory=time.time)
     buyer_fee: float = 0.0
     seller_fee: float = 0.0
     seller_tax: float = 0.0
-    
+
     @property
     def notional(self) -> float:
         return self.price * self.quantity
-    
+
     @property
     def buyer_total_cost(self) -> float:
         return self.notional + self.buyer_fee
-    
+
     @property
     def seller_net_proceeds(self) -> float:
         return self.notional - self.seller_fee - self.seller_tax
 
+
 @dataclass
 class Candle:
-    """
-    K线数据 (OHLCV)
-    """
+    """K线数据（OHLCV）。"""
+
     symbol: str
-    step: int # Simulation step index
-    timestamp: str # YYYY-MM-DD HH:MM:SS
+    step: int
+    timestamp: str
     open: float
     high: float
     low: float

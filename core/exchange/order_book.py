@@ -262,6 +262,17 @@ class OrderBook:
         self._clean_heap_top(OrderSide.SELL)
         return self.asks[0][0] if self.asks else None
 
+    def get_spread(self) -> Optional[float]:
+        """
+        获取当前买一卖一价差。
+        当任一侧盘口为空时返回 None。
+        """
+        best_bid = self.get_best_bid()
+        best_ask = self.get_best_ask()
+        if best_bid is None or best_ask is None:
+            return None
+        return float(best_ask - best_bid)
+
     def get_depth(self, levels: int = 5) -> Dict:
         """
         Get L2 Market Depth. 

@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import json
 import re
+import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -289,26 +290,15 @@ class ModelRouter:
         fallback_response: Optional[str] = None,
         cache_key: Optional[str] = None,
     ) -> Tuple[str, Optional[str], str]:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import nest_asyncio
-
-                nest_asyncio.apply()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
         if not priority_models:
             priority_models = ["deepseek-chat", "glm-4-flashx"]
-
-        return loop.run_until_complete(
+        return self._run_coro_sync(
             self.call_with_fallback(
-                messages,
-                priority_models,
-                timeout_budget,
-                fallback_response,
-                cache_key,
+                messages=messages,
+                priority_models=priority_models,
+                timeout_budget=timeout_budget,
+                fallback_response=fallback_response,
+                cache_key=cache_key,
             )
         )
 
@@ -406,17 +396,7 @@ class ModelRouter:
         fallback_obj: Optional[Dict[str, Any]] = None,
         cache_key: Optional[str] = None,
     ) -> Tuple[Dict[str, Any], str, str]:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import nest_asyncio
-
-                nest_asyncio.apply()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        return loop.run_until_complete(
+        return self._run_coro_sync(
             self.call_with_schema(
                 messages=messages,
                 json_schema=json_schema,
@@ -426,6 +406,43 @@ class ModelRouter:
                 cache_key=cache_key,
             )
         )
+
+    def _run_coro_sync(self, coro: Any) -> Any:
+        """同步调用异步协程，兼容“当前线程事件循环已在运行”的场景。"""
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        # 若当前线程已有运行中的事件循环，改用子线程新事件循环执行，避免重入冲突。
+        if running_loop and running_loop.is_running():
+            result_box: Dict[str, Any] = {}
+            error_box: Dict[str, BaseException] = {}
+
+            def _runner() -> None:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result_box["value"] = loop.run_until_complete(coro)
+                except BaseException as exc:  # noqa: BLE001
+                    error_box["error"] = exc
+                finally:
+                    loop.close()
+
+            t = threading.Thread(target=_runner, daemon=True, name="ModelRouterSyncBridge")
+            t.start()
+            t.join()
+            if "error" in error_box:
+                raise error_box["error"]
+            return result_box.get("value")
+
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
 
     async def _call_model(
         self,

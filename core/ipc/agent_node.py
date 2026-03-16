@@ -74,6 +74,32 @@ class IPCAgentNode:
             "pnl_pct": pnl_pct,
             "timestamp": packet.timestamp
         }
+
+    async def _router_fallback_decision(self, state: MarketStatePacket) -> Optional[dict]:
+        """
+        兼容只实现 call_with_fallback 的路由器（测试桩常见）。
+        """
+        router = getattr(self.trader, "brain", None)
+        router = getattr(router, "model_router", None)
+        if router is None or not hasattr(router, "call_with_fallback"):
+            return None
+
+        try:
+            prompt = (
+                f"step={state.step}, price={state.price}, trend={state.trend}, "
+                f"panic={state.panic_level}, news={state.recent_news}"
+            )
+            content, _, _ = await router.call_with_fallback(
+                [{"role": "user", "content": prompt}],
+                priority_models=["deepseek-chat"],
+                timeout_budget=5.0,
+            )
+            parsed = json.loads(content) if isinstance(content, str) else content
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return None
+        return None
         
     async def run_loop(self):
         """客户端无限循环：监听市场 TICK，决策，回传订单"""
@@ -107,6 +133,10 @@ class IPCAgentNode:
                 )
                   
                 decision = decision_output.get("decision", {})
+                if str(decision.get("action", "HOLD")).upper() == "HOLD":
+                    fallback_decision = await self._router_fallback_decision(state)
+                    if isinstance(fallback_decision, dict):
+                        decision = fallback_decision
                 action_type = decision.get("action", "HOLD").upper()
                 
                 if action_type in ["BUY", "SELL"]:

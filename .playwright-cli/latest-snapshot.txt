@@ -1,0 +1,6 @@
+### Page
+- Page URL: http://127.0.0.1:8501/
+- Page Title: Civitas-Economica-Demo | 评委答辩模式
+- Console: 0 errors, 1 warnings
+### Snapshot
+- [Snapshot](.playwright-cli\page-2026-03-15T17-37-56-391Z.yml)

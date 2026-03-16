@@ -158,7 +158,7 @@ class ConfidenceTracker:
             self.confidence = min(1.0, self.confidence + boost)
         else:
             # 亏损打击信心
-            penalty = min(0.2, abs(pnl) * 3)
+            penalty = min(0.05, abs(pnl) * 1.0)
             self.confidence = max(0.0, self.confidence - penalty)
             
     def get_description(self) -> str:

@@ -907,7 +907,7 @@ class TraderAgent(BaseAgent):
             score = 1.0 if pnl > 0 else -1.0
             self.brain.memory.add_memory(content, score)
             extract_text = (
-                f"Trade recap: action={decision.get('action')}, pnl={pnl}, confidence={self.brain.state.confidence}"
+                f"交易复盘: action={decision.get('action')}, pnl={pnl}, confidence={self.brain.state.confidence}"
             )
             asyncio.create_task(self._async_extract_and_store(extract_text, time.time(), is_news=False))
 

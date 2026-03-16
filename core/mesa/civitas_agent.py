@@ -73,6 +73,7 @@ class CivitasAgent(Agent):
         
         # 待执行动作（用于情绪推断和 DataCollector）
         self.pending_action: Optional[Dict[str, Any]] = None
+        self._portfolio_override: Optional[Any] = None
         
         # 恢复成本跟踪 (用于计算 PnL)
         self.avg_cost: float = 0.0
@@ -103,15 +104,30 @@ class CivitasAgent(Agent):
 
     @property
     def cash(self) -> float:
+        if self._portfolio_override is not None and hasattr(self._portfolio_override, "available_cash"):
+            return float(getattr(self._portfolio_override, "available_cash", 0.0) or 0.0)
         return self.core.cash_balance
         
     @property
-    def portfolio(self) -> Dict[str, int]:
+    def portfolio(self) -> Any:
+        if self._portfolio_override is not None:
+            return self._portfolio_override
         return self.core.portfolio
+
+    @portfolio.setter
+    def portfolio(self, value: Any) -> None:
+        self._portfolio_override = value
 
     @property
     def position(self) -> int:
-        return sum(self.core.portfolio.values())
+        portfolio_obj = self.portfolio
+        if hasattr(portfolio_obj, "positions"):
+            positions = getattr(portfolio_obj, "positions", {}) or {}
+            if isinstance(positions, dict):
+                return int(sum(positions.values()))
+        if isinstance(portfolio_obj, dict):
+            return int(sum(portfolio_obj.values()))
+        return 0
 
     @property
     def sentiment(self) -> float:
@@ -171,8 +187,39 @@ class CivitasAgent(Agent):
 
     # --- Compatibility API (Deprecated) ---
 
-    def prepare_decision(self, market_state: Dict) -> Tuple[Optional[List[Dict]], Dict]:
-         return None, {}
+    async def prepare_decision(self, market_state: Dict) -> Tuple[Optional[List[Dict]], Dict]:
+        account_state = self._build_account_state(market_state)
+        cognitive = getattr(self, "cognitive_agent", None)
+        if cognitive and hasattr(cognitive, "prepare_decision_prompt_async"):
+            prompt = await cognitive.prepare_decision_prompt_async(market_state, account_state)
+            return prompt, account_state
+        return None, account_state
+
+    def _build_account_state(self, market_state: Dict) -> Dict[str, Any]:
+        portfolio_obj = self.portfolio
+        cash = self.cash
+        position = 0
+        avg_cost = self.avg_cost
+
+        if hasattr(portfolio_obj, "positions"):
+            positions = getattr(portfolio_obj, "positions", {}) or {}
+            if isinstance(positions, dict):
+                position = int(sum(positions.values()))
+            avg_cost = float(getattr(portfolio_obj, "avg_cost", avg_cost) or avg_cost)
+        elif isinstance(portfolio_obj, dict):
+            position = int(sum(portfolio_obj.values()))
+
+        current_price = float(market_state.get("price", getattr(self.model, "current_price", 0.0)) or 0.0)
+        market_value = float(max(0.0, position * current_price))
+        pnl_pct = (current_price - avg_cost) / avg_cost if avg_cost and position > 0 else 0.0
+
+        return {
+            "cash": cash,
+            "position": position,
+            "market_value": market_value,
+            "avg_cost": float(avg_cost or 0.0),
+            "pnl_pct": float(pnl_pct),
+        }
 
     def finalize_decision(self, result: Any, market_state: Dict, account_state: Dict) -> None:
         pass

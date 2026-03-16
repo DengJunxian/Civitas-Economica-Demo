@@ -1,0 +1,146 @@
+- generic [ref=e2]:
+  - generic [ref=e11]:
+    - heading "全局面板" [level=3] [ref=e16]
+    - alert [ref=e19]:
+      - paragraph [ref=e24]: 运行态：DEMO_MODE
+    - generic [ref=e26]:
+      - paragraph [ref=e30]: 默认答辩场景
+      - generic [ref=e32]:
+        - generic [ref=e33]:
+          - generic [ref=e34]: tax_cut_liquidity_boost
+          - combobox "Selected tax_cut_liquidity_boost. 默认答辩场景" [ref=e36]
+        - img "open" [ref=e38]
+    - button "自动生成比赛材料" [ref=e42] [cursor=pointer]:
+      - paragraph [ref=e46]: 自动生成比赛材料
+  - generic [ref=e3]:
+    - banner [ref=e49]:
+      - generic [ref=e52]:
+        - button "Deploy" [ref=e54] [cursor=pointer]:
+          - generic [ref=e56]: Deploy
+        - button [ref=e58] [cursor=pointer]:
+          - img [ref=e59]
+    - generic [ref=e62]:
+      - heading "Civitas-Economica-Demo" [level=2] [ref=e68]:
+        - text: Civitas-Economica-Demo
+        - generic [ref=e69]:
+          - link "Link to heading":
+            - /url: "#civitas-economica-demo"
+            - img
+      - paragraph [ref=e74]: 首页入口：答辩模式 / 专家模式 / 历史回测 / 行为金融诊断 / 系统说明
+      - generic [ref=e76]:
+        - button "答辩模式" [ref=e81] [cursor=pointer]:
+          - paragraph [ref=e85]: 答辩模式
+        - button "专家模式" [ref=e90] [cursor=pointer]:
+          - paragraph [ref=e94]: 专家模式
+        - button "历史回测" [ref=e99] [cursor=pointer]:
+          - paragraph [ref=e103]: 历史回测
+        - button "行为金融诊断" [ref=e108] [cursor=pointer]:
+          - paragraph [ref=e112]: 行为金融诊断
+        - button "系统说明" [ref=e117] [cursor=pointer]:
+          - paragraph [ref=e121]: 系统说明
+      - generic [ref=e126]: 当前入口：答辩模式 | 运行态：DEMO_MODE
+      - heading "答辩模式" [level=2] [ref=e132]:
+        - text: 答辩模式
+        - generic [ref=e133]:
+          - link "Link to heading":
+            - /url: "#6a3624d5"
+            - img
+      - paragraph [ref=e138]: 一键加载场景、自动播放时间线，5 分钟内完成全链路演示。
+      - generic [ref=e140]:
+        - paragraph [ref=e144]: 场景选择
+        - generic [ref=e146]:
+          - generic [ref=e147]:
+            - generic [ref=e148]: tax_cut_liquidity_boost
+            - combobox "Selected tax_cut_liquidity_boost. 场景选择" [ref=e150]
+          - img "open" [ref=e152]
+      - generic [ref=e155]:
+        - button "一键载入场景" [active] [ref=e160] [cursor=pointer]:
+          - paragraph [ref=e164]: 一键载入场景
+        - button "自动播放" [ref=e169] [cursor=pointer]:
+          - paragraph [ref=e173]: 自动播放
+        - button "暂停" [ref=e178] [cursor=pointer]:
+          - paragraph [ref=e182]: 暂停
+        - button "下一步" [ref=e187] [cursor=pointer]:
+          - paragraph [ref=e191]: 下一步
+        - button "重置" [ref=e196] [cursor=pointer]:
+          - paragraph [ref=e200]: 重置
+      - generic [ref=e210]:
+        - generic [ref=e217]:
+          - generic [ref=e218]: 流动性
+          - generic [ref=e219]: "0.783"
+          - generic [ref=e220]: 越高越好
+        - generic [ref=e227]:
+          - generic [ref=e228]: 波动率
+          - generic [ref=e229]: 0.00%
+          - generic [ref=e230]: 越低越稳
+        - generic [ref=e237]:
+          - generic [ref=e238]: 羊群度
+          - generic [ref=e239]: "0.086"
+          - generic [ref=e240]: 高值代表拥挤交易
+        - generic [ref=e247]:
+          - generic [ref=e248]: 风险预警
+          - generic [ref=e249]: GREEN
+          - generic [ref=e250]: 系统风险灯
+        - generic [ref=e257]:
+          - generic [ref=e258]: 监管动作
+          - generic [ref=e259]: 观察
+          - generic [ref=e260]: 当前干预状态
+      - alert [ref=e263]:
+        - paragraph [ref=e268]: "自动讲解：主持人: 政策落地后，成交活跃度先于价格反应。"
+      - progressbar "8% Loaded" [ref=e272]
+      - heading "三段式叙事：Analyst → Manager → Market" [level=3] [ref=e280]:
+        - text: 三段式叙事：Analyst → Manager → Market
+        - generic [ref=e281]:
+          - link "Link to heading":
+            - /url: "#analyst-manager-market"
+            - img
+      - generic [ref=e283]:
+        - heading "1) Analyst" [level=3] [ref=e291]:
+          - text: 1) Analyst
+          - generic [ref=e292]:
+            - link "Link to heading":
+              - /url: "#1-analyst"
+              - img
+        - heading "2) Manager" [level=3] [ref=e302]:
+          - text: 2) Manager
+          - generic [ref=e303]:
+            - link "Link to heading":
+              - /url: "#2-manager"
+              - img
+        - heading "3) Market" [level=3] [ref=e313]:
+          - text: 3) Market
+          - generic [ref=e314]:
+            - link "Link to heading":
+              - /url: "#3-market"
+              - img
+      - separator [ref=e321]
+      - heading "A/B World Compare" [level=3] [ref=e326]:
+        - text: A/B World Compare
+        - generic [ref=e327]:
+          - link "Link to heading":
+            - /url: "#a-b-world-compare"
+            - img
+      - button "导出 PNG（缺少 kaleido）" [disabled] [ref=e336]:
+        - paragraph [ref=e340]: 导出 PNG（缺少 kaleido）
+      - alert [ref=e349]:
+        - generic [ref=e352]:
+          - generic [ref=e353]: "TypeError: Object of type ndarray is not JSON serializable"
+          - generic [ref=e354]:
+            - generic [ref=e355]: "Traceback:"
+            - code [ref=e358]:
+              - generic [ref=e359]: File "C:\Users\Deng Junxian\Desktop\Civitas_new\app.py", line 373, in <module> main() ~~~~^^
+              - generic [ref=e360]: File "C:\Users\Deng Junxian\Desktop\Civitas_new\app.py", line 361, in main _render_defense_mode() ~~~~~~~~~~~~~~~~~~~~^^
+              - generic [ref=e361]: File "C:\Users\Deng Junxian\Desktop\Civitas_new\app.py", line 257, in _render_defense_mode render_demo_tab(ctrl=st.session_state.get("controller")) ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              - generic [ref=e362]: File "C:\Users\Deng Junxian\Desktop\Civitas_new\ui\demo_wind_tunnel.py", line 244, in render_demo_tab fig_market = dashboard_ui.render_market_overview(metrics, current_step, key_prefix="defense")
+              - generic [ref=e363]: "File \"C:\\Users\\Deng Junxian\\Desktop\\Civitas_new\\ui\\dashboard.py\", line 125, in render_market_overview export_plot_bundle(fig, frame, f\"{key_prefix}_market_overview\", f\"{key_prefix}_market_overview\") ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^"
+              - generic [ref=e364]: File "C:\Users\Deng Junxian\Desktop\Civitas_new\ui\dashboard.py", line 72, in export_plot_bundle data=json.dumps(payload, ensure_ascii=False, indent=2), ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              - generic [ref=e365]: File "C:\Users\Deng Junxian\AppData\Local\Programs\Python\Python314\Lib\json\__init__.py", line 242, in dumps **kw).encode(obj) ~~~~~~^^^^^
+              - generic [ref=e366]: File "C:\Users\Deng Junxian\AppData\Local\Programs\Python\Python314\Lib\json\encoder.py", line 202, in encode chunks = self.iterencode(o, _one_shot=True)
+              - generic [ref=e367]: File "C:\Users\Deng Junxian\AppData\Local\Programs\Python\Python314\Lib\json\encoder.py", line 263, in iterencode return _iterencode(o, 0)
+              - generic [ref=e368]: "File \"C:\\Users\\Deng Junxian\\AppData\\Local\\Programs\\Python\\Python314\\Lib\\json\\encoder.py\", line 182, in default raise TypeError(f'Object of type {o.__class__.__name__} ' f'is not JSON serializable')"
+          - generic [ref=e369]:
+            - button "Copy" [ref=e370] [cursor=pointer]
+            - link "Ask Google" [ref=e371] [cursor=pointer]:
+              - /url: https://www.google.com/search?q=TypeError%3A%20Object%20of%20type%20ndarray%20is%20not%20JSON%20serializable
+            - link "Ask ChatGPT" [ref=e372] [cursor=pointer]:
+              - /url: https://chatgpt.com/?q=TypeError%3A%20Object%20of%20type%20ndarray%20is%20not%20JSON%20serializable%0A%0AFile%20%22C%3A%5CUsers%5CDeng%20Junxian%5CDesktop%5CCivitas_new%5Capp.py%22%2C%20line%20373%2C%20in%20%3Cmodule%3E%0A%20%20%20%20main()%0A%20%20%20%20~~~~%5E%5E%0AFile%20%22C%3A%5CUsers%5CDeng%20Junxian%5CDesktop%5CCivitas_new%5Capp.py%22%2C%20line%20361%2C%20in%20main%0A%20%20%20%20_render_defense_mode()%0A%20%20%20%20~~~~~~~~~~~~~~~~~~~~%5E%5E%0AFile%20%22C%3A%5CUsers%5CDeng%20Junxian%5CDesktop%5CCivitas_new%5Capp.py%22%2C%20line%20257%2C%20in%20_render_defense_mode%0A%20%20%20%20render_demo_tab(ctrl%3Dst.session_state.get(%22controller%22))%0A%20%20%20%20~~~~~~~~~~~~~~~%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%0AFile%20%22C%3A%5CUsers%5CDeng%20Junxian%5CDesktop%5CCivitas_new%5Cui%5Cdemo_wind_tunnel.py%22%2C%20line%20244%2C%20in%20render_demo_tab%0A%20%20%20%20fig_market%20%3D%20dashboard_ui.render_market_overview(metrics%2C%20current_step%2C%20key_prefix%3D%22defense%22)%0AFile%20%22C%3A%5CUsers%5CDeng%20Junxian%5CDesktop%5CCivitas_new%5Cui%5Cdashboard.py%22%2C%20line%20125%2C%20in%20render_market_overview%0A%20%20%20%20export_plot_bundle(fig%2C%20frame%2C%20f%22%7Bkey_prefix%7D_market_overview%22%2C%20f%22%7Bkey_prefix%7D_market_overview%22)%0A%20%20%20%20~~~~~~~~~~~~~~~~~~%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%0AFile%20%22C%3A%5CUsers%5CDeng%20Junxian%5CDesktop%5CCivitas_new%5Cui%5Cdashboard.py%22%2C%20line%2072%2C%20in%20export_plot_bundle%0A%20%20%20%20data%3Djson.dumps(payload%2C%20ensure_ascii%3DFalse%2C%20indent%3D2)%2C%0A%20%20%20%20%20%20%20%20%20~~~~~~~~~~%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%5E%0AFile%20%22C%3A%5CUsers%5CDeng%20Junxian%5CAppData%5CLocal%5CPrograms%5CPython%5CPython314%5CLib%5Cjson%5C__init__.py%22%2C%20line%20242%2C%20in%20dumps%0A%20%20%20%20**kw).encode(obj)%0A%20%20%20%20%20%20%20%20%20%20~~~~~~%5E%5E%5E%5E%5E%0AFile%20%22C%3A%5CUsers%5CDeng%20Junxian%5CAppData%5CLocal%5CPrograms%5CPython%5CPython314%5CLib%5Cjson%5Cencoder.py%22%2C%20line%20202%2C%20in%20encode%0A%20%20%20%20chunks%20%3D%20self.iterencode(o%2C%20_one_shot%3DTrue)%0AFile%20%22C%3A%5CUsers%5CDeng%20Junxian%5CAppData%5CLocal%5CPrograms%5CPython%5CPython314%5CLib%5Cjson%5Cencoder.py%22%2C%20line%20263%2C%20in%20iterencode%0A%20%20%20%20return%20_iterencode(o%2C%200)%0AFile%20%22C%3A%5CUsers%5CDeng%20Junxian%5CAppData%5CLocal%5CPrograms%5CPython%5CPython314%5CLib%5Cjson%5Cencoder.py%22%2C%20line%20182%2C%20in%20default%0A%20%20%20%20raise%20TypeError(f'Object%20of%20type%20%7Bo.__class__.__name__%7D%20'%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20f'is%20not%20JSON%20serializable')

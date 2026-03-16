@@ -462,8 +462,20 @@ class StratifiedPopulation:
             market_trend: 甯傚満瓒嬪娍淇″彿 (-1.0 ~ 1.0)
         """
         # 1. 鑾峰彇鏉ヨ嚜澶鐨勪俊鍙?(Local Signal)
-        smart_acts = np.array(smart_actions)  # shape (N_smart,)
-        guru_signals = smart_acts[self.influence_map]
+        # 维度防御：部分场景下 influence_map 可能与 state 行数不一致，这里统一对齐
+        vector_size = int(self.state.shape[0])
+        self.n_vectorized = vector_size
+        smart_acts = np.array(smart_actions, dtype=np.int32).reshape(-1)
+        if smart_acts.size == 0:
+            smart_acts = np.array([0], dtype=np.int32)
+        influence = np.array(self.influence_map, dtype=np.int32).reshape(-1)
+        if influence.size < vector_size:
+            pad = np.random.choice(influence if influence.size > 0 else np.array([0]), size=vector_size - influence.size)
+            influence = np.concatenate([influence, pad])
+        elif influence.size > vector_size:
+            influence = influence[:vector_size]
+        influence = np.clip(influence, 0, smart_acts.size - 1)
+        guru_signals = smart_acts[influence]
         
         # 2. 璁＄畻閭诲眳鎯呯华鐘舵€侊紙娑岀幇寮忕緤缇ゆ晥搴旀牳蹇冿級
         current_sentiment = self.state[:, self.IDX_SENTIMENT]
@@ -483,10 +495,10 @@ class StratifiedPopulation:
         confidence = self.state[:, self.IDX_CONFIDENCE] / 100.0  # 褰掍竴鍖栧埌 0-1
         
         # 鍩虹鏉冮噸
-        w_personal = np.full(self.n_vectorized, 0.4)
-        w_guru = np.full(self.n_vectorized, 0.2)
-        w_neighbor = np.full(self.n_vectorized, 0.2)
-        w_market = np.full(self.n_vectorized, 0.2)
+        w_personal = np.full(vector_size, 0.4)
+        w_guru = np.full(vector_size, 0.2)
+        w_neighbor = np.full(vector_size, 0.2)
+        w_market = np.full(vector_size, 0.2)
         
         # 鎶€鏈淳 (type=0): 鏇翠緷璧栧競鍦鸿秼鍔匡紝杈冨皯鍙楅偦灞呭奖鍝?
         tech_mask = cognitive_types == 0
@@ -529,7 +541,7 @@ class StratifiedPopulation:
         w_market /= total_w
         
         # 5. 鎵归噺鏇存柊鎯呯华 (Matrix Operation)
-        noise = np.random.normal(0, 0.05, self.n_vectorized)
+        noise = np.random.normal(0, 0.05, vector_size)
         
         new_sentiment = (
             w_personal * current_sentiment +

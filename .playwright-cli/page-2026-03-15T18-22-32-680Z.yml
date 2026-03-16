@@ -1,0 +1,233 @@
+- generic:
+  - generic [ref=e2]:
+    - generic [ref=e11]:
+      - heading "全局面板" [level=3] [ref=e16]
+      - alert [ref=e19]:
+        - paragraph [ref=e24]: 运行态：DEMO_MODE
+      - generic [ref=e26]:
+        - paragraph [ref=e30]: 默认答辩场景
+        - generic [ref=e32]:
+          - generic [ref=e33]:
+            - generic [ref=e34]: tax_cut_liquidity_boost
+            - combobox "Selected tax_cut_liquidity_boost. 默认答辩场景" [ref=e36]
+          - img "open" [ref=e38]
+      - button "自动生成比赛材料" [ref=e42] [cursor=pointer]:
+        - paragraph [ref=e46]: 自动生成比赛材料
+    - generic [ref=e3]:
+      - banner [ref=e49]:
+        - generic [ref=e52]:
+          - button "Deploy" [ref=e54] [cursor=pointer]:
+            - generic [ref=e56]: Deploy
+          - button [ref=e58] [cursor=pointer]:
+            - img [ref=e59]
+      - generic [ref=e62]:
+        - heading "Civitas-Economica-Demo" [level=2] [ref=e68]:
+          - text: Civitas-Economica-Demo
+          - generic [ref=e69]:
+            - link "Link to heading":
+              - /url: "#civitas-economica-demo"
+              - img
+        - paragraph [ref=e74]: 首页入口：答辩模式 / 专家模式 / 历史回测 / 行为金融诊断 / 系统说明
+        - generic [ref=e76]:
+          - button "答辩模式" [ref=e81] [cursor=pointer]:
+            - paragraph [ref=e85]: 答辩模式
+          - button "专家模式" [ref=e90] [cursor=pointer]:
+            - paragraph [ref=e94]: 专家模式
+          - button "历史回测" [active] [ref=e99] [cursor=pointer]:
+            - paragraph [ref=e103]: 历史回测
+          - button "行为金融诊断" [ref=e108] [cursor=pointer]:
+            - paragraph [ref=e112]: 行为金融诊断
+          - button "系统说明" [ref=e117] [cursor=pointer]:
+            - paragraph [ref=e121]: 系统说明
+        - generic [ref=e126]: 当前入口：历史回测 | 运行态：DEMO_MODE
+        - heading "历史回测" [level=2] [ref=e533]:
+          - text: 历史回测
+          - generic [ref=e133]:
+            - link "Link to heading":
+              - /url: "#6a3624d5"
+              - img
+        - paragraph [ref=e138]: 沿用现有回测引擎，不改后端架构。
+        - heading "历史回测与研究面板" [level=2] [ref=e539]:
+          - text: 历史回测与研究面板
+          - generic [ref=e540]:
+            - link "Link to heading":
+              - /url: "#1a30115b"
+              - img
+        - paragraph [ref=e545]: 支持 portfolio_system 策略，并支持一键生成政策A/B自动对比报告。
+        - generic [ref=e547]:
+          - generic [ref=e549]:
+            - generic [ref=e551]:
+              - generic [ref=e553]:
+                - paragraph [ref=e557]: 交易标的
+                - generic [ref=e559]:
+                  - generic [ref=e560]:
+                    - generic [ref=e561]: 上证指数 (sh000001)
+                    - combobox "Selected 上证指数 (sh000001). 交易标的" [ref=e563]
+                  - img "open" [ref=e565]
+              - generic [ref=e568]:
+                - paragraph [ref=e572]: 基准
+                - generic [ref=e574]:
+                  - generic [ref=e575]:
+                    - generic [ref=e576]: 上证指数 (sh000001)
+                    - combobox "Selected 上证指数 (sh000001). 基准" [ref=e578]
+                  - img "open" [ref=e580]
+              - generic [ref=e584] [cursor=pointer]:
+                - checkbox "自定义日期窗口"
+                - paragraph [ref=e589]: 自定义日期窗口
+              - generic [ref=e592]:
+                - paragraph [ref=e596]: 回看天数
+                - generic [ref=e597]:
+                  - slider "回看天数" [ref=e601]:
+                    - generic:
+                      - generic:
+                        - paragraph: "760"
+                  - generic:
+                    - generic:
+                      - paragraph: "180"
+                    - generic:
+                      - paragraph: "2000"
+            - generic [ref=e604]:
+              - generic [ref=e606]:
+                - paragraph [ref=e610]: 策略模板
+                - generic [ref=e612]:
+                  - generic [ref=e613]:
+                    - generic [ref=e614]: 动量策略
+                    - combobox "Selected 动量策略. 策略模板" [ref=e616]
+                  - img "open" [ref=e618]
+              - generic [ref=e622]:
+                - paragraph [ref=e626]: 观察窗口
+                - generic [ref=e627]:
+                  - slider "观察窗口" [ref=e631]:
+                    - generic:
+                      - generic:
+                        - paragraph: "20"
+                  - generic:
+                    - generic:
+                      - paragraph: "5"
+                    - generic:
+                      - paragraph: "120"
+              - generic [ref=e635]:
+                - paragraph [ref=e639]: 调仓频率(交易日)
+                - generic [ref=e640]:
+                  - slider "调仓频率(交易日)" [ref=e644]:
+                    - generic:
+                      - generic:
+                        - paragraph: "5"
+                  - generic:
+                    - generic:
+                      - paragraph: "1"
+                    - generic:
+                      - paragraph: "20"
+              - generic [ref=e648]:
+                - paragraph [ref=e652]: 最大仓位
+                - generic [ref=e653]:
+                  - slider "最大仓位" [ref=e657]:
+                    - generic:
+                      - generic:
+                        - paragraph: "1.00"
+                  - generic:
+                    - generic:
+                      - paragraph: "0.20"
+                    - generic:
+                      - paragraph: "1.50"
+              - generic [ref=e661] [cursor=pointer]:
+                - checkbox "允许做空"
+                - paragraph [ref=e666]: 允许做空
+            - generic [ref=e668]:
+              - generic [ref=e671]:
+                - paragraph [ref=e675]: 佣金 (bps)
+                - generic [ref=e676]:
+                  - slider "佣金 (bps)" [ref=e680]:
+                    - generic:
+                      - generic:
+                        - paragraph: "2.50"
+                  - generic:
+                    - generic:
+                      - paragraph: "0.00"
+                    - generic:
+                      - paragraph: "20.00"
+              - generic [ref=e684]:
+                - paragraph [ref=e688]: 印花税 (bps, 卖出)
+                - generic [ref=e689]:
+                  - slider "印花税 (bps, 卖出)" [ref=e693]:
+                    - generic:
+                      - generic:
+                        - paragraph: "5.00"
+                  - generic:
+                    - generic:
+                      - paragraph: "0.00"
+                    - generic:
+                      - paragraph: "20.00"
+              - generic [ref=e697]:
+                - paragraph [ref=e701]: 滑点 (bps)
+                - generic [ref=e702]:
+                  - slider "滑点 (bps)" [ref=e706]:
+                    - generic:
+                      - generic:
+                        - paragraph: "5.00"
+                  - generic:
+                    - generic:
+                      - paragraph: "0.00"
+                    - generic:
+                      - paragraph: "40.00"
+              - generic [ref=e710]:
+                - paragraph [ref=e714]: 冲击系数
+                - generic [ref=e715]:
+                  - slider "冲击系数" [ref=e719]:
+                    - generic:
+                      - generic:
+                        - paragraph: "0.05"
+                  - generic:
+                    - generic:
+                      - paragraph: "0.00"
+                    - generic:
+                      - paragraph: "0.50"
+              - generic [ref=e723]:
+                - paragraph [ref=e727]: 政策冲击因子
+                - generic [ref=e728]:
+                  - slider "政策冲击因子" [ref=e732]:
+                    - generic:
+                      - generic:
+                        - paragraph: "0.00"
+                  - generic:
+                    - generic:
+                      - paragraph: "-1.00"
+                    - generic:
+                      - paragraph: "1.00"
+              - generic [ref=e736]:
+                - paragraph [ref=e740]: 情绪权重
+                - generic [ref=e741]:
+                  - slider "情绪权重" [ref=e745]:
+                    - generic:
+                      - generic:
+                        - paragraph: "0.50"
+                  - generic:
+                    - generic:
+                      - paragraph: "0.00"
+                    - generic:
+                      - paragraph: "1.00"
+              - generic [ref=e749]:
+                - paragraph [ref=e753]: Civitas 因子权重
+                - generic [ref=e754]:
+                  - slider "Civitas 因子权重" [ref=e758]:
+                    - generic:
+                      - generic:
+                        - paragraph: "0.50"
+                  - generic:
+                    - generic:
+                      - paragraph: "0.00"
+                    - generic:
+                      - paragraph: "1.00"
+          - generic [ref=e762] [cursor=pointer]:
+            - checkbox "回测后自动导出 Qlib 研究数据束"
+            - paragraph [ref=e767]: 回测后自动导出 Qlib 研究数据束
+          - generic [ref=e769]:
+            - paragraph [ref=e773]: Qlib 导出路径
+            - textbox "Qlib 导出路径" [ref=e776]:
+              - /placeholder: ""
+              - text: outputs/backtest_qlib_bundle
+          - button "运行历史回测" [ref=e780] [cursor=pointer]:
+            - paragraph [ref=e784]: 运行历史回测
+        - alert [ref=e263]:
+          - paragraph [ref=e268]: 请先配置参数并运行一次回测。
+  - img [ref=e785]

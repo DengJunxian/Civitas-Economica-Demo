@@ -207,13 +207,19 @@ class FileSystemIPC:
         path = self.responses / f"{correlation_id}.json"
         while _utc_now() < deadline:
             if path.exists():
-                raw = self._load_json(path)
+                try:
+                    raw = self._load_json(path)
+                except (FileNotFoundError, PermissionError, OSError, json.JSONDecodeError):
+                    time.sleep(poll_interval)
+                    continue
                 if consume:
-                    path.unlink(missing_ok=True)
+                    try:
+                        path.unlink(missing_ok=True)
+                    except PermissionError:
+                        pass
                 return IPCEnvelope(**raw)
             time.sleep(poll_interval)
         return None
 
     def list_pending_commands(self) -> List[Path]:
         return sorted(self.commands_pending.glob("*.json"))
-

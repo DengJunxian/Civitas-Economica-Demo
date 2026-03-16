@@ -30,6 +30,33 @@ def test_filesystem_ipc_command_response_roundtrip(tmp_path):
     assert response.payload["accepted"] is True
 
 
+def test_filesystem_ipc_wait_for_response_retries_locked_file(tmp_path, monkeypatch):
+    ipc = FileSystemIPC(tmp_path)
+    correlation_id = "locked-response"
+    ipc.send_response(
+        correlation_id=correlation_id,
+        message_type="submit_intent_ack",
+        payload={"accepted": True},
+    )
+
+    real_load = ipc._load_json
+    attempts = {"count": 0}
+
+    def flaky_load(path):
+        if attempts["count"] == 0:
+            attempts["count"] += 1
+            raise PermissionError("response file is temporarily locked")
+        return real_load(path)
+
+    monkeypatch.setattr(ipc, "_load_json", flaky_load)
+
+    response = ipc.wait_for_response(correlation_id, timeout=0.5, poll_interval=0.01)
+
+    assert response is not None
+    assert response.payload["accepted"] is True
+    assert attempts["count"] == 1
+
+
 def test_simulation_runner_buffers_intents_until_time_advance():
     runner = SimulationRunner(response_timeout=2.0, prev_close=100.0, symbol="TEST")
     runner.start()

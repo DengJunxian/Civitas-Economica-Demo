@@ -10,6 +10,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from core.ui_text import display_risk_alert, translate_display_text, translate_ui_payload
+
 
 PLOTLY_DARK_LAYOUT = dict(
     template="plotly_dark",
@@ -61,7 +63,8 @@ def export_plot_bundle(
                 use_container_width=True,
             )
         except Exception:
-            st.button("导出 PNG（缺少 kaleido）", key=f"{key_prefix}_png_disabled", disabled=True, use_container_width=True)
+            st.button("导出 PNG（需安装依赖）", key=f"{key_prefix}_png_disabled", disabled=True, use_container_width=True)
+            st.caption("PNG 导出依赖未就绪，请安装 `kaleido` 后重启应用。")
 
     with c2:
         csv_text = ""
@@ -105,7 +108,10 @@ def render_kpi_cards(snapshot: Dict[str, Any]) -> None:
             elif percent is False and isinstance(value, (int, float)):
                 v = metric_value_text(float(value))
             else:
-                v = str(value)
+                if label == "风险预警":
+                    v = display_risk_alert(str(value))
+                else:
+                    v = translate_display_text(str(value))
             st.markdown(
                 f"""
                 <div class='kpi-card'>
@@ -149,7 +155,7 @@ def render_ab_world_compare(world_a: pd.DataFrame, world_b: pd.DataFrame, key_pr
     fig.add_trace(go.Scatter(x=merged["time"], y=merged["B世界"], mode="lines", name="B世界（政策缺失）", line=dict(color="#f97316", width=2)))
     fig.update_layout(
         **PLOTLY_DARK_LAYOUT,
-        title="A/B World Compare：政策有无的市场路径",
+        title="A/B 世界对照：政策有无的市场路径",
         yaxis=dict(title="指数点位"),
         legend=dict(orientation="h"),
         height=320,
@@ -296,8 +302,8 @@ def _policy_chain_strength(chain_payload: Optional[Dict[str, Any]]) -> Dict[str,
 def render_policy_transmission_chain(chain_payload: Optional[Dict[str, Any]] = None, key_prefix: str = "policy_chain") -> go.Figure:
     policy_text = "政策输入"
     if chain_payload and chain_payload.get("policy"):
-        policy_text = str(chain_payload.get("policy"))
-    labels = [policy_text[:24], "宏观变量", "社会情绪", "行业/agent", "市场微结构"]
+        policy_text = translate_display_text(str(chain_payload.get("policy")))
+    labels = [policy_text[:24], "宏观变量", "社会情绪", "行业主体", "市场微结构"]
     strength = _policy_chain_strength(chain_payload)
     source = [0, 1, 2, 3]
     target = [1, 2, 3, 4]
@@ -315,7 +321,7 @@ def render_policy_transmission_chain(chain_payload: Optional[Dict[str, Any]] = N
             )
         ]
     )
-    fig.update_layout(**PLOTLY_DARK_LAYOUT, title="政策传导链：政策 -> 宏观变量 -> 社会情绪 -> 行业/agent -> 市场微结构", height=360)
+    fig.update_layout(**PLOTLY_DARK_LAYOUT, title="政策传导链：政策 -> 宏观变量 -> 社会情绪 -> 行业主体 -> 市场微结构", height=360)
     st.plotly_chart(fig, use_container_width=True)
     sankey_df = pd.DataFrame({"source": source, "target": target, "value": value})
     export_plot_bundle(fig, sankey_df, f"{key_prefix}_policy_chain", f"{key_prefix}_policy_chain")
@@ -386,7 +392,7 @@ def render_decision_evidence_flow(
                 analyst_cards.append(
                     {
                         "analyst_id": str(name),
-                        "thesis": f"{name} legacy output",
+                        "thesis": f"{translate_display_text(str(name))} 历史输出",
                         "evidence": [{"type": "risk", "content": json.dumps(payload, ensure_ascii=False), "weight": 0.5}],
                         "time_horizon": "swing",
                         "risk_tags": [],
@@ -410,28 +416,29 @@ def render_decision_evidence_flow(
         calibration = manager_final_card.get("calibration", {}) if isinstance(manager_final_card, dict) else {}
 
     tab_cards, tab_matrix, tab_manager, tab_risk, tab_calib, tab_narration = st.tabs(
-        ["Analyst Cards", "Contradiction Matrix", "Manager Final Card", "Risk Alerts", "Calibration", "Narration"]
+        ["分析师卡片", "矛盾矩阵", "经理最终卡", "风险告警", "校准指标", "叙事时间线"]
     )
 
     with tab_cards:
         if analyst_cards:
             for idx, card in enumerate(analyst_cards):
-                label = f"{idx + 1}. {card.get('analyst_id', f'analyst_{idx}')}"
+                label = f"{idx + 1}. {translate_display_text(str(card.get('analyst_id', f'analyst_{idx}')))}"
                 with st.expander(label, expanded=(idx == 0)):
-                    st.json(card)
+                    st.json(translate_ui_payload(card))
         else:
-            st.info("暂无 analyst cards。")
+            st.info("暂无分析师卡片。")
 
     with tab_matrix:
         analysts = contradiction_matrix.get("analysts", []) if isinstance(contradiction_matrix, dict) else []
         matrix = contradiction_matrix.get("matrix", []) if isinstance(contradiction_matrix, dict) else []
         if matrix and analysts:
+            analyst_labels = [translate_display_text(str(item)) for item in analysts]
             fig = go.Figure(
                 data=[
                     go.Heatmap(
                         z=matrix,
-                        x=analysts,
-                        y=analysts,
+                        x=analyst_labels,
+                        y=analyst_labels,
                         zmin=0,
                         zmax=1,
                         colorscale="YlOrRd",
@@ -439,32 +446,32 @@ def render_decision_evidence_flow(
                     )
                 ]
             )
-            fig.update_layout(**PLOTLY_DARK_LAYOUT, title="Analyst Contradiction Matrix", height=360)
+            fig.update_layout(**PLOTLY_DARK_LAYOUT, title="分析师矛盾矩阵", height=360)
             st.plotly_chart(fig, use_container_width=True)
-            matrix_df = pd.DataFrame(matrix, columns=analysts, index=analysts)
+            matrix_df = pd.DataFrame(matrix, columns=analyst_labels, index=analyst_labels)
             export_plot_bundle(fig, matrix_df.reset_index(), "evidence_contradiction_matrix", "evidence_contradiction_matrix")
-            st.caption(f"Contradiction Index: {float(contradiction_matrix.get('contradiction_index', 0.0)):.3f}")
+            st.caption(f"矛盾指数：{float(contradiction_matrix.get('contradiction_index', 0.0)):.3f}")
         else:
             st.info("暂无矛盾矩阵数据。")
 
     with tab_manager:
-        st.json(manager_final_card)
+        st.json(translate_ui_payload(manager_final_card))
 
     with tab_risk:
-        st.json(risk_alerts)
+        st.json(translate_ui_payload(risk_alerts))
 
     with tab_calib:
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.metric("Brier-like", f"{float(calibration.get('brier_like_score', 0.0)):.4f}")
+            st.metric("Brier 类分数", f"{float(calibration.get('brier_like_score', 0.0)):.4f}")
         with c2:
-            st.metric("Confidence Drift", f"{float(calibration.get('confidence_drift', 0.0)):.4f}")
+            st.metric("置信漂移", f"{float(calibration.get('confidence_drift', 0.0)):.4f}")
         with c3:
-            st.metric("Outcome Proxy", f"{float(calibration.get('outcome_proxy', 0.0)):.2f}")
+            st.metric("结果代理值", f"{float(calibration.get('outcome_proxy', 0.0)):.2f}")
         if isinstance(manager_final_card, dict):
             st.caption(
-                f"raw_conf={float(manager_final_card.get('raw_confidence', 0.0)):.3f}, "
-                f"calibrated_conf={float(manager_final_card.get('calibrated_confidence', 0.0)):.3f}"
+                f"原始置信度={float(manager_final_card.get('raw_confidence', 0.0)):.3f}, "
+                f"校准后置信度={float(manager_final_card.get('calibrated_confidence', 0.0)):.3f}"
             )
 
     with tab_narration:
@@ -473,8 +480,8 @@ def render_decision_evidence_flow(
             rows.append(
                 {
                     "步骤": item.get("step"),
-                    "角色": item.get("speaker", "旁白"),
-                    "事件": item.get("text", ""),
+                    "角色": translate_display_text(str(item.get("speaker", "旁白"))),
+                    "事件": translate_display_text(str(item.get("text", ""))),
                 }
             )
         evidence_df = pd.DataFrame(rows)

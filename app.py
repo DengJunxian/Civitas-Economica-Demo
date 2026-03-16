@@ -20,6 +20,7 @@ from core.competition_demo import (
     load_competition_scenario,
     bootstrap_competition_demo,
 )
+from core.ui_text import display_runtime_mode, display_scenario_name
 from ui.backtest_panel import render_backtest_panel
 from ui.behavioral_diagnostics import render_behavioral_diagnostics
 from ui.demo_wind_tunnel import render_demo_tab
@@ -90,7 +91,7 @@ def _render_top_entry_selector() -> None:
 
     st.markdown(
         f"""
-        <div class='mode-pill'>当前入口：{st.session_state.entry} | 运行态：{st.session_state.runtime_mode}</div>
+        <div class='mode-pill'>当前入口：{st.session_state.entry} | 运行态：{display_runtime_mode(st.session_state.runtime_mode)}</div>
         """,
         unsafe_allow_html=True,
     )
@@ -143,7 +144,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
         "- 前：入口较分散，演示链路跨多个标签页，评委视角不连续。\n"
         "- 后：首页收敛为五入口（含行为金融诊断页），答辩链路一键加载+自动时间线+三段叙事。\n"
         "- 前：思维链以原始文本为主。\n"
-        "- 后：改为“决策证据流”，仅展示结构化 reasoning artifacts。\n"
+        "- 后：改为“决策证据流”，仅展示结构化推理产物。\n"
         "- 前：图表样式不统一。\n"
         "- 后：统一深色主题、中文标题、图表均支持 PNG/CSV/JSON 导出。\n"
     )
@@ -151,7 +152,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
     competition_summary = f"""# competition_summary
 
 生成时间：{now}
-场景：{scenario.name}
+场景：{display_scenario_name(scenario.name)}
 
 ## 核心结论
 - 累计收益：{stat['return_pct']:.2%}
@@ -160,9 +161,9 @@ def _generate_competition_materials() -> Dict[str, Path]:
 - 平均羊群度（CSAD）：{stat['herding_avg']:.3f}
 
 ## 叙事主线
-1. Analyst 汇总多源证据并形成结构化判断。
-2. Manager 将证据映射为可执行仓位与风险约束。
-3. Market 在流动性、波动率、羊群效应上给出反馈。
+1. 分析师汇总多源证据并形成结构化判断。
+2. 经理将证据映射为可执行仓位与风险约束。
+3. 市场在流动性、波动率、羊群效应上给出反馈。
 
 {comparison_md}
 """
@@ -171,7 +172,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
 
 ## 信息架构
 - 首页五入口：答辩模式 / 专家模式 / 历史回测 / 行为金融诊断 / 系统说明
-- 答辩模式：场景加载、自动时间线、KPI 大卡、三段叙事、A/B Compare
+- 答辩模式：场景加载、自动时间线、KPI 大卡、三段叙事、A/B 世界对照
 - 专家模式：决策证据流 + 多图联动
 
 ## 关键前端组件
@@ -181,8 +182,8 @@ def _generate_competition_materials() -> Dict[str, Path]:
 - 风险事件时间轴
 
 ## 约束达成
-- DEMO_MODE 无 API key 亦可完整演示
-- 5 分钟内可跑完完整答辩链路（默认 12 step）
+- DEMO_MODE 无需 API Key 亦可完整演示
+- 5 分钟内可跑完完整答辩链路（默认 12 步）
 - 图表统一深色风格、中文标题，支持 PNG/CSV/JSON 导出
 
 {comparison_md}
@@ -194,9 +195,9 @@ def _generate_competition_materials() -> Dict[str, Path]:
 - 打开首页，说明五入口结构和当前演示目标。
 
 ## 1:00 - 4:00 答辩模式
-- 一键加载场景 `{scenario.name}`。
+- 一键加载场景 `{display_scenario_name(scenario.name)}`。
 - 启动自动播放，展示 KPI 变化与三段式叙事。
-- 强调 A/B world compare 的政策差异路径。
+- 强调 A/B 世界对照中的政策差异路径。
 
 ## 4:00 - 7:30 专家模式
 - 进入“决策证据流”，展示结构化证据而非原始 CoT。
@@ -206,12 +207,13 @@ def _generate_competition_materials() -> Dict[str, Path]:
 - 切入回测页，说明与仿真页的数据闭环。
 
 ## 9:00 - 10:00 总结
-- 回答评委：为何该系统在无 API key 条件下仍可稳定完整展示。
+- 回答评委：为何该系统在无 API Key 条件下仍可稳定完整展示。
 """
 
     figures_index = {
         "generated_at": now,
         "scenario": scenario.name,
+        "scenario_display": display_scenario_name(scenario.name),
         "figures": st.session_state.get("last_demo_figures", {}),
     }
 
@@ -233,7 +235,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
 def _render_sidebar_global() -> None:
     with st.sidebar:
         st.markdown("### 全局面板")
-        st.info(f"运行态：{st.session_state.runtime_mode}")
+        st.info(f"运行态：{display_runtime_mode(st.session_state.runtime_mode)}")
 
         scenarios = list_competition_scenarios()
         if scenarios:
@@ -243,6 +245,7 @@ def _render_sidebar_global() -> None:
                 "默认答辩场景",
                 options=scenarios,
                 index=scenarios.index(st.session_state.demo_scenario_name),
+                format_func=display_scenario_name,
             )
         else:
             st.warning("未发现可用答辩场景，请检查 demo_scenarios 内容完整性。")
@@ -294,7 +297,7 @@ def _render_expert_mode() -> None:
     upto = metrics[metrics["step"] <= step]
     latest = upto.tail(1).iloc[0] if not upto.empty else metrics.tail(1).iloc[0]
     chain_payload = {
-        "policy": f"专家复盘 step={int(latest['step'])}",
+        "policy": f"专家复盘 第 {int(latest['step'])} 步",
         "macro_variables": {
             "inflation": 0.02 + float(latest["panic_level"]) * 0.01,
             "unemployment": 0.05 + float(latest["panic_level"]) * 0.03,

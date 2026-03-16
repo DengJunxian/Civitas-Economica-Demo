@@ -10,6 +10,8 @@ import json
 import pandas as pd
 import plotly.graph_objects as go
 
+from core.ui_text import translate_display_text
+
 LIVE_MODE = "LIVE_MODE"
 DEMO_MODE = "DEMO_MODE"
 COMPETITION_DEMO_MODE = "COMPETITION_DEMO_MODE"
@@ -278,7 +280,7 @@ def build_competition_metrics_figure(metrics: pd.DataFrame, upto_step: Optional[
             x=frame["time"],
             y=frame["close"],
             mode="lines+markers",
-            name="Index Close",
+            name="指数收盘",
             line=dict(color="#4DA6FF", width=2),
         )
     )
@@ -293,9 +295,9 @@ def build_competition_metrics_figure(metrics: pd.DataFrame, upto_step: Optional[
         )
     )
     fig.update_layout(
-        title="Competition Demo Metrics",
+        title=translate_display_text("比赛答辩指标总览"),
         template="plotly_dark",
-        yaxis=dict(title="Index Level"),
+        yaxis=dict(title="指数点位"),
         yaxis2=dict(title="CSAD", overlaying="y", side="right"),
         legend=dict(orientation="h"),
         margin=dict(l=30, r=30, t=50, b=30),

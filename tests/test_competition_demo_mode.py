@@ -1,4 +1,4 @@
-﻿from core.competition_demo import (
+from core.competition_demo import (
     LIVE_MODE,
     DEMO_MODE,
     REQUIRED_SCENARIOS,
@@ -10,6 +10,7 @@
     switch_runtime_mode,
     build_competition_metrics_figure,
 )
+from core.ui_text import display_scenario_name, translate_ui_payload
 
 
 def test_competition_demo_bootstrap_without_api_key():
@@ -60,8 +61,25 @@ def test_competition_demo_metrics_figure_renderable():
         upto_step=state.get("demo_last_step"),
     )
     assert len(fig.data) >= 2
-    assert fig.data[0].name == "Index Close"
+    assert fig.data[0].name == "指数收盘"
     assert fig.to_dict().get("data")
+
+
+def test_ui_text_helpers_translate_frontend_content():
+    assert display_scenario_name("tax_cut_liquidity_boost") == "减税与流动性提振"
+    payload = translate_ui_payload(
+        {
+            "analyst_outputs": {
+                "news_analyst": {
+                    "headline": "Tax cut + liquidity support announced",
+                    "signal": "risk_on",
+                }
+            }
+        }
+    )
+    assert "分析师输出" in payload
+    assert "新闻分析师" in payload["分析师输出"]
+    assert payload["分析师输出"]["新闻分析师"]["信号"] == "风险偏好提升"
 
 
 def test_competition_demo_narration_replay():

@@ -16,6 +16,7 @@ from core.competition_demo import (
     advance_competition_demo,
     replay_next_narration,
 )
+from core.ui_text import display_scenario_name, translate_display_text, translate_ui_payload
 from ui import dashboard as dashboard_ui
 
 
@@ -43,8 +44,8 @@ def _current_narration_text() -> str:
     latest = st.session_state.get("demo_last_narration")
     if not latest:
         return "等待自动讲解..."
-    speaker = latest.get("speaker", "旁白")
-    text = latest.get("text", "")
+    speaker = translate_display_text(str(latest.get("speaker", "旁白")))
+    text = translate_display_text(str(latest.get("text", "")))
     return f"{speaker}: {text}"
 
 
@@ -96,7 +97,7 @@ def _build_policy_chain_payload(scenario: Any, current_step: int) -> Dict[str, A
 
 
 def _render_three_stage_story(scenario: Any, current_step: int) -> None:
-    st.subheader("三段式叙事：Analyst → Manager → Market")
+    st.subheader("三段式叙事：分析师 -> 经理 -> 市场")
     analyst = scenario.analyst_manager_output.get("analyst_outputs", {})
     manager = scenario.analyst_manager_output.get("manager_decision", {})
     market_row = scenario.metrics[scenario.metrics["step"] <= current_step].tail(1)
@@ -104,21 +105,23 @@ def _render_three_stage_story(scenario: Any, current_step: int) -> None:
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown("### 1) Analyst")
-        st.json(analyst)
+        st.markdown("### 1) 分析师")
+        st.json(translate_ui_payload(analyst))
     with c2:
-        st.markdown("### 2) Manager")
-        st.json(manager)
+        st.markdown("### 2) 经理")
+        st.json(translate_ui_payload(manager))
     with c3:
-        st.markdown("### 3) Market")
+        st.markdown("### 3) 市场")
         st.json(
-            {
-                "step": market_data.get("step", 0),
-                "close": market_data.get("close", 0.0),
-                "volume": market_data.get("volume", 0.0),
-                "panic_level": market_data.get("panic_level", 0.0),
-                "csad": market_data.get("csad", 0.0),
-            }
+            translate_ui_payload(
+                {
+                    "step": market_data.get("step", 0),
+                    "close": market_data.get("close", 0.0),
+                    "volume": market_data.get("volume", 0.0),
+                    "panic_level": market_data.get("panic_level", 0.0),
+                    "csad": market_data.get("csad", 0.0),
+                }
+            )
         )
 
 
@@ -162,6 +165,7 @@ def render_demo_tab(ctrl: Optional[Any] = None) -> None:
         if st.session_state.get("demo_scenario_name", scenarios[0]) in scenarios
         else 0,
         key="defense_scene_selector",
+        format_func=display_scenario_name,
     )
     st.session_state.demo_scenario_name = selected
 
@@ -184,7 +188,7 @@ def render_demo_tab(ctrl: Optional[Any] = None) -> None:
             st.session_state.runtime_mode = DEMO_MODE
             st.session_state.competition_mode = COMPETITION_DEMO_MODE
             st.session_state._demo_autoplay_time = 0.0
-            st.success(f"场景 {selected} 已加载。")
+            st.success(f"场景“{display_scenario_name(selected)}”已加载。")
             st.rerun()
         except Exception as exc:
             st.error(f"场景加载失败：{exc}")
@@ -250,7 +254,7 @@ def render_demo_tab(ctrl: Optional[Any] = None) -> None:
     _render_three_stage_story(scenario, current_step)
 
     st.markdown("---")
-    st.subheader("A/B World Compare")
+    st.subheader("A/B 世界对照")
     world_b = _counterfactual_world(metrics)
     fig_market = dashboard_ui.render_market_overview(metrics, current_step, key_prefix="defense")
     fig_ab = dashboard_ui.render_ab_world_compare(metrics, world_b, key_prefix="defense")

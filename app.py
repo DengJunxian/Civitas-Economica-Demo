@@ -1,5 +1,5 @@
 ﻿# file: app.py
-"""Civitas front-end in Streamlit: Defense / Expert / Backtest / System Guide."""
+"""Civitas front-end in Streamlit: Policy Lab / History Replay / Advanced Analysis."""
 
 from __future__ import annotations
 
@@ -24,6 +24,8 @@ from core.ui_text import display_runtime_mode, display_scenario_name
 from ui.backtest_panel import render_backtest_panel
 from ui.behavioral_diagnostics import render_behavioral_diagnostics
 from ui.demo_wind_tunnel import render_demo_tab
+from ui.history_replay import render_history_replay
+from ui.policy_lab import render_policy_lab
 from ui import dashboard as dashboard_ui
 
 
@@ -35,7 +37,7 @@ st.set_page_config(
 )
 
 
-ENTRY_POINTS = ["答辩模式", "专家模式", "历史回测", "行为金融诊断", "系统说明"]
+ENTRY_POINTS = ["政策试验台", "历史政策回放", "高级分析", "系统说明"]
 THEME_PATH = Path("theme") / "competition_dark.css"
 MATERIALS_ROOT = Path("outputs") / "competition_materials"
 
@@ -56,7 +58,7 @@ def _load_theme() -> None:
 
 def _init_state() -> None:
     defaults: Dict[str, Any] = {
-        "entry": "答辩模式",
+        "entry": "政策试验台",
         "controller": None,
         "runtime_mode": LIVE_MODE,
         "competition_mode": "",
@@ -73,6 +75,8 @@ def _init_state() -> None:
         "is_running": False,
         "last_demo_figures": {},
         "materials_last_export": None,
+        "policy_lab_result": None,
+        "history_replay_result": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -80,8 +84,8 @@ def _init_state() -> None:
 
 
 def _render_top_entry_selector() -> None:
-    st.markdown("## Civitas-Economica-Demo")
-    st.caption("首页入口：答辩模式 / 专家模式 / 历史回测 / 行为金融诊断 / 系统说明")
+    st.markdown("## Civitas Policy Sandbox")
+    st.caption("首页入口：政策试验台 / 历史政策回放 / 高级分析 / 系统说明")
 
     cols = st.columns(len(ENTRY_POINTS))
     for idx, entry in enumerate(ENTRY_POINTS):
@@ -234,50 +238,44 @@ def _generate_competition_materials() -> Dict[str, Path]:
 
 def _render_sidebar_global() -> None:
     with st.sidebar:
-        st.markdown("### 全局面板")
-        st.info(f"运行态：{display_runtime_mode(st.session_state.runtime_mode)}")
+        st.markdown("### 快速说明")
+        st.info(f"当前运行态：{display_runtime_mode(st.session_state.runtime_mode)}")
+        st.caption("默认先使用“政策试验台”。技术细节与答辩材料已收纳到“高级分析”。")
 
-        scenarios = list_competition_scenarios()
-        if scenarios:
-            if st.session_state.demo_scenario_name not in scenarios:
-                st.session_state.demo_scenario_name = scenarios[0]
-            st.session_state.demo_scenario_name = st.selectbox(
-                "默认答辩场景",
-                options=scenarios,
-                index=scenarios.index(st.session_state.demo_scenario_name),
-                format_func=display_scenario_name,
-            )
-        else:
-            st.warning("未发现可用答辩场景，请检查 demo_scenarios 内容完整性。")
-
-        if st.button("自动生成比赛材料", width="stretch"):
-            _ensure_demo_loaded()
-            if st.session_state.get("demo_scenario") is None:
-                st.error("当前没有可用场景，无法生成比赛材料。")
+        if st.session_state.entry == "高级分析":
+            scenarios = list_competition_scenarios()
+            if scenarios:
+                if st.session_state.demo_scenario_name not in scenarios:
+                    st.session_state.demo_scenario_name = scenarios[0]
+                st.session_state.demo_scenario_name = st.selectbox(
+                    "高级分析默认场景",
+                    options=scenarios,
+                    index=scenarios.index(st.session_state.demo_scenario_name),
+                    format_func=display_scenario_name,
+                )
             else:
-                try:
-                    file_map = _generate_competition_materials()
-                    st.session_state.materials_last_export = {k: str(v) for k, v in file_map.items()}
-                    st.success("比赛材料已生成。")
-                except Exception as exc:
-                    st.error(f"比赛材料生成失败：{exc}")
+                st.warning("未发现可用答辩场景，请检查 demo_scenarios 内容完整性。")
 
-        if st.session_state.materials_last_export:
-            st.caption("最近生成文件")
-            st.json(st.session_state.materials_last_export)
+            if st.button("生成答辩材料", width="stretch"):
+                _ensure_demo_loaded()
+                if st.session_state.get("demo_scenario") is None:
+                    st.error("当前没有可用场景，无法生成比赛材料。")
+                else:
+                    try:
+                        file_map = _generate_competition_materials()
+                        st.session_state.materials_last_export = {k: str(v) for k, v in file_map.items()}
+                        st.success("比赛材料已生成。")
+                    except Exception as exc:
+                        st.error(f"比赛材料生成失败：{exc}")
+
+            if st.session_state.materials_last_export:
+                st.caption("最近生成文件")
+                st.json(st.session_state.materials_last_export)
 
 
-def _render_defense_mode() -> None:
-    st.session_state.runtime_mode = DEMO_MODE
-    st.session_state.competition_mode = COMPETITION_DEMO_MODE
-    render_demo_tab(ctrl=st.session_state.get("controller"))
-
-
-def _render_expert_mode() -> None:
-    st.session_state.runtime_mode = LIVE_MODE if st.session_state.get("controller") else DEMO_MODE
-    st.markdown("## 专家模式")
-    st.caption("用于专家追问：证据、路径、风险和政策传导机制。")
-
+def _render_ai_decision_tab() -> None:
+    st.markdown("### AI 决策解读")
+    st.caption("这里保留专家级视角，用于追问时查看结构化证据，而非普通用户默认入口。")
     _ensure_demo_loaded()
     scenario = st.session_state.demo_scenario
     metrics = scenario.metrics
@@ -285,15 +283,10 @@ def _render_expert_mode() -> None:
     if step <= 0:
         step = int(metrics.iloc[min(3, len(metrics) - 1)]["step"])
 
-    st.markdown("### 关键指标")
     kpi = dashboard_ui.build_kpi_snapshot(metrics, step, regulation_hint="专家复盘")
     dashboard_ui.render_kpi_cards(kpi)
-
-    st.markdown("### 决策证据流")
     dashboard_ui.render_decision_evidence_flow(scenario.narration, scenario.analyst_manager_output)
 
-    st.markdown("### 专家图谱")
-    c1, c2 = st.columns(2)
     upto = metrics[metrics["step"] <= step]
     latest = upto.tail(1).iloc[0] if not upto.empty else metrics.tail(1).iloc[0]
     chain_payload = {
@@ -308,9 +301,7 @@ def _render_expert_mode() -> None:
             "fiscal_stimulus": 0.02,
             "sentiment_index": max(0.0, min(1.0, 0.65 - float(latest["panic_level"]) * 0.55)),
         },
-        "social_sentiment": {
-            "mean": 0.5 - float(latest["panic_level"]),
-        },
+        "social_sentiment": {"mean": 0.5 - float(latest["panic_level"])},
         "industry_agent": {
             "avg_household_risk": 0.50 - float(latest["panic_level"]) * 0.3,
             "avg_firm_hiring": 0.15 - float(latest["panic_level"]) * 0.5,
@@ -322,46 +313,53 @@ def _render_expert_mode() -> None:
             "matching_mode": "expert_replay",
         },
     }
+    c1, c2 = st.columns(2)
     with c1:
-        dashboard_ui.render_social_network_heatmap(upto, key_prefix="expert")
-        dashboard_ui.render_lob_depth_animation(upto, key_prefix="expert")
+        dashboard_ui.render_social_network_heatmap(upto, key_prefix="advanced_ai")
+        dashboard_ui.render_lob_depth_animation(upto, key_prefix="advanced_ai")
     with c2:
-        dashboard_ui.render_policy_transmission_chain(chain_payload, key_prefix="expert")
-        dashboard_ui.render_risk_event_timeline(upto, key_prefix="expert")
+        dashboard_ui.render_policy_transmission_chain(chain_payload, key_prefix="advanced_ai")
+        dashboard_ui.render_risk_event_timeline(upto, key_prefix="advanced_ai")
 
 
-def _render_backtest_mode() -> None:
-    st.session_state.runtime_mode = LIVE_MODE
-    st.markdown("## 历史回测")
-    st.caption("沿用现有回测引擎，不改后端架构。")
-    render_backtest_panel(ctrl=st.session_state.get("controller"))
+def _render_advanced_analysis() -> None:
+    st.session_state.runtime_mode = DEMO_MODE
+    st.markdown("## 高级分析")
+    st.caption("这里保留专家追问、答辩演示、行为金融诊断和研究参数面板。")
+    tab1, tab2, tab3, tab4 = st.tabs(["AI 决策解读", "市场行为分析", "答辩演示", "研究参数"])
+
+    with tab1:
+        _render_ai_decision_tab()
+    with tab2:
+        render_behavioral_diagnostics()
+    with tab3:
+        st.session_state.competition_mode = COMPETITION_DEMO_MODE
+        render_demo_tab(ctrl=st.session_state.get("controller"))
+    with tab4:
+        st.session_state.runtime_mode = LIVE_MODE
+        render_backtest_panel(ctrl=st.session_state.get("controller"))
 
 
 def _render_system_guide() -> None:
     st.markdown("## 系统说明")
     st.markdown(
         """
+### 当前产品定位
+- 主入口已经切换为“政策试验台”和“历史政策回放”。
+- “高级分析”保留专家级证据流、行为金融诊断与答辩演示能力。
+- 页面默认展示业务语言和结果图，而不是原始结构化对象。
+
 ### 架构保持不变
 - 前端：Streamlit
 - 调度：IPC + Python 控制层
 - 撮合：C++ LOB 引擎
+- 历史回放：统一回测引擎 + 真实市场数据提供器
 
-### 本次前端重构重点
-- 首页收敛为五入口，减少答辩流程切换成本并新增行为金融诊断页。
-- 新增“答辩模式”：一键场景、自动时间线、KPI 大卡、三段叙事、A/B compare。
-- “思维链可视化”重命名为“决策证据流”，仅展示结构化 artifacts。
-- 图表统一深色主题，默认中文标题，并支持 PNG / CSV / JSON 导出。
-- 增加 LOB 深度动画、社会传播网络热图、政策传导桑基图、风险事件时间轴。
-
-### 重构前后对比
-- 前：功能入口分散，演示路径长。
-- 后：五入口固定，答辩路径与行为诊断路径均可复现。
-- 前：图表风格不一，导出能力弱。
-- 后：图表风格统一，支持比赛材料沉淀。
-
-### 运行约束达成
-- DEMO_MODE 默认 12 步，自动演示在 5 分钟内稳定完成。
-- 无 API key 仍可加载场景并完整展示。
+### AI 与多智能体如何工作
+- 政策文本先被编译成结构化冲击。
+- 新闻分析、量化分析、风险分析共同形成结构化判断。
+- 经理代理聚合意见、校准置信度并给出执行建议。
+- 仿真结果以指数、风险热度、流动性和行为金融指标返回前端。
         """
     )
 
@@ -373,14 +371,14 @@ def main() -> None:
     _render_top_entry_selector()
 
     entry = st.session_state.entry
-    if entry == "答辩模式":
-        _render_defense_mode()
-    elif entry == "专家模式":
-        _render_expert_mode()
-    elif entry == "历史回测":
-        _render_backtest_mode()
-    elif entry == "行为金融诊断":
-        render_behavioral_diagnostics()
+    if entry == "政策试验台":
+        st.session_state.runtime_mode = DEMO_MODE
+        render_policy_lab()
+    elif entry == "历史政策回放":
+        st.session_state.runtime_mode = LIVE_MODE
+        render_history_replay()
+    elif entry == "高级分析":
+        _render_advanced_analysis()
     else:
         _render_system_guide()
 

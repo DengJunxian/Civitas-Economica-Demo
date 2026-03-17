@@ -5,6 +5,13 @@ gatherUsageStats = false
 toolbarMode = "minimal"
 showErrorDetails = "none"
 
+[theme]
+primaryColor = "#2c5db7"
+backgroundColor = "#f4f7fc"
+secondaryBackgroundColor = "#edf2f9"
+textColor = "#162338"
+font = "sans serif"
+
 [server]
 headless = true
 showEmailPrompt = false

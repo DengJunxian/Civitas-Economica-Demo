@@ -30,7 +30,7 @@ from ui import dashboard as dashboard_ui
 
 
 st.set_page_config(
-    page_title="Civitas-Economica-Demo | 评委答辩模式",
+    page_title="Civitas Policy Sandbox | 政策试验台",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -38,6 +38,18 @@ st.set_page_config(
 
 
 ENTRY_POINTS = ["政策试验台", "历史政策回放", "高级分析", "系统说明"]
+ENTRY_DESCRIPTIONS = {
+    "政策试验台": "输入新政策，观察市场、风险与情绪如何联动变化。",
+    "历史政策回放": "选取真实历史区间，把仿真走势与真实市场放在一起比较。",
+    "高级分析": "查看 AI 证据流、行为金融诊断、答辩演示与研究参数。",
+    "系统说明": "快速了解架构、数据流与工程实现边界。",
+}
+ENTRY_PURPOSE = {
+    "政策试验台": "输入政策并运行多智能体仿真",
+    "历史政策回放": "验证政策机制是否像真实市场",
+    "高级分析": "专家追问与研究调参",
+    "系统说明": "了解系统如何工作",
+}
 THEME_PATH = Path("theme") / "competition_dark.css"
 MATERIALS_ROOT = Path("outputs") / "competition_materials"
 
@@ -90,12 +102,18 @@ def _render_top_entry_selector() -> None:
     cols = st.columns(len(ENTRY_POINTS))
     for idx, entry in enumerate(ENTRY_POINTS):
         with cols[idx]:
-            if st.button(entry, key=f"entry_{entry}", width="stretch"):
+            if st.button(
+                entry,
+                key=f"entry_{entry}",
+                width="stretch",
+                type="primary" if st.session_state.entry == entry else "secondary",
+            ):
                 st.session_state.entry = entry
+            st.caption(ENTRY_DESCRIPTIONS[entry])
 
     st.markdown(
         f"""
-        <div class='mode-pill'>当前入口：{st.session_state.entry} | 运行态：{display_runtime_mode(st.session_state.runtime_mode)}</div>
+        <div class='mode-pill'>当前页面：{st.session_state.entry} | 用途：{ENTRY_PURPOSE.get(st.session_state.entry, "")}</div>
         """,
         unsafe_allow_html=True,
     )
@@ -239,8 +257,8 @@ def _generate_competition_materials() -> Dict[str, Path]:
 def _render_sidebar_global() -> None:
     with st.sidebar:
         st.markdown("### 快速说明")
-        st.info(f"当前运行态：{display_runtime_mode(st.session_state.runtime_mode)}")
-        st.caption("默认先使用“政策试验台”。技术细节与答辩材料已收纳到“高级分析”。")
+        st.info(f"当前页面：{st.session_state.entry}")
+        st.caption("默认先做政策实验或历史回放。需要专家级细节时，再进入“高级分析”。")
 
         if st.session_state.entry == "高级分析":
             scenarios = list_competition_scenarios()

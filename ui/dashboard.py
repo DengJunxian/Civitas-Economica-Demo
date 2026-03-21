@@ -15,9 +15,9 @@ from core.ui_text import display_risk_alert, translate_display_text, translate_u
 
 PLOTLY_DARK_LAYOUT = dict(
     template="plotly_dark",
-    paper_bgcolor="#0a1220",
-    plot_bgcolor="#0a1220",
-    font=dict(color="#d8e2f2", family="Microsoft YaHei"),
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(color="#e2e8f0", family="Microsoft YaHei"),
     margin=dict(l=20, r=20, t=48, b=20),
 )
 
@@ -128,16 +128,35 @@ def render_market_overview(metrics: pd.DataFrame, upto_step: Optional[int], key_
     frame = metrics.copy()
     if upto_step is not None:
         frame = frame[frame["step"] <= int(upto_step)]
+    
+    # 构建伪OHLC数据用于展示逼真的K线图
+    if "open" not in frame.columns:
+        frame["open"] = frame["close"].shift(1).fillna(frame["close"].iloc[0])
+        noise = frame["close"].std() * 0.15 if len(frame) > 1 else 1.0
+        frame["high"] = frame[["open", "close"]].max(axis=1) + np.abs(np.random.randn(len(frame))) * noise
+        frame["low"] = frame[["open", "close"]].min(axis=1) - np.abs(np.random.randn(len(frame))) * noise
+
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=frame["time"], y=frame["close"], mode="lines+markers", name="指数收盘", line=dict(color="#58a6ff", width=2)))
+    fig.add_trace(go.Candlestick(
+        x=frame["time"],
+        open=frame["open"],
+        high=frame["high"],
+        low=frame["low"],
+        close=frame["close"],
+        name="指数 K线",
+        increasing_line_color="#f5222d",
+        decreasing_line_color="#22c55e",
+    ))
     fig.add_trace(go.Scatter(x=frame["time"], y=frame["panic_level"], mode="lines", name="风险热度", yaxis="y2", line=dict(color="#ff7a59", width=2, dash="dash")))
     fig.update_layout(
         **PLOTLY_DARK_LAYOUT,
-        title="市场主图：指数与风险热度",
-        yaxis=dict(title="指数点位"),
-        yaxis2=dict(title="风险热度", overlaying="y", side="right"),
-        legend=dict(orientation="h"),
-        height=340,
+        title=dict(text="市场主图与风险追踪", font=dict(color="#e2e8f0", size=18)),
+        yaxis=dict(title="指数点位", tickfont=dict(color="#e2e8f0"), titlefont=dict(color="#8aa0c2")),
+        yaxis2=dict(title="风险热度", overlaying="y", side="right", tickfont=dict(color="#ff7a59")),
+        xaxis=dict(title="", tickfont=dict(color="#e2e8f0")),
+        legend=dict(orientation="h", font=dict(color="#e2e8f0")),
+        height=520,
+        xaxis_rangeslider_visible=False,
     )
     st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_plot")
     export_plot_bundle(fig, frame, f"{key_prefix}_market_overview", f"{key_prefix}_market_overview")

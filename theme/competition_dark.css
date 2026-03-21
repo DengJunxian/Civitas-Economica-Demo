@@ -136,6 +136,13 @@ div[data-baseweb="textarea"] > div {
   color: #e2e8f0 !important;
 }
 
+div[data-baseweb="popover"] > div,
+ul[role="listbox"],
+ul[role="listbox"] li {
+  background-color: #0a1931 !important;
+  color: #e2e8f0 !important;
+}
+
 .stSlider [data-baseweb="slider"] [role="slider"] {
   background: var(--c-accent) !important;
   border-color: var(--c-accent) !important;

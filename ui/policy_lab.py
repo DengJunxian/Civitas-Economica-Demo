@@ -609,11 +609,11 @@ def _render_policy_comparison_chart(primary: Dict[str, Any], control: Optional[D
     )
     fig.update_layout(
         **dashboard_ui.PLOTLY_DARK_LAYOUT,
-        title="政策方案 vs 对照组",
-        yaxis=dict(title="指数点位"),
-        xaxis=dict(title="时间"),
-        height=330,
-        legend=dict(orientation="h"),
+        title=dict(text="政策方案 vs 对照组", font=dict(color="#e2e8f0", size=18)),
+        yaxis=dict(title="指数点位", tickfont=dict(color="#e2e8f0"), titlefont=dict(color="#8aa0c2")),
+        xaxis=dict(title="时间", tickfont=dict(color="#e2e8f0"), titlefont=dict(color="#8aa0c2")),
+        legend=dict(orientation="h", font=dict(color="#e2e8f0")),
+        height=450,
     )
     st.plotly_chart(fig, use_container_width=True, key="policy_lab_compare_chart")
     dashboard_ui.export_plot_bundle(fig, frame, "policy_lab_compare", "policy_lab_compare")

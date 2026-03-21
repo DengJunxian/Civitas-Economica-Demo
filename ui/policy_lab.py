@@ -610,8 +610,8 @@ def _render_policy_comparison_chart(primary: Dict[str, Any], control: Optional[D
     fig.update_layout(
         **dashboard_ui.PLOTLY_DARK_LAYOUT,
         title=dict(text="政策方案 vs 对照组", font=dict(color="#e2e8f0", size=18)),
-        yaxis=dict(title="指数点位", tickfont=dict(color="#e2e8f0"), titlefont=dict(color="#8aa0c2")),
-        xaxis=dict(title="时间", tickfont=dict(color="#e2e8f0"), titlefont=dict(color="#8aa0c2")),
+        yaxis=dict(title=dict(text="指数点位", font=dict(color="#8aa0c2")), tickfont=dict(color="#e2e8f0")),
+        xaxis=dict(title=dict(text="时间", font=dict(color="#8aa0c2")), tickfont=dict(color="#e2e8f0")),
         legend=dict(orientation="h", font=dict(color="#e2e8f0")),
         height=450,
     )

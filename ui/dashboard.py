@@ -151,9 +151,9 @@ def render_market_overview(metrics: pd.DataFrame, upto_step: Optional[int], key_
     fig.update_layout(
         **PLOTLY_DARK_LAYOUT,
         title=dict(text="市场主图与风险追踪", font=dict(color="#e2e8f0", size=18)),
-        yaxis=dict(title="指数点位", tickfont=dict(color="#e2e8f0"), titlefont=dict(color="#8aa0c2")),
-        yaxis2=dict(title="风险热度", overlaying="y", side="right", tickfont=dict(color="#ff7a59")),
-        xaxis=dict(title="", tickfont=dict(color="#e2e8f0")),
+        yaxis=dict(title=dict(text="指数点位", font=dict(color="#8aa0c2")), tickfont=dict(color="#e2e8f0")),
+        yaxis2=dict(title=dict(text="风险热度", font=dict(color="#ff7a59")), overlaying="y", side="right", tickfont=dict(color="#ff7a59")),
+        xaxis=dict(title=dict(text="", font=dict(color="#e2e8f0")), tickfont=dict(color="#e2e8f0")),
         legend=dict(orientation="h", font=dict(color="#e2e8f0")),
         height=520,
         xaxis_rangeslider_visible=False,

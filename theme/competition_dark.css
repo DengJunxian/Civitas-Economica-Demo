@@ -292,3 +292,46 @@ ul[role="listbox"] li {
   border-color: #1f365c !important;
   opacity: 0.6 !important;
 }
+
+/* JSON Viewer / Evidence Flow Overrides */
+.stJson {
+  background-color: #030811 !important;
+  border: 1px solid #1f365c !important;
+  border-radius: 6px !important;
+  padding: 10px !important;
+}
+
+.react-json-view {
+  background-color: transparent !important;
+}
+
+.react-json-view span {
+  color: #8aa0c2 !important;
+}
+
+.react-json-view .string-value {
+  color: #35d07f !important;
+}
+
+.react-json-view .object-key span {
+  color: #e2e8f0 !important;
+}
+
+
+/* Expander & JSON Background Overrides for Advanced Analysis */
+div[data-testid="stExpander"] div[role="button"] {
+  background-color: #0a1931 !important;
+  color: #e2e8f0 !important;
+  border-color: #1f365c !important;
+}
+
+div[data-testid="stExpanderDetails"] {
+  background-color: #030811 !important;
+  border: 1px solid #1f365c !important;
+  border-top: none !important;
+}
+
+[data-testid="stJson"], 
+.react-json-view {
+  background-color: transparent !important;
+}

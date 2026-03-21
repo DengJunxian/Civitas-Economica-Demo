@@ -331,19 +331,20 @@ def _render_policy_cards(cards: List[PolicyNarrativeCard]) -> None:
 
 
 def _render_flow_strip() -> None:
-    steps = ["政策输入", "宏观传导", "分析师讨论", "经理决策", "市场反馈"]
-    cols = st.columns(len(steps))
-    for idx, label in enumerate(steps):
-        with cols[idx]:
-            st.markdown(
-                f"""
-                <div class="flow-card">
-                  <div class="flow-step-index">0{idx + 1}</div>
-                  <div class="flow-step-label">{label}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    st.markdown(
+        """
+        <div style="padding: 18px; border-radius: 8px; background: rgba(24,144,255,0.06); border: 1px solid rgba(24,144,255,0.3); box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
+            <h4 style="margin-top:0; color: #1890ff; font-weight: 600;">⚙️ 系统底层推演链条</h4>
+            <p style="color: #e2e8f0; line-height: 1.8; font-size: 15px; margin-bottom: 0;">
+            1. <b>意图智能解析</b>：您输入的纯净政策文本，由 ManagerAgent 自动解析为主机底层所需的具体宏观参数（例如流动性释放倍数、利率降幅等）。<br>
+            2. <b>网络情绪扩散</b>：宏观变化立刻投放进虚拟的微缩社交网络中，模拟因为新政出台引发的全民“情绪传染”与“羊群炒作”。<br>
+            3. <b>微观主体调整</b>：大模型驱动的各行业虚拟公司、散户、机构庄家感知到热度与基本面的变化，各自调整风险偏好与投资组合。<br>
+            4. <b>高频订单碰撞</b>：系统每秒将所有主体的交易冲动汇聚为海量限价单（LOB），在 C++ 高性能撮合引擎中完成毫无主观干预的毫秒级撮合，最后向上反馈生成顶部那根逼真的 K 线。
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _build_operational_brief(result: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -900,7 +901,9 @@ def render_policy_lab() -> None:
 
     result = st.session_state.policy_lab_result
     if not result:
-        st.info("先从模板库里挑一项政策，配置对照组，再点击“开始仿真”。系统会优先展示大盘和对照差异。")
+        st.info("提示：请先在“参数配置”面板选定或输入您的政策方案，然后点击“开始仿真”。")
+        st.markdown("### 历史大盘基准 (前30日走势)")
+        dashboard_ui.render_empty_market_board(key_prefix="policy_lab_empty")
         return
 
     primary = result["primary"]
@@ -908,54 +911,60 @@ def render_policy_lab() -> None:
     metrics = primary["metrics"]
     current_step = int(metrics.iloc[-1]["step"])
 
-    st.markdown("### 仿真大盘走势")
+    st.markdown("### 大盘走势与关键风险点全景")
     _render_policy_comparison_chart(primary, control)
     if control:
         _render_control_delta_cards(primary, control)
 
-    summary_col, side_col = st.columns([1.8, 1.0])
-    with summary_col:
-        kpi = dashboard_ui.build_kpi_snapshot(metrics, current_step, regulation_hint="政策观察期")
-        dashboard_ui.render_kpi_cards(kpi)
-        dashboard_ui.render_market_overview(metrics, current_step, key_prefix="policy_lab")
-    with side_col:
-        primary_summary = primary["summary"]
-        st.markdown("### 政策摘要")
+    # 渲染大盘主图及KPI（独占整宽）
+    kpi = dashboard_ui.build_kpi_snapshot(metrics, current_step, regulation_hint="政策观察期")
+    dashboard_ui.render_kpi_cards(kpi)
+    dashboard_ui.render_market_overview(metrics, current_step, key_prefix="policy_lab_full")
+
+    # 横向布局的“政策概览与成效对比”
+    st.markdown("### 政策宏观摘要与回撤对照")
+    primary_summary = primary["summary"]
+    if control:
+        c1, c2, c3 = st.columns(3)
+        control_summary = control["summary"]
+    else:
+        c1, c2 = st.columns(2)
+        c3 = None
+
+    with c1:
         st.markdown(
             f"""
             <div class="summary-card">
-              <div class="summary-label">政策名称</div>
-              <div class="summary-value">{result['policy_title']}</div>
-              <div class="summary-label">模板来源</div>
-              <div class="summary-note">{result['template']['title']} / {result['template']['category']}</div>
-              <div class="summary-label">政策说明</div>
-              <div class="summary-note">{result['policy_text']}</div>
+              <div class="summary-label">方案定性摘要</div>
+              <div class="summary-value" style="font-size: 1.15em; color: #1890ff; font-weight: bold;">{result['policy_title']}</div>
+              <div class="summary-note">模板来源：{result['template']['category']}</div>
+              <div class="summary-note" style="margin-top: 5px;">简述：{result['policy_text']}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
+    with c2:
         st.markdown(
             f"""
             <div class="summary-card">
-              <div class="summary-label">当前方案</div>
-              <div class="summary-note">累计变化：{_format_percent(primary_summary['return_pct'])}</div>
-              <div class="summary-note">最大回撤：{_format_percent(primary_summary['max_drawdown'])}</div>
-              <div class="summary-note">平均风险热度：{primary_summary['avg_panic']:.2f}</div>
-              <div class="summary-note">平均羊群度：{primary_summary['avg_csad']:.3f}</div>
+              <div class="summary-label">当前运行期核心指标</div>
+              <div class="summary-note">累计变动率：{_format_percent(primary_summary['return_pct'])}</div>
+              <div class="summary-note">探测最大回撤：<span style="color: #f5222d;">{_format_percent(primary_summary['max_drawdown'])}</span></div>
+              <div class="summary-note">盘面羊群共识指数：{primary_summary['avg_csad']:.3f}</div>
+              <div class="summary-note">平均风险热度中枢：{primary_summary['avg_panic']:.2f}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        if control:
-            control_summary = control["summary"]
+    if c3:
+        with c3:
             st.markdown(
                 f"""
                 <div class="summary-card">
-                  <div class="summary-label">对照组</div>
-                  <div class="summary-value">{control['label']}</div>
-                  <div class="summary-note">累计变化：{_format_percent(control_summary['return_pct'])}</div>
+                  <div class="summary-label">平移对照组 ({control['label']})</div>
+                  <div class="summary-note">累计变动率：{_format_percent(control_summary['return_pct'])}</div>
                   <div class="summary-note">最大回撤：{_format_percent(control_summary['max_drawdown'])}</div>
-                  <div class="summary-note">平均风险热度：{control_summary['avg_panic']:.2f}</div>
+                  <div class="summary-note">平均风险热度中枢：{control_summary['avg_panic']:.2f}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,

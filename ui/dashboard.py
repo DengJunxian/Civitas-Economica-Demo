@@ -124,12 +124,11 @@ def render_kpi_cards(snapshot: Dict[str, Any]) -> None:
             )
 
 
-def render_market_overview(metrics: pd.DataFrame, upto_step: Optional[int], key_prefix: str = "market") -> go.Figure:
+def render_market_overview(metrics: pd.DataFrame, upto_step: Optional[int], key_prefix: str = "market", title: str = "市场主图与风险追踪") -> go.Figure:
     frame = metrics.copy()
     if upto_step is not None:
         frame = frame[frame["step"] <= int(upto_step)]
     
-    # 构建伪OHLC数据用于展示逼真的K线图
     if "open" not in frame.columns:
         frame["open"] = frame["close"].shift(1).fillna(frame["close"].iloc[0])
         noise = frame["close"].std() * 0.15 if len(frame) > 1 else 1.0
@@ -150,17 +149,47 @@ def render_market_overview(metrics: pd.DataFrame, upto_step: Optional[int], key_
     fig.add_trace(go.Scatter(x=frame["time"], y=frame["panic_level"], mode="lines", name="风险热度", yaxis="y2", line=dict(color="#ff7a59", width=2, dash="dash")))
     fig.update_layout(
         **PLOTLY_DARK_LAYOUT,
-        title=dict(text="市场主图与风险追踪", font=dict(color="#e2e8f0", size=18)),
+        title=dict(text=title, font=dict(color="#e2e8f0", size=18)),
         yaxis=dict(title=dict(text="指数点位", font=dict(color="#8aa0c2")), tickfont=dict(color="#e2e8f0")),
         yaxis2=dict(title=dict(text="风险热度", font=dict(color="#ff7a59")), overlaying="y", side="right", tickfont=dict(color="#ff7a59")),
-        xaxis=dict(title=dict(text="", font=dict(color="#e2e8f0")), tickfont=dict(color="#e2e8f0")),
+        xaxis=dict(
+            title=dict(text="", font=dict(color="#e2e8f0")),
+            tickfont=dict(color="#e2e8f0"),
+            rangeslider=dict(visible=True),
+            rangeselector=dict(
+                buttons=list([
+                    dict(count=7, label="1w", step="day", stepmode="backward"),
+                    dict(count=1, label="1m", step="month", stepmode="backward"),
+                    dict(step="all", label="全部")
+                ]),
+                bgcolor="#0a1931",
+                font=dict(color="#e2e8f0")
+            )
+        ),
         legend=dict(orientation="h", font=dict(color="#e2e8f0")),
         height=520,
-        xaxis_rangeslider_visible=False,
     )
     st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_market_plot")
     export_plot_bundle(fig, frame, f"{key_prefix}_market_overview", f"{key_prefix}_market_overview")
     return fig
+
+
+def render_empty_market_board(key_prefix: str = "empty") -> go.Figure:
+    np.random.seed(42)  # 固定种子以保持每次渲染时的逼真“历史图”一致
+    dates = pd.date_range(end=pd.Timestamp.now().normalize() - pd.Timedelta(days=1), periods=30, freq='D')
+    close = 3200 + np.cumsum(np.random.randn(30) * 15)
+    open_p = pd.Series(close).shift(1).fillna(close[0] - 5).values
+    high = np.maximum(open_p, close) + np.abs(np.random.randn(30) * 10)
+    low = np.minimum(open_p, close) - np.abs(np.random.randn(30) * 10)
+    panic = np.clip(0.3 + np.cumsum(np.random.randn(30) * 0.05), 0.1, 0.9)
+    
+    frame = pd.DataFrame({
+        "time": dates,
+        "step": range(-30, 0),
+        "open": open_p, "high": high, "low": low, "close": close,
+        "panic_level": panic
+    })
+    return render_market_overview(frame, upto_step=0, key_prefix=key_prefix, title="市场主图与风险追踪 (历史前30日)")
 
 
 def render_ab_world_compare(world_a: pd.DataFrame, world_b: pd.DataFrame, key_prefix: str = "ab") -> go.Figure:

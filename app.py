@@ -30,10 +30,10 @@ from ui import dashboard as dashboard_ui
 
 
 st.set_page_config(
-    page_title="Civitas Policy Sandbox | 政策试验台",
+    page_title="数治观澜 | 政策风动推演沙箱",
     page_icon="🎯",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 
@@ -110,19 +110,6 @@ def _render_top_entry_selector() -> None:
         """,
         unsafe_allow_html=True
     )
-    st.caption("导航入口：政策试验台 / 历史政策回放 / 高级分析 / 系统说明")
-
-    cols = st.columns(len(ENTRY_POINTS))
-    for idx, entry in enumerate(ENTRY_POINTS):
-        with cols[idx]:
-            if st.button(
-                entry,
-                key=f"entry_{entry}",
-                width="stretch",
-                type="primary" if st.session_state.entry == entry else "secondary",
-            ):
-                st.session_state.entry = entry
-            st.caption(ENTRY_DESCRIPTIONS[entry])
 
     st.markdown(
         f"""
@@ -269,8 +256,16 @@ def _generate_competition_materials() -> Dict[str, Path]:
 
 def _render_sidebar_global() -> None:
     with st.sidebar:
-        st.markdown("### 快速说明")
-        st.info(f"当前页面：{st.session_state.entry}")
+        st.markdown("### 导航菜单")
+        for entry in ENTRY_POINTS:
+            if st.button(
+                entry,
+                key=f"entry_{entry}",
+                use_container_width=True,
+                type="primary" if st.session_state.entry == entry else "secondary",
+            ):
+                st.session_state.entry = entry
+            st.caption(ENTRY_DESCRIPTIONS[entry])
         
         st.markdown("---")
         st.markdown("### 仿真模式设置")

@@ -59,11 +59,11 @@ def _load_theme() -> None:
         css = THEME_PATH.read_text(encoding="utf-8")
     else:
         css = """
-        .stApp { background: #070b14; color: #d8e2f2; }
-        .kpi-card { background: #111827; border: 1px solid #334155; border-radius: 12px; padding: 12px; }
-        .kpi-title { font-size: 12px; color: #94a3b8; }
-        .kpi-value { font-size: 24px; font-weight: 700; color: #e2e8f0; }
-        .kpi-note { font-size: 12px; color: #64748b; }
+        .stApp { background: #050b14; color: #e2e8f0; }
+        .kpi-card { background: rgba(10, 25, 49, 0.65); border: 1px solid #1f365c; border-radius: 12px; padding: 16px; backdrop-filter: blur(8px); }
+        .kpi-title { font-size: 13px; color: #8aa0c2; text-transform: uppercase; }
+        .kpi-value { font-size: 28px; font-weight: 700; color: #ffffff; }
+        .kpi-note { font-size: 12px; color: #7995bc; }
         """
     st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
 
@@ -97,8 +97,20 @@ def _init_state() -> None:
 
 
 def _render_top_entry_selector() -> None:
-    st.markdown("## Civitas Policy Sandbox")
-    st.caption("首页入口：政策试验台 / 历史政策回放 / 高级分析 / 系统说明")
+    st.markdown(
+        """
+        <div style="margin-bottom: 2rem;">
+            <h1 style="font-size: 2.4rem; font-weight: 700; color: #e2e8f0; margin-bottom: 0.5rem; letter-spacing: 2px; text-shadow: 0 0 20px rgba(24,144,255,0.4);">
+                数治观澜 <span style="font-size: 1.4rem; font-weight: 400; color: #8aa0c2; text-shadow: none;">—— 基于大模型多智能体的金融政策风动推演沙箱</span>
+            </h1>
+            <div style="font-size: 15px; color: #4da6ff; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 600;">
+                Civitas Policy Sandbox 
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    st.caption("导航入口：政策试验台 / 历史政策回放 / 高级分析 / 系统说明")
 
     cols = st.columns(len(ENTRY_POINTS))
     for idx, entry in enumerate(ENTRY_POINTS):

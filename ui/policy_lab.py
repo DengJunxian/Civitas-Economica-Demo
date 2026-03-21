@@ -615,7 +615,7 @@ def _render_policy_comparison_chart(primary: Dict[str, Any], control: Optional[D
         height=330,
         legend=dict(orientation="h"),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key="policy_lab_compare_chart")
     dashboard_ui.export_plot_bundle(fig, frame, "policy_lab_compare", "policy_lab_compare")
 
 

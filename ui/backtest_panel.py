@@ -87,7 +87,7 @@ def _render_equity_chart(frame: pd.DataFrame) -> None:
         go.Scatter(x=frame["date"], y=frame["benchmark"], mode="lines", name="基准净值", line=dict(width=1.8, color="#2f80ed"))
     )
     fig.update_layout(template="plotly_dark", height=380, margin=dict(l=10, r=10, t=35, b=10), title="策略 vs 基准")
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, width="stretch", key="backtest_equity_chart")
 
 
 def _render_risk_chart(frame: pd.DataFrame) -> None:
@@ -113,7 +113,7 @@ def _render_risk_chart(frame: pd.DataFrame) -> None:
         yaxis=dict(tickformat=".0%"),
         yaxis2=dict(overlaying="y", side="right", tickformat=".0%", showgrid=False),
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, width="stretch", key="backtest_risk_chart")
 
 
 def _result_payload(result: BacktestResult) -> Dict[str, Any]:

@@ -155,7 +155,7 @@ def _render_comparison_chart(result: BacktestResult, baseline: Optional[Backtest
         height=420,
         legend=dict(orientation="h"),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key="history_replay_compare_chart")
     dashboard_ui.export_plot_bundle(fig, frame, "history_replay_compare", "history_replay_compare")
 
 

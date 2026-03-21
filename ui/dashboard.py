@@ -1,4 +1,4 @@
-﻿"""Dashboard widgets for competition-defense Streamlit UI."""
+"""Dashboard widgets for competition-defense Streamlit UI."""
 
 from __future__ import annotations
 
@@ -139,7 +139,7 @@ def render_market_overview(metrics: pd.DataFrame, upto_step: Optional[int], key_
         legend=dict(orientation="h"),
         height=340,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_plot")
     export_plot_bundle(fig, frame, f"{key_prefix}_market_overview", f"{key_prefix}_market_overview")
     return fig
 
@@ -160,7 +160,7 @@ def render_ab_world_compare(world_a: pd.DataFrame, world_b: pd.DataFrame, key_pr
         legend=dict(orientation="h"),
         height=320,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_plot")
     export_plot_bundle(fig, merged, f"{key_prefix}_ab_compare", f"{key_prefix}_ab_compare")
     return fig
 
@@ -192,7 +192,7 @@ def render_lob_depth_animation(metrics: pd.DataFrame, key_prefix: str = "lob") -
     frames, labels = _build_lob_depth_steps(metrics)
     if not frames:
         fig = go.Figure()
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_plot_empty")
         return fig
 
     fig = go.Figure(data=frames[0].data, frames=frames)
@@ -235,7 +235,7 @@ def render_lob_depth_animation(metrics: pd.DataFrame, key_prefix: str = "lob") -
             }
         ],
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_plot")
     export_plot_bundle(fig, metrics.head(len(frames)), f"{key_prefix}_lob_depth", f"{key_prefix}_lob_depth")
     return fig
 
@@ -260,7 +260,7 @@ def render_social_network_heatmap(metrics: pd.DataFrame, key_prefix: str = "soci
         ]
     )
     fig.update_layout(**PLOTLY_DARK_LAYOUT, title="社会传播网络热图", xaxis_title="节点", yaxis_title="节点", height=360)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_plot")
     heatmap_df = pd.DataFrame(matrix)
     export_plot_bundle(fig, heatmap_df, f"{key_prefix}_social_heatmap", f"{key_prefix}_social_heatmap")
     return fig
@@ -322,7 +322,7 @@ def render_policy_transmission_chain(chain_payload: Optional[Dict[str, Any]] = N
         ]
     )
     fig.update_layout(**PLOTLY_DARK_LAYOUT, title="政策传导链：政策 -> 宏观变量 -> 社会情绪 -> 行业主体 -> 市场微结构", height=360)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_plot")
     sankey_df = pd.DataFrame({"source": source, "target": target, "value": value})
     export_plot_bundle(fig, sankey_df, f"{key_prefix}_policy_chain", f"{key_prefix}_policy_chain")
     return fig
@@ -371,7 +371,7 @@ def render_risk_event_timeline(metrics: pd.DataFrame, key_prefix: str = "risk") 
         xaxis=dict(title="时间"),
         height=320,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_plot")
     export_plot_bundle(fig, events_df, f"{key_prefix}_timeline", f"{key_prefix}_timeline")
     return fig
 
@@ -447,7 +447,7 @@ def render_decision_evidence_flow(
                 ]
             )
             fig.update_layout(**PLOTLY_DARK_LAYOUT, title="分析师矛盾矩阵", height=360)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="evidence_contradiction_matrix_plot")
             matrix_df = pd.DataFrame(matrix, columns=analyst_labels, index=analyst_labels)
             export_plot_bundle(fig, matrix_df.reset_index(), "evidence_contradiction_matrix", "evidence_contradiction_matrix")
             st.caption(f"矛盾指数：{float(contradiction_matrix.get('contradiction_index', 0.0)):.3f}")

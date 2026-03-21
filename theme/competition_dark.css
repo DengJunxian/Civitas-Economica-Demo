@@ -238,3 +238,25 @@ div[data-baseweb="textarea"] > div {
 .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
   color: #ffffff !important;
 }
+
+/* Sidebar dark theme override */
+[data-testid="stSidebar"] {
+  background-color: #030811 !important;
+  border-right: 1px solid rgba(24, 144, 255, 0.15) !important;
+}
+
+[data-testid="stSidebar"] p, 
+[data-testid="stSidebar"] span, 
+[data-testid="stSidebar"] h1, 
+[data-testid="stSidebar"] h2, 
+[data-testid="stSidebar"] h3, 
+[data-testid="stSidebar"] h4, 
+[data-testid="stSidebar"] h5, 
+[data-testid="stSidebar"] h6,
+[data-testid="stSidebar"] label {
+  color: #e2e8f0 !important;
+}
+
+[data-testid="stSidebarNav"] {
+  background-color: transparent !important;
+}

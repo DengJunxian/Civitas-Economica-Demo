@@ -267,3 +267,28 @@ ul[role="listbox"] li {
 [data-testid="stSidebarNav"] {
   background-color: transparent !important;
 }
+
+/* Button & Download Button Overrides */
+.stButton button,
+.stDownloadButton button {
+  background-color: #0a1931 !important;
+  color: #e2e8f0 !important;
+  border: 1px solid #1f365c !important;
+  transition: all 0.3s ease !important;
+}
+
+.stButton button:hover,
+.stDownloadButton button:hover {
+  background-color: #1890ff !important;
+  color: #ffffff !important;
+  border-color: #1890ff !important;
+  box-shadow: 0 0 10px rgba(24, 144, 255, 0.4) !important;
+}
+
+.stButton button:disabled,
+.stDownloadButton button:disabled {
+  background-color: rgba(10, 25, 49, 0.5) !important;
+  color: #8aa0c2 !important;
+  border-color: #1f365c !important;
+  opacity: 0.6 !important;
+}

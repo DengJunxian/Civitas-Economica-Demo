@@ -1,4 +1,4 @@
-﻿# file: app.py
+# file: app.py
 """Civitas front-end in Streamlit: Policy Lab / History Replay / Advanced Analysis."""
 
 from __future__ import annotations
@@ -89,6 +89,7 @@ def _init_state() -> None:
         "materials_last_export": None,
         "policy_lab_result": None,
         "history_replay_result": None,
+        "simulation_mode": "SMART",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -258,6 +259,22 @@ def _render_sidebar_global() -> None:
     with st.sidebar:
         st.markdown("### 快速说明")
         st.info(f"当前页面：{st.session_state.entry}")
+        
+        st.markdown("---")
+        st.markdown("### 仿真模式设置")
+        sim_mode_display = {"SMART": "智能模式 (GLM-4 + Chat)", "DEEP": "深度模式 (Reasoner + Chat)"}
+        selected_mode_key = st.radio(
+            "选择 LLM 调度策略",
+            options=["SMART", "DEEP"],
+            index=0 if st.session_state.simulation_mode == "SMART" else 1,
+            format_func=lambda x: sim_mode_display.get(x, x),
+            help="智能模式优先使用 GLM；深度模式优先使用 DeepSeek Reasoner 推理模型。"
+        )
+        if selected_mode_key != st.session_state.simulation_mode:
+            st.session_state.simulation_mode = selected_mode_key
+            st.toast(f"已切换至 {sim_mode_display[selected_mode_key]}")
+
+        st.markdown("---")
         st.caption("默认先做政策实验或历史回放。需要专家级细节时，再进入“高级分析”。")
 
         if st.session_state.entry == "高级分析":

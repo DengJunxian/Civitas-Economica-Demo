@@ -215,9 +215,20 @@ class ModelRouter:
         return json.dumps(payload, ensure_ascii=False)
 
     def get_model_priority(self, mode: str) -> List[str]:
-        base_priority = ["deepseek-chat", "glm-4-flashx"]
-        if mode == "FAST":
+        """
+        根据仿真模式获取模型优先级。
+        
+        SMART (智能模式): GLM (flashx) -> DeepSeek Chat (回退)
+        DEEP (深度模式): DeepSeek Reasoner -> DeepSeek Chat (超时/失败回退)
+        FAST (快速模式): 同智能模式
+        """
+        if mode == "DEEP":
+            base_priority = ["deepseek-reasoner", "deepseek-chat"]
+        elif mode == "SMART" or mode == "FAST":
             base_priority = ["glm-4-flashx", "deepseek-chat"]
+        else:
+            base_priority = ["deepseek-chat", "glm-4-flashx"]
+            
         return [m for m in base_priority if m in self.available_models]
 
     async def call_with_fallback(

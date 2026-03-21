@@ -21,12 +21,11 @@ pybind11>=2.10.0
 setuptools>=42.0.0
 
 # Plotly PNG export support:
-kaleido>=1.2.0
+kaleido==0.2.1
 
 # Document export support:
 python-docx>=1.1.0
 reportlab>=4.0.0
-
 
 # Optional analytics ecosystem (install on demand):
 # empyrical>=0.5.5

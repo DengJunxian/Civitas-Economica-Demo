@@ -19,23 +19,22 @@ venv/
 *.pyd
 dist/
 build/
+build_temp/
+build_lib/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
 .pytest_tmp/
 .pytest_tmp_check/
 .tmp/
+__pycache__/
 
 # Generated runtime outputs
 .playwright-cli/
-artifacts/build_temp_verify/
-artifacts/build_lib_verify/
-outputs/competition_materials/
-outputs/policy_ab_reports/
-outputs/*.html
-outputs/*.png
-outputs/*.json
-outputs/*.csv
+artifacts/
+output/
+outputs/
+tmp/
 tmp/pytest_realism_reporting/
 
 # Temporary and local data caches

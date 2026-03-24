@@ -64,15 +64,13 @@ Write-Host "[Civitas] Python: $pythonExe"
 
 $requiredFiles = @(
     "README.md",
-    "readme.txt",
     ".env.example",
     "app.py",
     "requirements.txt",
     "requirements-lock.txt",
-    "docs\competition_delivery_audit.md",
-    "docs\deployment_guide.md",
+    "AI_TOOL_DISCLOSURE.md",
+    "THIRD_PARTY_OPEN_SOURCE_DISCLOSURE.md",
     "docs\user_manual.md",
-    "docs\project_structure.md",
     "docs\interface_spec.md",
     "docs\data_model_thirdparty.md",
     "docs\defense_qa.md",

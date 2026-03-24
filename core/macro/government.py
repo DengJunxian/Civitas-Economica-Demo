@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import re
 import uuid
-from dataclasses import asdict, dataclass
-from typing import Dict, Optional
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 from core.macro.state import MacroState
+from policy.structured import PolicyEvent, PolicyPackage, StructuredPolicyParser, stable_json_hash
 
 
 def _clip(value: float, lower: float, upper: float) -> float:
@@ -27,6 +28,7 @@ class PolicyShock:
     stamp_tax_delta: float = 0.0
     sentiment_delta: float = 0.0
     rumor_shock: float = 0.0
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, float | str]:
         return asdict(self)
@@ -112,12 +114,231 @@ class PolicyCompiler:
 class GovernmentAgent:
     """Government layer that compiles policy text and applies macro shocks."""
 
-    def __init__(self, compiler: Optional[PolicyCompiler] = None):
+    def __init__(
+        self,
+        compiler: Optional[PolicyCompiler] = None,
+        *,
+        feature_flags: Optional[Mapping[str, bool]] = None,
+        policy_parser: Optional[StructuredPolicyParser] = None,
+    ):
         self.compiler = compiler or PolicyCompiler()
+        self.feature_flags: Dict[str, bool] = {
+            "structured_policy_parser_v1": True,
+            "policy_transmission_layers_v1": True,
+        }
+        if feature_flags:
+            for key, value in feature_flags.items():
+                self.feature_flags[str(key)] = bool(value)
+        self.policy_parser = policy_parser or StructuredPolicyParser(feature_flags=self.feature_flags)
 
-    def compile_policy_text(self, policy_text: str, *, tick: int = 0) -> PolicyShock:
+    def _infer_policy_family(self, policy_text: str, shock: Optional[PolicyShock] = None) -> Tuple[str, str]:
+        text = str(policy_text or "").lower()
+        if shock is not None:
+            if shock.stamp_tax_delta < 0:
+                return "tax_cut", "easing"
+            if shock.stamp_tax_delta > 0:
+                return "tax_hike", "tightening"
+            if shock.policy_rate_delta < 0 or shock.liquidity_injection > 0:
+                return "liquidity_easing", "easing"
+            if shock.policy_rate_delta > 0 or shock.credit_spread_delta > 0:
+                return "tightening", "tightening"
+            if shock.fiscal_stimulus_delta > 0:
+                return "fiscal_stimulus", "easing"
+            if shock.rumor_shock > 0 or "辟谣" in policy_text or "rumor" in text:
+                return "rumor_refutation", "stabilizing"
+        if "印花税" in policy_text or "stamp" in text:
+            if "下调" in policy_text or "cut" in text:
+                return "tax_cut", "easing"
+            return "tax_hike", "tightening"
+        if "降准" in policy_text or "liquidity" in text or "流动性" in policy_text:
+            return "liquidity_easing", "easing"
+        if "降息" in policy_text or "rate cut" in text:
+            return "rate_cut", "easing"
+        if "财政" in policy_text or "fiscal" in text or "补贴" in policy_text:
+            return "fiscal_stimulus", "easing"
+        if "辟谣" in policy_text or "rumor" in text or "澄清" in policy_text:
+            return "rumor_refutation", "stabilizing"
+        if "收紧" in policy_text or "tighten" in text or "加息" in policy_text:
+            return "tightening", "tightening"
+        if "平准" in policy_text or "维稳" in policy_text or "国家队" in policy_text:
+            return "stabilization", "stabilizing"
+        return "unclassified", "neutral"
+
+    def _legacy_package(
+        self,
+        *,
+        policy_text: str,
+        shock: PolicyShock,
+        tick: int,
+        policy_type_hint: Optional[str],
+        intensity: float,
+        market_regime: Optional[str],
+        snapshot_info: Optional[Mapping[str, Any]],
+    ) -> PolicyPackage:
+        policy_type, direction = self._infer_policy_family(policy_text, shock)
+        if policy_type_hint:
+            policy_type = str(policy_type_hint)
+        channels = []
+        def _pick_channel(family: str, channel_name: str, dir_hint: str) -> Any:
+            family_channels = self.policy_parser._build_channels(family, 1.0, dir_hint, policy_text)
+            for channel in family_channels:
+                if channel.name == channel_name:
+                    return channel
+            return family_channels[0]
+
+        if shock.liquidity_injection != 0.0:
+            channels.append(_pick_channel("liquidity_easing", "liquidity", "easing" if shock.liquidity_injection > 0 else "tightening"))
+        if shock.policy_rate_delta != 0.0:
+            channels.append(_pick_channel("rate_cut", "rate", "easing" if shock.policy_rate_delta < 0 else "tightening"))
+        if shock.fiscal_stimulus_delta != 0.0:
+            channels.append(_pick_channel("fiscal_stimulus", "fiscal_demand", "easing"))
+        if shock.stamp_tax_delta != 0.0:
+            channels.append(_pick_channel("tax_cut" if shock.stamp_tax_delta < 0 else "tax_hike", "tax_frictions", "easing" if shock.stamp_tax_delta < 0 else "tightening"))
+        if shock.credit_spread_delta != 0.0:
+            channels.append(_pick_channel("tightening", "credit_spread", "tightening" if shock.credit_spread_delta > 0 else "easing"))
+        if shock.sentiment_delta != 0.0:
+            channels.append(_pick_channel("liquidity_easing", "sentiment_confidence", "easing" if shock.sentiment_delta > 0 else "tightening"))
+        if shock.rumor_shock != 0.0:
+            channels.append(_pick_channel("rumor_refutation", "rumor_suppression", "stabilizing" if shock.rumor_shock > 0 else "tightening"))
+
+        if not channels:
+            channels = self.policy_parser._build_channels("unclassified", 1.0, "neutral", policy_text)
+
+        sector_effects, factor_effects, agent_class_effects, market_effects = self.policy_parser._build_layers(
+            policy_type=policy_type,
+            direction=direction,
+            channels=channels,
+            text=policy_text,
+            market_regime=market_regime,
+        )
+        event = PolicyEvent(
+            policy_id=shock.policy_id or f"policy-{tick}",
+            raw_text=policy_text,
+            policy_type=policy_type,
+            policy_label="Legacy fallback",
+            direction=direction,
+            intensity=float(intensity),
+            tick=int(tick),
+            matched_tokens=[],
+            source="legacy_compiler",
+        )
+        metadata = {
+            "seed": 0,
+            "config_hash": stable_json_hash(
+                {
+                    "policy_text": policy_text,
+                    "tick": int(tick),
+                    "intensity": float(intensity),
+                    "policy_type_hint": policy_type_hint or "",
+                    "mode": "legacy",
+                }
+            ),
+            "snapshot_info": dict(snapshot_info or {}),
+            "feature_flags": dict(self.feature_flags),
+            "parser_mode": "legacy",
+        }
+        return PolicyPackage(
+            event=event,
+            channels=channels,
+            uncertainty=self.policy_parser.parse(
+                policy_text,
+                tick=tick,
+                policy_type_hint=policy_type_hint,
+                intensity=intensity,
+                market_regime=market_regime,
+                snapshot_info=snapshot_info,
+                fallback_used=True,
+            ).uncertainty,
+            sector_effects=sector_effects,
+            factor_effects=factor_effects,
+            agent_class_effects=agent_class_effects,
+            market_effects=market_effects,
+            metadata=metadata,
+            parser_version="legacy_policy_compiler",
+        )
+
+    def compile_policy_package(
+        self,
+        policy_text: str,
+        *,
+        tick: int = 0,
+        policy_type_hint: Optional[str] = None,
+        intensity: float = 1.0,
+        market_regime: Optional[str] = None,
+        snapshot_info: Optional[Mapping[str, Any]] = None,
+    ) -> PolicyPackage:
+        """Compile free-form policy text into a structured policy package."""
+
+        if not self.feature_flags.get("structured_policy_parser_v1", True):
+            shock = self.compiler.compile(policy_text, tick=tick)
+            return self._legacy_package(
+                policy_text=policy_text,
+                shock=shock,
+                tick=tick,
+                policy_type_hint=policy_type_hint,
+                intensity=intensity,
+                market_regime=market_regime,
+                snapshot_info=snapshot_info,
+            )
+
+        package = self.policy_parser.parse(
+            policy_text,
+            tick=tick,
+            policy_type_hint=policy_type_hint,
+            intensity=intensity,
+            market_regime=market_regime,
+            snapshot_info=snapshot_info,
+        )
+        if package.uncertainty.confidence < 0.35 or package.event.policy_type == "unclassified":
+            shock = self.compiler.compile(policy_text, tick=tick)
+            return self._legacy_package(
+                policy_text=policy_text,
+                shock=shock,
+                tick=tick,
+                policy_type_hint=policy_type_hint,
+                intensity=intensity,
+                market_regime=market_regime,
+                snapshot_info=snapshot_info,
+            )
+        return package
+
+    def compile_policy_text(
+        self,
+        policy_text: str,
+        *,
+        tick: int = 0,
+        policy_type_hint: Optional[str] = None,
+        intensity: float = 1.0,
+        market_regime: Optional[str] = None,
+        snapshot_info: Optional[Mapping[str, Any]] = None,
+    ) -> PolicyShock:
         """Compile free-form policy text into a structured policy shock."""
-        return self.compiler.compile(policy_text, tick=tick)
+        package = self.compile_policy_package(
+            policy_text,
+            tick=tick,
+            policy_type_hint=policy_type_hint,
+            intensity=intensity,
+            market_regime=market_regime,
+            snapshot_info=snapshot_info,
+        )
+        shock_fields = package.to_policy_shock_fields()
+        shock = PolicyShock(
+            policy_id=package.event.policy_id,
+            policy_text=policy_text,
+            **shock_fields,
+        )
+        shock.metadata = {
+            "policy_event": package.event.to_dict() if hasattr(package.event, "to_dict") else asdict(package.event),
+            "policy_package": package.to_dict(),
+            "reproducibility": {
+                "seed": int(package.metadata.get("seed", 0)),
+                "config_hash": str(package.metadata.get("config_hash", "")),
+                "snapshot_info": dict(package.metadata.get("snapshot_info", {})),
+            },
+            "parser_mode": package.uncertainty.parser_mode,
+            "feature_flags": dict(self.feature_flags),
+        }
+        return shock
 
     def apply_policy_shock(self, macro_state: MacroState, shock: PolicyShock) -> MacroState:
         """Apply policy shock to macro state."""

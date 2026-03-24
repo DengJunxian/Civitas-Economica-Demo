@@ -6,7 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -14,6 +14,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.macro.government import GovernmentAgent, PolicyShock
+from core.event_store import EventRecord, EventStore, EventType
+from policy.structured import PolicyPackage
 from ui import dashboard as dashboard_ui
 from ui.reporting import official_report_meta, write_report_artifacts
 
@@ -75,19 +77,184 @@ def _seed_from_text(text: str) -> int:
     return int(digest[:16], 16)
 
 
-def _compile_scaled_shock(policy_text: str, intensity: float) -> PolicyShock:
-    gov = GovernmentAgent()
-    shock = gov.compile_policy_text(policy_text, tick=1)
-    _apply_local_policy_keywords(policy_text, shock)
-    scale = float(intensity)
-    shock.policy_rate_delta *= scale
-    shock.fiscal_stimulus_delta *= scale
-    shock.liquidity_injection *= scale
-    shock.credit_spread_delta *= scale
-    shock.stamp_tax_delta *= scale
-    shock.sentiment_delta *= scale
-    shock.rumor_shock *= scale
+def _to_iso_safe(value: Any) -> str:
+    ts = pd.to_datetime(value, errors="coerce", utc=True)
+    if pd.isna(ts):
+        ts = pd.Timestamp.now(tz="UTC")
+    return ts.isoformat()
+
+
+def _policy_feature_flags(enable_structured_parser: bool = True) -> Dict[str, bool]:
+    return {
+        "structured_policy_parser_v1": bool(enable_structured_parser),
+        "policy_transmission_layers_v1": True,
+    }
+
+
+def _compile_policy_bundle(
+    policy_text: str,
+    intensity: float,
+    *,
+    policy_type_hint: Optional[str] = None,
+    market_regime: Optional[str] = None,
+    enable_structured_parser: bool = True,
+) -> Tuple[PolicyShock, PolicyPackage]:
+    gov = GovernmentAgent(feature_flags=_policy_feature_flags(enable_structured_parser))
+    package = gov.compile_policy_package(
+        policy_text,
+        tick=1,
+        policy_type_hint=policy_type_hint,
+        intensity=float(intensity),
+        market_regime=market_regime,
+        snapshot_info={
+            "policy_text_length": len(policy_text or ""),
+            "policy_type_hint": policy_type_hint or "",
+            "parser_mode": "structured" if enable_structured_parser else "legacy",
+        },
+    )
+    shock = PolicyShock(policy_id=package.event.policy_id, policy_text=policy_text, **package.to_policy_shock_fields())
+    shock.metadata = {
+        "policy_event": package.event.to_dict() if hasattr(package.event, "to_dict") else {
+            "policy_id": package.event.policy_id,
+            "raw_text": package.event.raw_text,
+            "policy_type": package.event.policy_type,
+            "policy_label": package.event.policy_label,
+            "direction": package.event.direction,
+            "intensity": package.event.intensity,
+            "tick": package.event.tick,
+            "matched_tokens": list(package.event.matched_tokens),
+            "timestamp": float(package.event.timestamp),
+            "source": package.event.source,
+        },
+        "policy_package": package.to_dict(),
+        "reproducibility": {
+            "seed": int(package.metadata.get("seed", 0)),
+            "config_hash": str(package.metadata.get("config_hash", "")),
+            "snapshot_info": dict(package.metadata.get("snapshot_info", {})),
+        },
+        "parser_mode": package.uncertainty.parser_mode,
+        "feature_flags": dict(package.metadata.get("feature_flags", {})),
+    }
+    return shock, package
+
+
+def _compile_scaled_shock(
+    policy_text: str,
+    intensity: float,
+    *,
+    enable_structured_parser: bool = True,
+) -> PolicyShock:
+    shock, _ = _compile_policy_bundle(policy_text, intensity, enable_structured_parser=enable_structured_parser)
     return shock
+
+
+def _format_top_effects(effect_map: Dict[str, float], limit: int = 3) -> List[str]:
+    ranked = sorted(effect_map.items(), key=lambda item: abs(float(item[1])), reverse=True)
+    return [f"{name}: {float(value):+.3f}" for name, value in ranked[:limit]]
+
+
+def _normalize_top_layer(layer_value: Any, limit: int = 3) -> List[str]:
+    if isinstance(layer_value, dict):
+        return _format_top_effects({str(key): float(value) for key, value in layer_value.items()}, limit=limit)
+    if isinstance(layer_value, list):
+        normalized: List[str] = []
+        for item in layer_value[:limit]:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                normalized.append(f"{item[0]}: {float(item[1]):+.3f}")
+            else:
+                normalized.append(str(item))
+        return normalized
+    return []
+
+
+def _render_policy_transmission_path(primary: Dict[str, Any]) -> None:
+    package = primary.get("policy_package") or {}
+    transmission_layers = primary.get("transmission_layers") or {}
+    if not package:
+        return
+
+    event = package.get("event", {})
+    channels = package.get("channels", [])
+    uncertainty = package.get("uncertainty", {})
+    reproducibility = primary.get("reproducibility", {})
+    market_effects = transmission_layers.get("market", package.get("market_effects", {}))
+    top_layers = transmission_layers.get("top_layers", package.get("top_layers", {}))
+
+    channel_lines = []
+    for channel in channels[:3]:
+        if not isinstance(channel, dict):
+            continue
+        channel_lines.append(
+            f"{channel.get('name', 'channel')} / {float(channel.get('impact', 0.0)):+.2f} / "
+            f"lag {int(channel.get('lag_days', 0))}d"
+        )
+    if not channel_lines:
+        channel_lines = ["暂无显式通道，已回落到 legacy parser"]
+
+    sector_lines = _normalize_top_layer(top_layers.get("sector")) or _format_top_effects(transmission_layers.get("sector", package.get("sector_effects", {})))
+    factor_lines = _normalize_top_layer(top_layers.get("factor")) or _format_top_effects(transmission_layers.get("factor", package.get("factor_effects", {})))
+    agent_lines = _normalize_top_layer(top_layers.get("agent_class")) or _format_top_effects(transmission_layers.get("agent_class", package.get("agent_class_effects", {})))
+    market_lines = [
+        f"market_bias: {float(market_effects.get('market_bias', 0.0)):+.3f}",
+        f"liquidity_bias: {float(market_effects.get('liquidity_bias', 0.0)):+.3f}",
+        f"confidence_bias: {float(market_effects.get('confidence_bias', 0.0)):+.3f}",
+        f"volatility_bias: {float(market_effects.get('volatility_bias', 0.0)):+.3f}",
+    ]
+
+    cols = st.columns(4)
+    cards = [
+        (
+            "政策",
+            f"{event.get('policy_label', 'Unknown')} / {event.get('policy_type', 'unclassified')}",
+            [
+                f"direction: {event.get('direction', 'neutral')}",
+                f"intensity: {float(event.get('intensity', 0.0)):.2f}",
+                f"confidence: {float(uncertainty.get('confidence', 0.0)):.2f}",
+            ],
+        ),
+        (
+            "传导通道",
+            channels[0].get("name", "channel") if channels else "channel",
+            channel_lines,
+        ),
+        (
+            "主体反应",
+            "sector / factor / agent-class",
+            [
+                f"sector: {sector_lines[0] if sector_lines else 'n/a'}",
+                f"factor: {factor_lines[0] if factor_lines else 'n/a'}",
+                f"agent: {agent_lines[0] if agent_lines else 'n/a'}",
+            ],
+        ),
+        (
+            "市场结果",
+            "path fit / microstructure / behavior",
+            market_lines
+            + [
+                f"seed: {reproducibility.get('seed', 0)}",
+                f"config: {str(reproducibility.get('config_hash', ''))[:12]}",
+            ],
+        ),
+    ]
+    for idx, (title, summary, bullets) in enumerate(cards):
+        items = "".join(f"<li>{item}</li>" for item in bullets)
+        with cols[idx]:
+            st.markdown(
+                f"""
+                <div class="summary-card">
+                  <div class="summary-label">{title}</div>
+                  <div class="summary-value" style="font-size: 1.02em; font-weight: 600;">{summary}</div>
+                  <ul class="story-card-list">{items}</ul>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    st.caption(
+        "reproducibility: "
+        f"seed={reproducibility.get('seed', 0)} | "
+        f"config_hash={reproducibility.get('config_hash', '')} | "
+        f"snapshot={json.dumps(reproducibility.get('snapshot_info', {}), ensure_ascii=False, sort_keys=True)}"
+    )
 
 
 def _apply_local_policy_keywords(policy_text: str, shock: PolicyShock) -> None:
@@ -556,8 +723,30 @@ def _build_policy_run(
     intensity: float,
     duration_days: int,
     rumor_noise: bool,
+    enable_structured_parser: bool = True,
+    event_store: Optional[EventStore] = None,
+    dataset_version: str = "",
+    snapshot_id: str = "",
+    event_store_enabled: bool = False,
 ) -> Dict[str, Any]:
-    shock = _compile_scaled_shock(policy_text, intensity)
+    shock, package = _compile_policy_bundle(
+        policy_text,
+        intensity,
+        enable_structured_parser=enable_structured_parser,
+    )
+    package_dict = package.to_dict()
+    reproducibility = {
+        "seed": int(package.metadata.get("seed", 0)),
+        "config_hash": str(package.metadata.get("config_hash", "")),
+        "snapshot_info": dict(package.metadata.get("snapshot_info", {})),
+    }
+    transmission_layers = {
+        "sector": package.sector_effects,
+        "factor": package.factor_effects,
+        "agent_class": package.agent_class_effects,
+        "market": package.market_effects,
+        "top_layers": package.top_layers(),
+    }
     metrics = _generate_policy_metrics(
         policy_text=policy_text,
         intensity=intensity,
@@ -565,6 +754,50 @@ def _build_policy_run(
         rumor_noise=rumor_noise,
         scenario_key=label,
     )
+    event_store_rows = 0
+    if event_store_enabled and event_store is not None and dataset_version:
+        policy_event = EventRecord(
+            event_type=EventType.POLICY,
+            timestamp=_to_iso_safe(metrics["time"].iloc[0]) if not metrics.empty else _to_iso_safe(None),
+            visibility_time=_to_iso_safe(metrics["time"].iloc[0]) if not metrics.empty else _to_iso_safe(None),
+            source="policy_lab",
+            confidence=0.85,
+            payload=package_dict.get("event", {}),
+            metadata={
+                "label": label,
+                "parser_mode": package.uncertainty.parser_mode,
+                "snapshot_id": snapshot_id,
+            },
+        )
+        bar_events: List[EventRecord] = []
+        for _, row in metrics.iterrows():
+            ts = _to_iso_safe(row.get("time"))
+            bar_events.append(
+                EventRecord(
+                    event_type=EventType.MARKET_BAR,
+                    timestamp=ts,
+                    visibility_time=ts,
+                    source="policy_lab_simulation",
+                    confidence=0.80,
+                    payload={
+                        "open": float(row.get("open", 0.0)),
+                        "high": float(row.get("high", 0.0)),
+                        "low": float(row.get("low", 0.0)),
+                        "close": float(row.get("close", 0.0)),
+                        "volume": float(row.get("volume", 0.0)),
+                        "step": int(row.get("step", 0)),
+                    },
+                    metadata={"label": label, "snapshot_id": snapshot_id},
+                )
+            )
+        event_store.append_events(
+            dataset_version,
+            [policy_event, *bar_events],
+            seed=int(reproducibility.get("seed", 0)),
+            config_hash=str(reproducibility.get("config_hash", "")),
+            snapshot_id=snapshot_id,
+        )
+        event_store_rows = 1 + len(bar_events)
     return {
         "label": label,
         "policy_text": policy_text,
@@ -572,8 +805,19 @@ def _build_policy_run(
         "duration_days": duration_days,
         "rumor_noise": rumor_noise,
         "shock": shock.to_dict(),
+        "policy_event": package_dict["event"],
+        "policy_package": package_dict,
+        "transmission_layers": transmission_layers,
+        "reproducibility": reproducibility,
+        "parser_mode": package.uncertainty.parser_mode,
         "metrics": metrics,
         "summary": _compute_policy_summary(metrics),
+        "event_store": {
+            "enabled": bool(event_store_enabled),
+            "dataset_version": dataset_version,
+            "snapshot_id": snapshot_id,
+            "rows_written": int(event_store_rows),
+        },
     }
 
 
@@ -672,6 +916,12 @@ def _build_policy_report(result: Dict[str, Any]) -> Dict[str, Any]:
         "template_risk_focus": template.get("risk_focus", []),
         "primary_summary": primary["summary"],
         "primary_shock": primary["shock"],
+        "primary_policy_event": primary.get("policy_event", {}),
+        "primary_policy_package": primary.get("policy_package", {}),
+        "primary_transmission_layers": primary.get("transmission_layers", {}),
+        "primary_reproducibility": primary.get("reproducibility", {}),
+        "primary_parser_mode": primary.get("parser_mode", "legacy"),
+        "structured_parser_enabled": bool(result.get("structured_parser_enabled", True)),
         "control_summary": control["summary"] if control else None,
         "control_label": control["label"] if control else None,
         "operational_brief": ops_cards,
@@ -697,7 +947,14 @@ def _build_policy_report(result: Dict[str, Any]) -> Dict[str, Any]:
         "## 二、政策内容",
         result["policy_text"],
         "",
-        "## 三、核心结论",
+        "## 三、政策传导链路",
+        f"- 解析模式：{primary.get('parser_mode', 'legacy')}",
+        f"- 政策事件：{primary.get('policy_event', {}).get('policy_label', 'Unknown')} / {primary.get('policy_event', {}).get('policy_type', 'unclassified')}",
+        f"- 传导通道：{', '.join([str(item.get('name', 'channel')) for item in primary.get('policy_package', {}).get('channels', [])]) or 'n/a'}",
+        f"- 主体反应：{', '.join([f'{k}={v:+.3f}' for k, v in primary.get('transmission_layers', {}).get('agent_class', {}).items()]) or 'n/a'}",
+        f"- 市场结果：{', '.join([f'{k}={v:+.3f}' for k, v in primary.get('transmission_layers', {}).get('market', {}).items()]) or 'n/a'}",
+        "",
+        "## 四、核心结论",
         f"- 总体判断：{conclusion_card['summary']}",
         f"- 市场累计变化：{_format_percent(primary['summary']['return_pct'])}",
         f"- 风险热度水平：{primary['summary']['avg_panic']:.2f}",
@@ -709,7 +966,7 @@ def _build_policy_report(result: Dict[str, Any]) -> Dict[str, Any]:
     markdown.extend(
         [
             "",
-            "## 四、仿真结果",
+            "## 五、仿真结果",
         ]
     )
     markdown.extend(
@@ -726,7 +983,7 @@ def _build_policy_report(result: Dict[str, Any]) -> Dict[str, Any]:
         markdown.extend(
             [
                 "",
-                "## 五、对照组比较",
+                "## 六、对照组比较",
                 f"- 对照组：{control['label']}",
                 f"- 对照组累计变化：{_format_percent(control['summary']['return_pct'])}",
                 f"- 相对对照组超额变化：{_format_percent(primary['summary']['return_pct'] - control['summary']['return_pct'])}",
@@ -734,17 +991,17 @@ def _build_policy_report(result: Dict[str, Any]) -> Dict[str, Any]:
                 f"- 对照组最大回撤：{_format_percent(control['summary']['max_drawdown'])}",
             ]
         )
-    markdown.extend(["", "## 六、AI 研判意见"])
+    markdown.extend(["", "## 七、AI 研判意见"])
     for card in cards:
         markdown.append(f"### {card.title}")
         markdown.append(f"- 研判结论：{card.summary}")
         for line in card.bullets:
             markdown.append(f"- {line}")
-    markdown.extend(["", "## 七、风险提示与边界"])
+    markdown.extend(["", "## 八、风险提示与边界"])
     markdown.append(f"- {boundary_card['summary']}")
     for line in boundary_card["lines"]:
         markdown.append(f"- {line}")
-    markdown.extend(["", "## 八、建议事项"])
+    markdown.extend(["", "## 九、建议事项"])
     for card in ops_cards:
         markdown.append(f"- {card['title']}：{card['summary']}")
         for line in card["lines"]:
@@ -850,13 +1107,29 @@ def render_policy_lab() -> None:
             intensity = st.slider("冲击强度", min_value=0.2, max_value=1.6, value=float(selected_template.get("recommended_intensity", 1.0)), step=0.1)
             duration_days = st.slider("仿真时长（交易日）", min_value=12, max_value=60, value=int(selected_template.get("recommended_duration", 30)), step=6)
             rumor_noise = st.toggle("加入舆情扰动", value=bool(selected_template.get("default_rumor_noise", False)))
+            structured_parser_enabled = st.toggle("启用结构化政策解析", value=True, help="默认优先 structured parser，关闭时回落到 legacy parser。")
+            enable_event_store = st.toggle("Enable EventStore write", value=False)
+            dataset_version = st.text_input("EventStore dataset_version", value="default")
+            snapshot_id = st.text_input("Snapshot id (optional)", value="")
 
         st.markdown("#### 对照组设置")
         control_mode = st.selectbox("对照组模式", options=CONTROL_MODE_OPTIONS, index=2)
         submitted = st.form_submit_button("开始仿真", use_container_width=True, type="primary")
 
     if submitted:
-        primary = _build_policy_run(label="primary", policy_text=policy_text, intensity=intensity, duration_days=duration_days, rumor_noise=rumor_noise)
+        event_store = EventStore() if enable_event_store else None
+        primary = _build_policy_run(
+            label="primary",
+            policy_text=policy_text,
+            intensity=intensity,
+            duration_days=duration_days,
+            rumor_noise=rumor_noise,
+            enable_structured_parser=structured_parser_enabled,
+            event_store=event_store,
+            dataset_version=dataset_version,
+            snapshot_id=snapshot_id,
+            event_store_enabled=bool(enable_event_store),
+        )
         control_config = _build_control_policy(
             template=selected_template,
             control_mode=control_mode,
@@ -873,8 +1146,13 @@ def render_policy_lab() -> None:
                 intensity=float(control_config["intensity"]),
                 duration_days=int(control_config["duration_days"]),
                 rumor_noise=bool(control_config["rumor_noise"]),
+                enable_structured_parser=structured_parser_enabled,
+                event_store=event_store,
+                dataset_version=dataset_version,
+                snapshot_id=snapshot_id,
+                event_store_enabled=bool(enable_event_store),
             )
-        shock = _compile_scaled_shock(policy_text, intensity)
+        shock = _compile_scaled_shock(policy_text, intensity, enable_structured_parser=structured_parser_enabled)
         cards = _build_policy_cards(
             policy_title=policy_title,
             policy_type=policy_type,
@@ -890,6 +1168,10 @@ def render_policy_lab() -> None:
             "intensity": intensity,
             "duration_days": duration_days,
             "rumor_noise": rumor_noise,
+            "structured_parser_enabled": structured_parser_enabled,
+            "event_store_enabled": bool(enable_event_store),
+            "dataset_version": dataset_version,
+            "snapshot_id": snapshot_id,
             "control_mode": control_mode,
             "primary": primary,
             "control": control,
@@ -915,6 +1197,9 @@ def render_policy_lab() -> None:
     _render_policy_comparison_chart(primary, control)
     if control:
         _render_control_delta_cards(primary, control)
+
+    st.markdown("### 政策 -> 传导通道 -> 主体反应 -> 市场结果")
+    _render_policy_transmission_path(primary)
 
     # 渲染大盘主图及KPI（独占整宽）
     kpi = dashboard_ui.build_kpi_snapshot(metrics, current_step, regulation_hint="政策观察期")

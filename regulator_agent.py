@@ -11,6 +11,8 @@ Regulator Agent 顶层框架。
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import random
 import threading
 from collections import defaultdict
@@ -91,6 +93,9 @@ class RegulatoryAction:
     reserve_cut_bps: int
     policy_rate_cut_bps: int
     rumor_refute_strength: float
+    stabilization_capital: float = 0.0
+    stabilization_timing: int = 0
+    halt_enabled: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -98,6 +103,9 @@ class RegulatoryAction:
             "reserve_cut_bps": self.reserve_cut_bps,
             "policy_rate_cut_bps": self.policy_rate_cut_bps,
             "rumor_refute_strength": self.rumor_refute_strength,
+            "stabilization_capital": self.stabilization_capital,
+            "stabilization_timing": self.stabilization_timing,
+            "halt_enabled": self.halt_enabled,
         }
 
     def describe(self) -> str:
@@ -105,7 +113,10 @@ class RegulatoryAction:
             f"印花税={self.stamp_tax_rate:.4%}, "
             f"降准={self.reserve_cut_bps}bps, "
             f"降息={self.policy_rate_cut_bps}bps, "
-            f"定向辟谣强度={self.rumor_refute_strength:.2f}"
+            f"定向辟谣强度={self.rumor_refute_strength:.2f}, "
+            f"稳定资金={self.stabilization_capital:.2f}, "
+            f"干预时点={self.stabilization_timing}, "
+            f"halt={'on' if self.halt_enabled else 'off'}"
         )
 
 
@@ -133,16 +144,25 @@ class RewardFunction:
     - 额外轻惩罚高波动（防止“表面稳定、底层剧烈震荡”）。
     """
 
-    w_stability: float = 1.8
-    w_crash_loss: float = 2.4
-    w_volatility: float = 0.4
+    w_macro_stability: float = 1.8
+    w_crash_risk_penalty: float = 2.4
+    w_volatility_penalty: float = 0.4
+    w_liquidity_shortage_penalty: float = 0.8
+    w_intervention_cost_penalty: float = 0.6
+    w_welfare_confidence_reward: float = 0.7
     w_stability_improve: float = 0.6
 
     def __call__(self, obs: EnvObservation, prev_obs: Optional[EnvObservation] = None) -> float:
+        liquidity_shortage = float(obs.extras.get("liquidity_shortage", 0.0)) if obs.extras else 0.0
+        intervention_cost = float(obs.extras.get("intervention_cost", 0.0)) if obs.extras else 0.0
+        welfare_confidence = float(obs.extras.get("welfare_confidence", 1.0 - obs.panic_level)) if obs.extras else float(1.0 - obs.panic_level)
         reward = (
-            self.w_stability * float(obs.macro_stability)
-            - self.w_crash_loss * float(obs.crash_loss_rate)
-            - self.w_volatility * float(obs.volatility)
+            self.w_macro_stability * float(obs.macro_stability)
+            - self.w_crash_risk_penalty * float(obs.crash_loss_rate)
+            - self.w_volatility_penalty * float(obs.volatility)
+            - self.w_liquidity_shortage_penalty * float(liquidity_shortage)
+            - self.w_intervention_cost_penalty * float(intervention_cost)
+            + self.w_welfare_confidence_reward * float(welfare_confidence)
         )
         if prev_obs is not None:
             reward += self.w_stability_improve * (float(obs.macro_stability) - float(prev_obs.macro_stability))
@@ -213,7 +233,20 @@ class ToyRegulatoryMarketEnv(RegulatoryEnvironment):
         rrr_diff = abs(action.reserve_cut_bps - self._target_action.reserve_cut_bps) / 100.0
         rate_diff = abs(action.policy_rate_cut_bps - self._target_action.policy_rate_cut_bps) / 50.0
         rumor_diff = abs(action.rumor_refute_strength - self._target_action.rumor_refute_strength)
-        return float(np.clip(0.35 * tax_diff + 0.25 * rrr_diff + 0.20 * rate_diff + 0.20 * rumor_diff, 0.0, 1.0))
+        capital_diff = abs(action.stabilization_capital - self._target_action.stabilization_capital) / 1.0
+        timing_diff = abs(action.stabilization_timing - self._target_action.stabilization_timing) / 10.0
+        return float(
+            np.clip(
+                0.30 * tax_diff
+                + 0.20 * rrr_diff
+                + 0.15 * rate_diff
+                + 0.15 * rumor_diff
+                + 0.10 * capital_diff
+                + 0.10 * timing_diff,
+                0.0,
+                1.0,
+            )
+        )
 
     def step(self, action: RegulatoryAction) -> Tuple[EnvObservation, float, bool, Dict[str, Any]]:
         prev_obs = self._obs
@@ -224,12 +257,24 @@ class ToyRegulatoryMarketEnv(RegulatoryEnvironment):
         control_gain = 1.0 - distance
 
         noise = self._rng.uniform(-0.015, 0.015)
-        next_vol = float(np.clip(0.78 * prev_obs.volatility + 0.14 * (1.0 - control_gain) + 0.10 * prev_obs.panic_level + noise, 0.0, 1.0))
+        intervention_effect = float(np.clip(action.stabilization_capital, 0.0, 1.0)) * 0.15
+        next_vol = float(
+            np.clip(
+                0.78 * prev_obs.volatility
+                + 0.14 * (1.0 - control_gain)
+                + 0.10 * prev_obs.panic_level
+                - intervention_effect
+                + noise,
+                0.0,
+                1.0,
+            )
+        )
         next_panic = float(
             np.clip(
                 0.75 * prev_obs.panic_level
                 + 0.16 * (1.0 - control_gain)
                 - 0.18 * action.rumor_refute_strength
+                - intervention_effect * 0.4
                 + noise,
                 0.0,
                 1.0,
@@ -237,6 +282,18 @@ class ToyRegulatoryMarketEnv(RegulatoryEnvironment):
         )
         next_crash = float(np.clip(0.80 * prev_obs.crash_loss_rate + 0.22 * max(0.0, next_vol + next_panic - 0.85) + noise, 0.0, 1.0))
         next_stability = float(np.clip(1.0 - (0.55 * next_vol + 0.35 * next_panic + 0.45 * next_crash), 0.0, 1.0))
+        liquidity_shortage = float(np.clip(0.55 * next_panic + 0.35 * next_vol - 0.25 * intervention_effect, 0.0, 1.0))
+        intervention_cost = float(
+            np.clip(
+                abs(action.stamp_tax_rate - 0.0005) * 120.0
+                + abs(action.reserve_cut_bps) / 120.0
+                + abs(action.policy_rate_cut_bps) / 80.0
+                + max(0.0, action.stabilization_capital),
+                0.0,
+                2.5,
+            )
+        )
+        welfare_confidence = float(np.clip(1.0 - 0.55 * next_panic - 0.25 * next_vol + 0.20 * intervention_effect, 0.0, 1.0))
 
         self._obs = EnvObservation(
             step=self._step,
@@ -245,7 +302,13 @@ class ToyRegulatoryMarketEnv(RegulatoryEnvironment):
             volatility=next_vol,
             panic_level=next_panic,
             agent_count=self.agent_count,
-            extras={"control_gain": control_gain, "distance": distance},
+            extras={
+                "control_gain": control_gain,
+                "distance": distance,
+                "liquidity_shortage": liquidity_shortage,
+                "intervention_cost": intervention_cost,
+                "welfare_confidence": welfare_confidence,
+            },
         )
 
         reward = self.reward_fn(self._obs, prev_obs=prev_obs)
@@ -279,6 +342,7 @@ class CivitasMarketEnvAdapter(RegulatoryEnvironment):
         self.model: Any = None
         self._step = 0
         self._last_obs: Optional[EnvObservation] = None
+        self._last_action: RegulatoryAction = RegulatoryAction(0.0005, 0, 0, 0.0)
 
     def reset(self, seed: Optional[int] = None) -> EnvObservation:
         self.model = self.model_factory()
@@ -287,6 +351,7 @@ class CivitasMarketEnvAdapter(RegulatoryEnvironment):
         return self._last_obs
 
     def step(self, action: RegulatoryAction) -> Tuple[EnvObservation, float, bool, Dict[str, Any]]:
+        self._last_action = action
         self._apply_action(action)
         self._advance_model_one_step()
         self._step += 1
@@ -322,12 +387,29 @@ class CivitasMarketEnvAdapter(RegulatoryEnvironment):
             policy = getattr(market, "policy", None)
             if policy is not None:
                 if hasattr(policy, "liquidity_injection"):
-                    policy.liquidity_injection = float(getattr(policy, "liquidity_injection", 0.0) + action.reserve_cut_bps * 1_000_000.0)
+                    policy.liquidity_injection = float(
+                        getattr(policy, "liquidity_injection", 0.0)
+                        + action.reserve_cut_bps * 1_000_000.0
+                        + max(0.0, action.stabilization_capital) * 5_000_000.0
+                    )
                 if hasattr(policy, "risk_free_rate"):
                     policy.risk_free_rate = float(max(0.0, getattr(policy, "risk_free_rate", 0.02) - action.policy_rate_cut_bps / 10_000.0))
 
             if hasattr(self.model, "panic_level"):
-                self.model.panic_level = float(np.clip(self.model.panic_level - 0.25 * action.rumor_refute_strength, 0.0, 1.0))
+                self.model.panic_level = float(
+                    np.clip(
+                        self.model.panic_level
+                        - 0.25 * action.rumor_refute_strength
+                        - 0.20 * max(0.0, action.stabilization_capital),
+                        0.0,
+                        1.0,
+                    )
+                )
+            if action.halt_enabled:
+                regulatory_module = getattr(self.model, "regulatory_module", None)
+                cb = getattr(regulatory_module, "circuit_breaker", None) if regulatory_module is not None else None
+                if cb is not None and hasattr(cb, "is_halted"):
+                    cb.is_halted = True
         except Exception:
             # 顶层框架保持容错，避免某个字段不存在导致训练中断。
             return
@@ -370,6 +452,18 @@ class CivitasMarketEnvAdapter(RegulatoryEnvironment):
 
         panic_level = float(getattr(self.model, "panic_level", 0.0))
         macro_stability = float(np.clip(1.0 - (12.0 * volatility + 0.6 * crash_loss_rate + 0.35 * panic_level), 0.0, 1.0))
+        liquidity_shortage = float(np.clip(0.60 * panic_level + 0.35 * volatility - 0.25 * max(0.0, self._last_action.stabilization_capital), 0.0, 1.0))
+        intervention_cost = float(
+            np.clip(
+                abs(self._last_action.stamp_tax_rate - 0.0005) * 120.0
+                + abs(self._last_action.reserve_cut_bps) / 120.0
+                + abs(self._last_action.policy_rate_cut_bps) / 80.0
+                + max(0.0, self._last_action.stabilization_capital),
+                0.0,
+                2.5,
+            )
+        )
+        welfare_confidence = float(np.clip(1.0 - 0.55 * panic_level - 0.25 * volatility + 0.20 * max(0.0, self._last_action.stabilization_capital), 0.0, 1.0))
 
         return EnvObservation(
             step=step,
@@ -378,7 +472,12 @@ class CivitasMarketEnvAdapter(RegulatoryEnvironment):
             volatility=float(np.clip(volatility, 0.0, 1.0)),
             panic_level=float(np.clip(panic_level, 0.0, 1.0)),
             agent_count=int(len(getattr(self.model, "agents", []))),
-            extras={"price_len": len(price_history)},
+            extras={
+                "price_len": len(price_history),
+                "liquidity_shortage": liquidity_shortage,
+                "intervention_cost": intervention_cost,
+                "welfare_confidence": welfare_confidence,
+            },
         )
 
 
@@ -404,6 +503,7 @@ class SimulationControllerEnvAdapter(RegulatoryEnvironment):
         self.controller: Any = None
         self._step = 0
         self._last_obs: Optional[EnvObservation] = None
+        self._last_action: RegulatoryAction = RegulatoryAction(0.0005, 0, 0, 0.0)
 
     def reset(self, seed: Optional[int] = None) -> EnvObservation:
         self.controller = self.controller_factory()
@@ -412,6 +512,7 @@ class SimulationControllerEnvAdapter(RegulatoryEnvironment):
         return self._last_obs
 
     def step(self, action: RegulatoryAction) -> Tuple[EnvObservation, float, bool, Dict[str, Any]]:
+        self._last_action = action
         self._apply_action(action)
         self._run_controller_tick()
         self._step += 1
@@ -437,16 +538,34 @@ class SimulationControllerEnvAdapter(RegulatoryEnvironment):
             policy = getattr(market, "policy", None)
             if policy is not None:
                 if hasattr(policy, "liquidity_injection"):
-                    policy.liquidity_injection = float(getattr(policy, "liquidity_injection", 0.0) + action.reserve_cut_bps * 1_000_000.0)
+                    policy.liquidity_injection = float(
+                        getattr(policy, "liquidity_injection", 0.0)
+                        + action.reserve_cut_bps * 1_000_000.0
+                        + max(0.0, action.stabilization_capital) * 5_000_000.0
+                    )
                 if hasattr(policy, "risk_free_rate"):
                     policy.risk_free_rate = float(max(0.0, getattr(policy, "risk_free_rate", 0.02) - action.policy_rate_cut_bps / 10_000.0))
 
             if hasattr(market, "panic_level"):
-                market.panic_level = float(np.clip(market.panic_level - 0.25 * action.rumor_refute_strength, 0.0, 1.0))
+                market.panic_level = float(
+                    np.clip(
+                        market.panic_level
+                        - 0.25 * action.rumor_refute_strength
+                        - 0.20 * max(0.0, action.stabilization_capital),
+                        0.0,
+                        1.0,
+                    )
+                )
+            if action.halt_enabled:
+                regulatory_module = getattr(market, "regulatory_module", None)
+                cb = getattr(regulatory_module, "circuit_breaker", None) if regulatory_module is not None else None
+                if cb is not None and hasattr(cb, "is_halted"):
+                    cb.is_halted = True
             if hasattr(market, "current_news"):
                 market.current_news = (
                     f"[RegulatorRefute] 辟谣强度={action.rumor_refute_strength:.2f}，"
-                    f"税率={action.stamp_tax_rate:.4%}，降准={action.reserve_cut_bps}bps，降息={action.policy_rate_cut_bps}bps。"
+                    f"税率={action.stamp_tax_rate:.4%}，降准={action.reserve_cut_bps}bps，降息={action.policy_rate_cut_bps}bps，"
+                    f"稳定资金={action.stabilization_capital:.2f}。"
                 )
         except Exception:
             return
@@ -493,6 +612,18 @@ class SimulationControllerEnvAdapter(RegulatoryEnvironment):
 
         panic_level = float(getattr(market, "panic_level", 0.0))
         macro_stability = float(np.clip(1.0 - (12.0 * volatility + 0.6 * crash_loss_rate + 0.35 * panic_level), 0.0, 1.0))
+        liquidity_shortage = float(np.clip(0.60 * panic_level + 0.35 * volatility - 0.25 * max(0.0, self._last_action.stabilization_capital), 0.0, 1.0))
+        intervention_cost = float(
+            np.clip(
+                abs(self._last_action.stamp_tax_rate - 0.0005) * 120.0
+                + abs(self._last_action.reserve_cut_bps) / 120.0
+                + abs(self._last_action.policy_rate_cut_bps) / 80.0
+                + max(0.0, self._last_action.stabilization_capital),
+                0.0,
+                2.5,
+            )
+        )
+        welfare_confidence = float(np.clip(1.0 - 0.55 * panic_level - 0.25 * volatility + 0.20 * max(0.0, self._last_action.stabilization_capital), 0.0, 1.0))
 
         return EnvObservation(
             step=step,
@@ -501,7 +632,13 @@ class SimulationControllerEnvAdapter(RegulatoryEnvironment):
             volatility=float(np.clip(volatility, 0.0, 1.0)),
             panic_level=float(np.clip(panic_level, 0.0, 1.0)),
             agent_count=int(len(getattr(model, "agents", []))) if model is not None else 0,
-            extras={"price_len": len(price_history), "controller_mode": str(getattr(self.controller, "mode", "UNKNOWN"))},
+            extras={
+                "price_len": len(price_history),
+                "controller_mode": str(getattr(self.controller, "mode", "UNKNOWN")),
+                "liquidity_shortage": liquidity_shortage,
+                "intervention_cost": intervention_cost,
+                "welfare_confidence": welfare_confidence,
+            },
         )
 
 
@@ -562,21 +699,41 @@ class RegulatorAgent:
         reserve_cut_candidates = [0, 25, 50]
         rate_cut_candidates = [0, 10, 25]
         rumor_refute_candidates = [0.0, 0.4, 0.7, 1.0]
+        stabilization_capital_candidates = [0.0, 0.3, 0.6]
+        stabilization_timing_candidates = [0, 3, 6]
+        halt_candidates = [False, True]
 
         actions: List[RegulatoryAction] = []
         for tax in stamp_tax_candidates:
             for rrr in reserve_cut_candidates:
                 for rate in rate_cut_candidates:
                     for rumor in rumor_refute_candidates:
-                        actions.append(
-                            RegulatoryAction(
-                                stamp_tax_rate=float(tax),
-                                reserve_cut_bps=int(rrr),
-                                policy_rate_cut_bps=int(rate),
-                                rumor_refute_strength=float(rumor),
-                            )
-                        )
+                        for capital in stabilization_capital_candidates:
+                            for timing in stabilization_timing_candidates:
+                                for halt in halt_candidates:
+                                    actions.append(
+                                        RegulatoryAction(
+                                            stamp_tax_rate=float(tax),
+                                            reserve_cut_bps=int(rrr),
+                                            policy_rate_cut_bps=int(rate),
+                                            rumor_refute_strength=float(rumor),
+                                            stabilization_capital=float(capital),
+                                            stabilization_timing=int(timing),
+                                            halt_enabled=bool(halt),
+                                        )
+                                    )
         return actions
+
+    @staticmethod
+    def build_compact_action_space() -> List[RegulatoryAction]:
+        """Smaller action set for quick A/B and Pareto evaluation."""
+        return [
+            RegulatoryAction(0.0005, 0, 0, 0.0, 0.0, 0, False),
+            RegulatoryAction(0.0003, 25, 10, 0.7, 0.3, 2, False),
+            RegulatoryAction(0.0003, 50, 25, 1.0, 0.6, 1, False),
+            RegulatoryAction(0.0010, 0, 0, 0.2, 0.0, 0, True),
+            RegulatoryAction(0.0008, 0, 0, 0.4, 0.2, 4, False),
+        ]
 
     @staticmethod
     def discretize_state(obs: EnvObservation) -> Tuple[int, int, int, int]:
@@ -725,6 +882,23 @@ def run_controller_regulatory_optimization(
     return agent.train(env=env, episodes=episodes, max_steps_per_episode=max_steps_per_episode)
 
 
+def run_real_regulatory_optimization(
+    *,
+    env_factory: Callable[[], RegulatoryEnvironment],
+    episodes: int = 300,
+    max_steps_per_episode: int = 48,
+    seed: int = 42,
+) -> TrainingSummary:
+    """Real-simulation-first optimization entrypoint (toy env remains fallback elsewhere)."""
+    agent = RegulatorAgent(action_space=RegulatorAgent.build_compact_action_space(), seed=int(seed))
+    env = env_factory()
+    return agent.train(
+        env=env,
+        episodes=int(episodes),
+        max_steps_per_episode=int(max_steps_per_episode),
+    )
+
+
 def training_summary_to_dict(summary: TrainingSummary) -> Dict[str, Any]:
     """
     将训练结果转换为可 JSON 序列化结构。
@@ -744,6 +918,195 @@ def training_summary_to_dict(summary: TrainingSummary) -> Dict[str, Any]:
             for action, score in summary.top_actions
         ],
         "q_states": int(summary.q_states),
+    }
+
+
+def _action_signature(action: RegulatoryAction) -> str:
+    return hashlib.sha256(json.dumps(action.to_dict(), sort_keys=True).encode("utf-8")).hexdigest()[:12]
+
+
+def _evaluate_action_bundle(
+    *,
+    env_factory: Callable[[], RegulatoryEnvironment],
+    action: RegulatoryAction,
+    max_steps_per_episode: int,
+    seed: int,
+) -> Dict[str, Any]:
+    env = env_factory()
+    obs = env.reset(seed=seed)
+    total_reward = 0.0
+    metrics_trace: List[Dict[str, float]] = []
+    done = False
+    for _ in range(max_steps_per_episode):
+        obs, reward, done, _info = env.step(action)
+        total_reward += float(reward)
+        liquidity_shortage = float(obs.extras.get("liquidity_shortage", 0.0)) if obs.extras else 0.0
+        intervention_cost = float(obs.extras.get("intervention_cost", 0.0)) if obs.extras else 0.0
+        welfare_confidence = float(obs.extras.get("welfare_confidence", 1.0 - obs.panic_level)) if obs.extras else float(1.0 - obs.panic_level)
+        metrics_trace.append(
+            {
+                "macro_stability": float(obs.macro_stability),
+                "crash_risk": float(obs.crash_loss_rate),
+                "volatility": float(obs.volatility),
+                "liquidity_shortage": liquidity_shortage,
+                "liquidity": float(np.clip(1.0 - liquidity_shortage, 0.0, 1.0)),
+                "intervention_cost": intervention_cost,
+                "welfare_confidence": welfare_confidence,
+            }
+        )
+        if done:
+            break
+    frame = np.array(
+        [
+            [
+                row["macro_stability"],
+                row["crash_risk"],
+                row["volatility"],
+                row["liquidity"],
+                row["intervention_cost"],
+                row["welfare_confidence"],
+            ]
+            for row in metrics_trace
+        ],
+        dtype=float,
+    )
+    if frame.size == 0:
+        frame = np.zeros((1, 6), dtype=float)
+    return {
+        "action": action.to_dict(),
+        "action_description": action.describe(),
+        "action_signature": _action_signature(action),
+        "avg_reward": float(total_reward / max(1, len(metrics_trace))),
+        "episode_reward": float(total_reward),
+        "macro_stability": float(np.mean(frame[:, 0])),
+        "crash_risk": float(np.mean(frame[:, 1])),
+        "volatility": float(np.mean(frame[:, 2])),
+        "liquidity": float(np.mean(frame[:, 3])),
+        "intervention_cost": float(np.mean(frame[:, 4])),
+        "welfare_confidence": float(np.mean(frame[:, 5])),
+        "steps": int(len(metrics_trace)),
+        "terminated": bool(done),
+    }
+
+
+def _pareto_frontier(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    frontier: List[Dict[str, Any]] = []
+    for row in rows:
+        dominated = False
+        for other in rows:
+            if other is row:
+                continue
+            better_or_equal = (
+                float(other.get("macro_stability", 0.0)) >= float(row.get("macro_stability", 0.0))
+                and float(other.get("liquidity", 0.0)) >= float(row.get("liquidity", 0.0))
+                and float(other.get("intervention_cost", 0.0)) <= float(row.get("intervention_cost", 0.0))
+            )
+            strictly_better = (
+                float(other.get("macro_stability", 0.0)) > float(row.get("macro_stability", 0.0))
+                or float(other.get("liquidity", 0.0)) > float(row.get("liquidity", 0.0))
+                or float(other.get("intervention_cost", 0.0)) < float(row.get("intervention_cost", 0.0))
+            )
+            if better_or_equal and strictly_better:
+                dominated = True
+                break
+        if not dominated:
+            frontier.append(row)
+    frontier.sort(key=lambda x: (float(x.get("intervention_cost", 0.0)), -float(x.get("macro_stability", 0.0)), -float(x.get("liquidity", 0.0))))
+    return frontier
+
+
+def run_regulatory_closed_loop(
+    *,
+    episodes: int = 300,
+    max_steps_per_episode: int = 48,
+    seed: int = 42,
+    top_k: int = 5,
+    use_toy_env: bool = True,
+    env: Optional[RegulatoryEnvironment] = None,
+    env_factory: Optional[Callable[[], RegulatoryEnvironment]] = None,
+) -> Dict[str, Any]:
+    """
+    Run regulator optimization in a simulation loop and output:
+    - training summary
+    - counterfactual A/B bundles
+    - Pareto frontier (stability vs liquidity vs cost)
+    """
+    if env_factory is None:
+        if env is not None:
+            env_factory = lambda: env
+        elif use_toy_env:
+            env_factory = lambda: ToyRegulatoryMarketEnv(episode_steps=max_steps_per_episode)
+        else:
+            raise ValueError("use_toy_env=False 时必须提供 env 或 env_factory。")
+
+    agent = RegulatorAgent(action_space=RegulatorAgent.build_compact_action_space(), seed=int(seed))
+    summary = agent.train(
+        env=env_factory(),
+        episodes=int(episodes),
+        max_steps_per_episode=int(max_steps_per_episode),
+    )
+    summary_dict = training_summary_to_dict(summary)
+
+    baseline = RegulatoryAction(0.0005, 0, 0, 0.0, 0.0, 0, False)
+    evaluated: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for idx, action in enumerate([baseline, *[x[0] for x in summary.top_actions[: max(1, int(top_k))]]]):
+        sig = _action_signature(action)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        evaluated.append(
+            _evaluate_action_bundle(
+                env_factory=env_factory,
+                action=action,
+                max_steps_per_episode=int(max_steps_per_episode),
+                seed=int(seed + idx),
+            )
+        )
+
+    baseline_row = evaluated[0] if evaluated else {}
+    candidates = evaluated[1:] if len(evaluated) > 1 else []
+    ab_rows: List[Dict[str, Any]] = []
+    for row in candidates:
+        ab_rows.append(
+            {
+                "action": row["action"],
+                "action_description": row["action_description"],
+                "macro_stability_delta": float(row["macro_stability"] - float(baseline_row.get("macro_stability", 0.0))),
+                "liquidity_delta": float(row["liquidity"] - float(baseline_row.get("liquidity", 0.0))),
+                "cost_delta": float(row["intervention_cost"] - float(baseline_row.get("intervention_cost", 0.0))),
+                "reward_delta": float(row["avg_reward"] - float(baseline_row.get("avg_reward", 0.0))),
+            }
+        )
+
+    pareto = _pareto_frontier(candidates if candidates else evaluated)
+    reproducibility = {
+        "seed": int(seed),
+        "episodes": int(episodes),
+        "max_steps_per_episode": int(max_steps_per_episode),
+        "config_hash": hashlib.sha256(
+            json.dumps(
+                {
+                    "seed": int(seed),
+                    "episodes": int(episodes),
+                    "max_steps_per_episode": int(max_steps_per_episode),
+                    "top_k": int(top_k),
+                    "action_space": [a.to_dict() for a in agent.action_space],
+                },
+                sort_keys=True,
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest(),
+    }
+    return {
+        "training_summary": summary_dict,
+        "counterfactual_ab": {
+            "baseline": baseline_row,
+            "candidates": candidates,
+            "deltas": ab_rows,
+        },
+        "pareto_frontier": pareto,
+        "reproducibility": reproducibility,
     }
 
 

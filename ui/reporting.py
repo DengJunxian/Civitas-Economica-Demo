@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from docx import Document
 from docx.enum.section import WD_SECTION
@@ -41,6 +42,7 @@ def official_report_meta(report_type: str, title: str) -> Dict[str, str]:
     prefix = {
         "policy_lab": "CIVITAS-POL",
         "history_replay": "CIVITAS-HIS",
+        "realism_report": "CIVITAS-REAL",
     }.get(report_type, "CIVITAS-RPT")
     recipient = {
         "policy_lab": "政策研究会商组、相关业务部门",
@@ -423,4 +425,197 @@ def write_report_artifacts(
         "json_text": json_text,
         "docx_bytes": docx_bytes,
         "pdf_bytes": pdf_bytes,
+    }
+
+
+def _stable_json_text(payload: Mapping[str, Any]) -> str:
+    return json.dumps(serializable_payload(dict(payload)), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def stable_payload_hash(payload: Mapping[str, Any]) -> str:
+    return hashlib.sha256(_stable_json_text(payload).encode("utf-8")).hexdigest()
+
+
+def _format_value(value: Any) -> str:
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    if isinstance(value, float):
+        return f"{value:.6f}"
+    return str(value)
+
+
+def _markdown_table(section: Mapping[str, Any], *, skip: Tuple[str, ...] = ("enabled",)) -> str:
+    rows = []
+    for key, value in section.items():
+        if key in skip:
+            continue
+        rows.append((key, _format_value(value)))
+    if not rows:
+        return "_No metrics available._"
+    lines = ["| Metric | Value |", "| --- | --- |"]
+    lines.extend([f"| {key} | {value} |" for key, value in rows])
+    return "\n".join(lines)
+
+
+def render_realism_report_markdown(payload: Mapping[str, Any]) -> str:
+    title = str(payload.get("title", "Stylized Facts Realism Report"))
+    meta = payload.get("report_meta") or official_report_meta("realism_report", title)
+    path_fit = payload.get("path_fit", {})
+    micro = payload.get("microstructure_fit", {})
+    behavior = payload.get("behavioral_fit", {})
+    repro = payload.get("reproducibility", {})
+    snapshot = payload.get("snapshot_info", {})
+    charts = payload.get("charts", [])
+
+    lines = [
+        f"# {meta['title']}",
+        "",
+        f"- Report No: {meta['report_no']}",
+        f"- Generated At: {meta['generated_at']}",
+        f"- Seed: {repro.get('seed', payload.get('seed', 0))}",
+        f"- Config Hash: {repro.get('config_hash', payload.get('config_hash', ''))}",
+        f"- Feature Flag: {payload.get('feature_flag', False)}",
+        "",
+        "## Snapshot",
+        "```json",
+        json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True),
+        "```",
+        "",
+        "## Path Fit",
+        _markdown_table(path_fit),
+        "",
+        "## Microstructure Fit",
+        _markdown_table(micro),
+        "",
+        "## Behavioral Fit",
+        _markdown_table(behavior),
+        "",
+        "## Charts",
+    ]
+    if charts:
+        for chart in charts:
+            lines.append(f"- {chart.get('name', 'chart')}: {chart.get('kind', 'unknown')}")
+    else:
+        lines.append("- None")
+    lines.extend(
+        [
+            "",
+            "## Reproducibility",
+            "```json",
+            json.dumps(repro, ensure_ascii=False, indent=2, sort_keys=True),
+            "```",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def write_realism_report_artifacts(
+    *,
+    root_dir: Path,
+    title: str,
+    payload: Dict[str, Any],
+    feature_flag: bool = False,
+) -> Dict[str, Any]:
+    clean_payload = serializable_payload(payload)
+    feature_flags = dict(clean_payload.get("feature_flags") or {})
+    feature_flags["stylized_facts_v2"] = bool(feature_flag or clean_payload.get("feature_flag", False))
+    clean_payload["feature_flags"] = feature_flags
+    clean_payload["feature_flag"] = feature_flags["stylized_facts_v2"]
+    clean_payload.setdefault("title", title)
+    clean_payload["report_meta"] = clean_payload.get("report_meta") or official_report_meta("realism_report", title)
+    clean_payload["config_hash"] = clean_payload.get("config_hash") or stable_payload_hash(
+        {
+            "title": title,
+            "seed": clean_payload.get("reproducibility", {}).get("seed", 0),
+            "feature_flag": clean_payload["feature_flag"],
+            "snapshot_info": clean_payload.get("snapshot_info", {}),
+        }
+    )
+
+    markdown_text = render_realism_report_markdown(clean_payload)
+    bundle = write_report_artifacts(
+        root_dir=root_dir,
+        report_type="realism_report",
+        title=title,
+        markdown_text=markdown_text,
+        payload=clean_payload,
+    )
+
+    charts_path = bundle["markdown_path"].with_name(f"{bundle['stem']}_charts.json")
+    charts_text = json.dumps(clean_payload.get("charts", []), ensure_ascii=False, indent=2, sort_keys=True)
+    charts_path.write_text(charts_text, encoding="utf-8")
+    bundle["charts_path"] = charts_path
+    bundle["charts_text"] = charts_text
+    bundle["feature_flags"] = feature_flags
+    return bundle
+
+
+def export_defense_bundle(
+    *,
+    root_dir: Path,
+    bundle_name: str,
+    design_chapter_markdown: str,
+    realism_payload: Dict[str, Any],
+    policy_ab_markdown: str,
+    architecture_graph: Dict[str, Any],
+    causal_chain_graph: Dict[str, Any],
+    defense_outline_markdown: str,
+    feature_flags: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Export one-click defense materials package:
+    - design chapter draft
+    - realism report
+    - policy A/B report
+    - architecture / causal chain graph data
+    - defense speech outline
+    """
+    root_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    safe_name = safe_slug(bundle_name, fallback="defense_bundle")
+    bundle_root = root_dir / f"{safe_name}_{stamp}"
+    bundle_root.mkdir(parents=True, exist_ok=True)
+
+    design_path = bundle_root / "design_chapter_draft.md"
+    policy_ab_path = bundle_root / "policy_ab_report.md"
+    architecture_path = bundle_root / "architecture_graph.json"
+    causal_chain_path = bundle_root / "causal_chain_graph.json"
+    outline_path = bundle_root / "defense_outline.md"
+    manifest_path = bundle_root / "bundle_manifest.json"
+
+    design_path.write_text(design_chapter_markdown, encoding="utf-8")
+    policy_ab_path.write_text(policy_ab_markdown, encoding="utf-8")
+    architecture_path.write_text(json.dumps(architecture_graph, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    causal_chain_path.write_text(json.dumps(causal_chain_graph, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    outline_path.write_text(defense_outline_markdown, encoding="utf-8")
+
+    realism_bundle = write_realism_report_artifacts(
+        root_dir=bundle_root,
+        title=str(realism_payload.get("title", "真实性评估报告")),
+        payload=realism_payload,
+        feature_flag=bool((feature_flags or {}).get("stylized_facts_v2", True)),
+    )
+
+    manifest = {
+        "bundle_name": bundle_name,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "feature_flags": dict(feature_flags or {}),
+        "files": {
+            "design_chapter_draft": str(design_path),
+            "realism_markdown": str(realism_bundle["markdown_path"]),
+            "realism_json": str(realism_bundle["json_path"]),
+            "realism_docx": str(realism_bundle["docx_path"]),
+            "realism_pdf": str(realism_bundle["pdf_path"]),
+            "policy_ab_report": str(policy_ab_path),
+            "architecture_graph": str(architecture_path),
+            "causal_chain_graph": str(causal_chain_path),
+            "defense_outline": str(outline_path),
+        },
+    }
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return {
+        "bundle_root": bundle_root,
+        "manifest": manifest,
+        "manifest_path": manifest_path,
+        "realism_bundle": realism_bundle,
     }

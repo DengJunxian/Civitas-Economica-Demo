@@ -26,6 +26,7 @@ from ui.behavioral_diagnostics import render_behavioral_diagnostics
 from ui.demo_wind_tunnel import render_demo_tab
 from ui.history_replay import render_history_replay
 from ui.policy_lab import render_policy_lab
+from ui.regulator_optimization import REGULATOR_OPTIMIZATION_PAGE_FLAG, render_regulator_optimization
 from ui import dashboard as dashboard_ui
 
 
@@ -37,21 +38,52 @@ st.set_page_config(
 )
 
 
-ENTRY_POINTS = ["系统说明", "政策试验台", "历史政策回放", "高级分析"]
+ENTRY_POINTS = [
+    "政策试验台",
+    "历史因子回测",
+    "历史Agent回放",
+    "真实性报告",
+    "政策A/B推演",
+    "监管优化",
+    "系统说明",
+]
+ENTRY_ALIASES = {
+    "历史政策回放": "历史因子回测",
+    "高级分析": "真实性报告",
+}
 ENTRY_DESCRIPTIONS = {
     "政策试验台": "输入新政策，观察市场、风险与情绪如何联动变化。",
-    "历史政策回放": "选取真实历史区间，把仿真走势与真实市场放在一起比较。",
-    "高级分析": "查看 AI 证据流、行为金融诊断、答辩演示与研究参数。",
+    "历史因子回测": "保留传统因子/组合回测能力，用于基准对照。",
+    "历史Agent回放": "在历史窗口重放 agent 决策与撮合成交，并输出 simulated OHLCV。",
+    "真实性报告": "查看路径拟合、微观结构拟合、行为模式拟合及可解释差异。",
+    "政策A/B推演": "同一政策在不同干预方案下做对照实验，支持答辩展示。",
+    "监管优化": "面向监管目标做动作搜索，输出稳市场-流动性-成本权衡。",
     "系统说明": "快速了解架构、数据流与工程实现边界。",
 }
 ENTRY_PURPOSE = {
     "政策试验台": "输入政策并运行多智能体仿真",
-    "历史政策回放": "验证政策机制是否像真实市场",
-    "高级分析": "专家追问与研究调参",
+    "历史因子回测": "因子与组合回测对照",
+    "历史Agent回放": "真实成交驱动的历史重放",
+    "真实性报告": "解释哪里像真、哪里不像真",
+    "政策A/B推演": "政策组合对照与机制解释",
+    "监管优化": "监管动作优化与权衡分析",
     "系统说明": "了解系统如何工作",
 }
 THEME_PATH = Path("theme") / "competition_dark.css"
 MATERIALS_ROOT = Path("outputs") / "competition_materials"
+
+
+def _normalize_entry(entry: str) -> str:
+    key = str(entry or "")
+    return ENTRY_ALIASES.get(key, key)
+
+
+def _feature_flag_enabled(flag_name: str, *, default: bool = False) -> bool:
+    flags = st.session_state.get("feature_flags", {})
+    if isinstance(flags, MutableMapping):
+        if flag_name in flags:
+            return bool(flags[flag_name])
+    return bool(default)
 
 
 def _load_theme() -> None:
@@ -94,6 +126,9 @@ def _init_state() -> None:
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+    st.session_state.entry = _normalize_entry(str(st.session_state.get("entry", "系统说明")))
+    if st.session_state.entry not in ENTRY_POINTS:
+        st.session_state.entry = "系统说明"
 
 
 def _render_top_entry_selector() -> None:
@@ -284,7 +319,7 @@ def _render_sidebar_global() -> None:
         st.markdown("---")
         st.caption("默认先做政策实验或历史回放。需要专家级细节时，再进入“高级分析”。")
 
-        if st.session_state.entry == "高级分析":
+        if st.session_state.entry in {"真实性报告", "监管优化"}:
             scenarios = list_competition_scenarios()
             if scenarios:
                 if st.session_state.demo_scenario_name not in scenarios:
@@ -443,9 +478,26 @@ def main() -> None:
     if entry == "政策试验台":
         st.session_state.runtime_mode = DEMO_MODE
         render_policy_lab()
-    elif entry == "历史政策回放":
+    elif entry == "历史因子回测":
         st.session_state.runtime_mode = LIVE_MODE
+        st.session_state["history_replay_entry_mode"] = "factor"
         render_history_replay()
+    elif entry == "历史Agent回放":
+        st.session_state.runtime_mode = LIVE_MODE
+        st.session_state["history_replay_entry_mode"] = "agent"
+        render_history_replay()
+    elif entry == "真实性报告":
+        st.session_state.runtime_mode = LIVE_MODE
+        render_behavioral_diagnostics()
+    elif entry == "政策A/B推演":
+        st.session_state.runtime_mode = DEMO_MODE
+        render_policy_lab()
+    elif entry == "监管优化":
+        st.session_state.runtime_mode = LIVE_MODE
+        if _feature_flag_enabled(REGULATOR_OPTIMIZATION_PAGE_FLAG, default=True):
+            render_regulator_optimization()
+        else:
+            render_backtest_panel(ctrl=st.session_state.get("controller"))
     elif entry == "高级分析":
         _render_advanced_analysis()
     else:

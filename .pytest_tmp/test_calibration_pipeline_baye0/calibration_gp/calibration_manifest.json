@@ -1,0 +1,98 @@
+{
+  "artifacts": {
+    "best_config": "C:\\Users\\Deng Junxian\\Desktop\\Civitas_new\\.pytest_tmp\\test_calibration_pipeline_baye0\\calibration_gp\\best_config.json",
+    "holdout_report": "C:\\Users\\Deng Junxian\\Desktop\\Civitas_new\\.pytest_tmp\\test_calibration_pipeline_baye0\\calibration_gp\\holdout_report.json",
+    "sensitivity": "C:\\Users\\Deng Junxian\\Desktop\\Civitas_new\\.pytest_tmp\\test_calibration_pipeline_baye0\\calibration_gp\\sensitivity.csv"
+  },
+  "config": {
+    "base_config": {
+      "allow_short": false,
+      "benchmark_symbol": "sh000001",
+      "civitas_factor_weight": 0.5,
+      "commission_rate": 0.00025,
+      "end_date": null,
+      "export_qlib_bundle": false,
+      "feature_flags": {},
+      "initial_cash": 100000.0,
+      "lookback": 20,
+      "market_impact": 0.05,
+      "max_position": 1.0,
+      "period_days": 0,
+      "policy_shock": 0.0,
+      "qlib_bundle_path": "outputs/backtest_qlib_bundle",
+      "random_seed": 7,
+      "rebalance_frequency": 5,
+      "sentiment_weight": 0.5,
+      "signal_threshold": 0.05,
+      "slippage_bps": 5.0,
+      "stamp_duty_rate": 0.0005,
+      "start_date": null,
+      "strategy_name": "portfolio_system",
+      "symbol": "sh000001",
+      "tick_per_day": 4
+    },
+    "spec": {
+      "bayes_init": 3,
+      "bayes_iterations": 4,
+      "bayes_patience": 4,
+      "dataset_snapshot_id": "snap-calib-gp",
+      "evo_elite": 6,
+      "evo_generations": 40,
+      "evo_population": 24,
+      "evo_restarts": 2,
+      "evo_sigma0": 0.18,
+      "feature_flags": {
+        "calibration_gp_bo_v1": true
+      },
+      "gp_candidate_pool": 256,
+      "gp_exploration": 0.01,
+      "gp_length_scale": 0.35,
+      "method": "bayesian",
+      "objective_weights": {
+        "path_fit": 0.35,
+        "stylized_facts_fit": 0.3,
+        "turnover_fit": 0.15,
+        "volatility_fit": 0.2
+      },
+      "output_dir": "C:\\Users\\Deng Junxian\\Desktop\\Civitas_new\\.pytest_tmp\\test_calibration_pipeline_baye0\\calibration_gp",
+      "parameter_space": {
+        "max_position": [
+          0.8,
+          1.0
+        ],
+        "policy_shock": [
+          -0.2,
+          0.2
+        ],
+        "rebalance_frequency": [
+          3,
+          5,
+          10
+        ]
+      },
+      "random_seed": 7,
+      "rolling_window": false,
+      "split_holdout": 0.25,
+      "split_train": 0.5,
+      "split_validation": 0.25
+    }
+  },
+  "config_hash": "07ed011852bed15326f60abace063b66e24ec214483f974c1d110013f06bc341",
+  "dataset_snapshot_id": "snap-calib-gp",
+  "feature_flags": {
+    "calibration_gp_bo_v1": true
+  },
+  "git_commit": "8e787b076dae9495169d238e27bd8fe31e9bdbf6",
+  "module": "calibration_pipeline",
+  "notes": {
+    "split_sizes": {
+      "holdout": 23,
+      "train": 45,
+      "validation": 22
+    }
+  },
+  "parent_run_id": "",
+  "run_id": "calibration_pipeline-20260324T021003+0000-07ed011852be",
+  "seed": 7,
+  "timestamp": "2026-03-24T02:10:03+00:00"
+}

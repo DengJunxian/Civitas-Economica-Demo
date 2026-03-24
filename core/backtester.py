@@ -8,18 +8,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+import hashlib
 import json
 import math
+import random
 
 import numpy as np
 import pandas as pd
 
 from config import GLOBAL_CONFIG
 from core.data.market_data_provider import MarketDataProvider, MarketDataQuery
+from core.experiment_manifest import attach_manifest_to_metadata
 from core.performance import compute_backtest_credibility, compute_performance_metrics
 from core.portfolio import PortfolioConstructionLayer, PortfolioConstraints, PortfolioInput
 
@@ -57,6 +60,8 @@ class BacktestConfig:
     tick_per_day: int = 4
     export_qlib_bundle: bool = False
     qlib_bundle_path: str = "outputs/backtest_qlib_bundle"
+    random_seed: int = 42
+    feature_flags: Dict[str, bool] = field(default_factory=dict)
 
 
 @dataclass
@@ -106,6 +111,7 @@ class BacktestResult:
     simulated_prices: List[float] = field(default_factory=list)
     real_prices: List[float] = field(default_factory=list)
     dates: List[str] = field(default_factory=list)
+    simulated_bars: List[Dict[str, Any]] = field(default_factory=list)
 
     equity_curve: List[float] = field(default_factory=list)
     benchmark_curve: List[float] = field(default_factory=list)
@@ -587,7 +593,90 @@ def build_strategy(config: BacktestConfig) -> BaseStrategy:
     return strategy_cls(config)
 
 
-class HistoricalBacktester:
+def _seed_everything(seed: int) -> None:
+    normalized = int(seed) % (2**32 - 1)
+    random.seed(normalized)
+    np.random.seed(normalized)
+
+
+def _hash_frame(frame: pd.DataFrame) -> str:
+    if frame is None or frame.empty:
+        return "0" * 64
+    payload = pd.util.hash_pandas_object(frame.reset_index(drop=True), index=False).values.tobytes()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _build_snapshot_info(
+    frame: pd.DataFrame,
+    *,
+    symbol: str,
+    benchmark_symbol: str,
+    mode: str,
+) -> Dict[str, Any]:
+    if frame is None or frame.empty:
+        return {
+            "mode": mode,
+            "rows": 0,
+            "start_date": None,
+            "end_date": None,
+            "sha256": "0" * 64,
+            "snapshot_id": f"{mode}-empty",
+            "symbol": symbol,
+            "benchmark_symbol": benchmark_symbol,
+        }
+
+    digest = _hash_frame(frame)
+    dates = pd.to_datetime(frame.get("date", pd.Series(dtype=str)), errors="coerce").dropna()
+    start_date = dates.min().strftime("%Y-%m-%d") if not dates.empty else None
+    end_date = dates.max().strftime("%Y-%m-%d") if not dates.empty else None
+    return {
+        "mode": mode,
+        "rows": int(len(frame)),
+        "start_date": start_date,
+        "end_date": end_date,
+        "sha256": digest,
+        "snapshot_id": f"{mode}-{digest[:12]}",
+        "symbol": symbol,
+        "benchmark_symbol": benchmark_symbol,
+    }
+
+
+def _build_repro_metadata(
+    config: BacktestConfig,
+    frame: pd.DataFrame,
+    *,
+    mode: str,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    config_hash = hashlib.sha256(
+        json.dumps(asdict(config), sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+    ).hexdigest()
+    snapshot = _build_snapshot_info(
+        frame,
+        symbol=config.symbol,
+        benchmark_symbol=config.benchmark_symbol,
+        mode=mode,
+    )
+    metadata = {
+        "replay_mode": mode,
+        "config_hash": config_hash,
+        "random_seed": int(config.random_seed),
+        "feature_flags": dict(config.feature_flags or {}),
+        "data_snapshot": snapshot,
+    }
+    if extra:
+        metadata.update(extra)
+    return attach_manifest_to_metadata(
+        metadata,
+        module=f"backtest_{mode}",
+        seed=int(config.random_seed),
+        dataset_snapshot_id=str(snapshot.get("snapshot_id", "")),
+        feature_flags=dict(config.feature_flags or {}),
+        config=asdict(config),
+    )
+
+
+class FactorBacktestEngine:
     """鍘嗗彶鍥炴祴寮曟搸"""
 
     def __init__(self, config: Optional[BacktestConfig] = None):
@@ -684,6 +773,7 @@ class HistoricalBacktester:
         civitas_factors: Optional[pd.DataFrame] = None,
     ) -> BacktestResult:
         del market_manager
+        _seed_everything(self.config.random_seed)
 
         if self.historical_data.empty:
             if not self.load_data(progress_callback):
@@ -981,6 +1071,14 @@ class HistoricalBacktester:
                 "bt": "strategy templating and pluggable execution stack",
             },
         }
+        result.metadata.update(
+            _build_repro_metadata(
+                self.config,
+                self.historical_data,
+                mode="factor",
+                extra={"simulated_price_source": "equity_curve_scaled"},
+            )
+        )
 
         if self.config.export_qlib_bundle:
             try:
@@ -1055,6 +1153,10 @@ class HistoricalBacktester:
 
     def get_progress(self) -> Tuple[int, int]:
         return self.current_day_index, len(self.historical_data)
+
+
+class HistoricalBacktester(FactorBacktestEngine):
+    """Backward-compatible alias for the factor backtest engine."""
 
 
 class BacktestReportGenerator:

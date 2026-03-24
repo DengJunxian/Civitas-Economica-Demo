@@ -2,6 +2,8 @@
 
 import time
 import random
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Dict, Any, TYPE_CHECKING
 from datetime import datetime, timedelta
@@ -12,10 +14,11 @@ import akshare as ak
 import uuid
 import os
 
-from core.types import Order, Trade, Candle, OrderSide, OrderType, OrderStatus
+from core.types import Order, Trade, Candle, OrderSide, OrderType, OrderStatus, ExecutionPlan
 from core.time_manager import SimulationClock
 from core.policy import PolicyManager
 from core.regulation.risk_control import RiskEngine
+from core.exchange.bar_builder import TradeTapeBarBuilder, TradeTapeEntry
 
 if TYPE_CHECKING:
     from agents.base_agent import MarketSnapshot
@@ -139,6 +142,30 @@ def blend_price_with_backdrop(
     damp = 1.0 + min(3.0, vol / 1_000_000.0) * 0.20
     return float(old_p + (raw - old_p) / damp)
 
+
+def _resolve_bool_flag(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _resolve_feature_flags(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, bool]:
+    flags = {
+        "market_kernel_v1": _resolve_bool_flag(os.getenv("CIVITAS_MARKET_KERNEL_V1"), False),
+    }
+    for key, value in (overrides or {}).items():
+        flags[str(key)] = _resolve_bool_flag(value, flags.get(str(key), False))
+    return flags
+
 # ==========================================
 # PART 3: Matching Engine
 # (From coremarket_engine.py, enhanced for Simulation)
@@ -185,6 +212,86 @@ class MatchingEngine:
         """Update prev_close after market close for next day's limit calculation."""
         self.prev_close = close_price
 
+    def _execution_child_schedule(self, plan: ExecutionPlan) -> List[int]:
+        return plan.resolved_child_schedule(self.last_price)
+
+    def _execution_child_price(self, plan: ExecutionPlan, child_index: int) -> float:
+        reference_price = plan.resolved_reference_price(self.last_price)
+        if plan.order_type == OrderType.MARKET:
+            return float(reference_price)
+
+        slip = max(0.0, float(plan.max_slippage))
+        if plan.order_type == OrderType.POST_ONLY:
+            slip *= 0.5
+
+        if plan.is_buy:
+            factor = 1.0 - slip if plan.order_type == OrderType.POST_ONLY else 1.0 + slip
+        else:
+            factor = 1.0 + slip if plan.order_type == OrderType.POST_ONLY else 1.0 - slip
+
+        if str(plan.slicing_rule).lower() in {"twap", "twap-like", "twap_like"} and plan.time_horizon > 1:
+            step_adjust = 0.01 * child_index
+            factor = factor + step_adjust if plan.is_buy else factor - step_adjust
+
+        return float(round(max(0.01, reference_price * factor), 2))
+
+    def submit_execution_plan(self, plan: ExecutionPlan, liquidity_injection_prob: float = 0.0) -> List[Trade]:
+        """Execute a structured plan by splitting it into child orders."""
+        child_schedule = self._execution_child_schedule(plan)
+        if not child_schedule:
+            return []
+
+        remaining_qty = plan.resolved_qty(self.last_price)
+        if remaining_qty <= 0:
+            return []
+
+        generated_trades: List[Trade] = []
+        for child_index, child_qty in enumerate(child_schedule):
+            if remaining_qty <= 0:
+                break
+
+            current_qty = min(int(child_qty), remaining_qty)
+            if current_qty <= 0:
+                continue
+
+            child_price = self._execution_child_price(plan, child_index)
+            child_order = plan.to_order(
+                price=child_price,
+                quantity=current_qty,
+                timestamp=plan.timestamp + (child_index * 0.001),
+                child_index=child_index,
+                extra_metadata={"child_schedule": list(child_schedule)},
+            )
+            child_trades = self.submit_order(child_order, liquidity_injection_prob)
+            generated_trades.extend(child_trades)
+
+            filled_qty = sum(int(trade.quantity) for trade in child_trades)
+            remaining_qty -= filled_qty if filled_qty > 0 else current_qty
+
+            if (
+                child_order.remaining_qty > 0
+                and str(plan.cancel_replace_policy).lower() in {"cancel-replace", "reprice", "aggressive"}
+                and child_order.order_type in {OrderType.LIMIT, OrderType.POST_ONLY}
+            ):
+                reprice = self._execution_child_price(plan, child_index + 1)
+                replacement_qty = int(child_order.remaining_qty)
+                if replacement_qty > 0:
+                    replacement_order = plan.to_order(
+                        price=reprice,
+                        quantity=replacement_qty,
+                        timestamp=child_order.timestamp + 0.0001,
+                        child_index=child_index,
+                        extra_metadata={
+                            "replacement_for": child_order.order_id,
+                            "replacement_round": 1,
+                        },
+                    )
+                    replacement_trades = self.submit_order(replacement_order, liquidity_injection_prob)
+                    generated_trades.extend(replacement_trades)
+                    remaining_qty -= sum(int(trade.quantity) for trade in replacement_trades)
+
+        return generated_trades
+
     def _check_price_limit(self, price: float) -> bool:
         """
         娑ㄨ穼鍋滄鏌?(Delegated to OrderBook)
@@ -198,7 +305,7 @@ class MatchingEngine:
         lower = self.prev_close * (1 - limit)
         return round(lower, 2) <= round(price, 2) <= round(upper, 2)
 
-    def submit_order(self, order: Order, liquidity_injection_prob: float = 0.0) -> List[Trade]:
+    def submit_order(self, order: Order | ExecutionPlan, liquidity_injection_prob: float = 0.0) -> List[Trade]:
         """
         Submit an order and attempt immediate matching.
         
@@ -209,6 +316,9 @@ class MatchingEngine:
         Returns:
             List[Trade]: Trades generated by this order.
         """
+        if isinstance(order, ExecutionPlan):
+            return self.submit_execution_plan(order, liquidity_injection_prob)
+
         # 1. Price Limit Check
         if not self._check_price_limit(order.price):
             # In a real exchange, this is a Reject. 
@@ -217,7 +327,7 @@ class MatchingEngine:
 
         # 2. National Team Intervention (Liquidity Injection)
         # If it's a sell order and probability triggers, generate a buy order first.
-        if order.side == 'sell' and liquidity_injection_prob > 0:
+        if order.side == OrderSide.SELL and liquidity_injection_prob > 0:
             if random.random() < liquidity_injection_prob:
                 team_order = Order(
                     price=order.price, 
@@ -271,7 +381,7 @@ class MatchingEngine:
                 agent_id=order.agent_id,
                 symbol=self.symbol,
                 side=order.side,
-                order_type=OrderType.LIMIT,
+                order_type=order.order_type,
                 price=order.price,
                 quantity=order.quantity,
                 order_id=lob_id,
@@ -284,7 +394,7 @@ class MatchingEngine:
                 agent_id=order.agent_id,
                 symbol=self.symbol,
                 side=order.side,
-                order_type=OrderType.LIMIT,
+                order_type=order.order_type,
                 price=order.price,
                 quantity=order.quantity,
                 order_id=lob_id,
@@ -321,8 +431,8 @@ class MatchingEngine:
                 taker_id=getattr(t, 'taker_order_id', getattr(t, 'taker_id', order.order_id)),
                 maker_agent_id=t.maker_agent_id,
                 taker_agent_id=t.taker_agent_id,
-                buyer_agent_id=t.taker_agent_id if order.side=='buy' else t.maker_agent_id,
-                seller_agent_id=t.maker_agent_id if order.side=='buy' else t.taker_agent_id,
+                buyer_agent_id=t.taker_agent_id if order.side == OrderSide.BUY else t.maker_agent_id,
+                seller_agent_id=t.maker_agent_id if order.side == OrderSide.BUY else t.taker_agent_id,
                 timestamp=t.timestamp,
                 buyer_fee=t.buyer_fee,
                 seller_fee=t.seller_fee,
@@ -375,8 +485,8 @@ class MatchingEngine:
             return self.prev_close, []
         
         # 鍒嗙涔板崠璁㈠崟
-        buy_orders = [o for o in orders if o.side == 'buy']
-        sell_orders = [o for o in orders if o.side == 'sell']
+        buy_orders = [o for o in orders if o.side == OrderSide.BUY]
+        sell_orders = [o for o in orders if o.side == OrderSide.SELL]
         
         if not buy_orders or not sell_orders:
             return self.prev_close, []
@@ -442,15 +552,19 @@ class MatchingEngine:
                 stamp_rate = GLOBAL_CONFIG.TAX_RATE_STAMP
                 
                 trade = Trade(
-                    trade_id=str(uuid.uuid4()), # Generate new ID to ensure uniqueness for aggregates
+                    trade_id=str(uuid.uuid4()),
                     price=opening_price,
                     quantity=match_qty,
-                    buy_agent_id=buy_order.agent_id,
-                    sell_agent_id=sell_order.agent_id,
+                    maker_id=buy_order.order_id if buy_order.timestamp <= sell_order.timestamp else sell_order.order_id,
+                    taker_id=sell_order.order_id if buy_order.timestamp <= sell_order.timestamp else buy_order.order_id,
+                    maker_agent_id=buy_order.agent_id if buy_order.timestamp <= sell_order.timestamp else sell_order.agent_id,
+                    taker_agent_id=sell_order.agent_id if buy_order.timestamp <= sell_order.timestamp else buy_order.agent_id,
+                    buyer_agent_id=buy_order.agent_id,
+                    seller_agent_id=sell_order.agent_id,
                     timestamp=self.clock.timestamp if self.clock else time.time(),
                     buyer_fee=market_val * comm_rate,
                     seller_fee=market_val * comm_rate,
-                    seller_tax=0.0 # Will be updated by PolicyManager
+                    seller_tax=0.0,
                 )
                 
                 # 搴旂敤鏀跨瓥鏁堟灉锛堝嵃鑺辩◣绛夛級
@@ -739,11 +853,35 @@ class PolicyInterpreter:
 # ==========================================
 
 class MarketDataManager:
-    def __init__(self, api_key_or_router, load_real_data=True, clock: Optional[SimulationClock] = None, regulatory_module: Optional[Any] = None):
+    def __init__(
+        self,
+        api_key_or_router,
+        load_real_data=True,
+        clock: Optional[SimulationClock] = None,
+        regulatory_module: Optional[Any] = None,
+        *,
+        seed: Optional[int] = None,
+        feature_flags: Optional[Dict[str, Any]] = None,
+    ):
         self.policy = PolicyState()
         self.interpreter = PolicyInterpreter(api_key_or_router)
         self.clock = clock
         self.regulatory_module = regulatory_module
+        self.seed = int(seed if seed is not None else os.getenv("CIVITAS_SEED", "42"))
+        self.feature_flags = _resolve_feature_flags(feature_flags)
+        self.config_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "seed": self.seed,
+                    "feature_flags": self.feature_flags,
+                    "load_real_data": bool(load_real_data),
+                    "symbol": "sh000001",
+                },
+                sort_keys=True,
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()
+        self.rng = random.Random(self.seed)
         
         # 鏀跨瓥绠＄悊鍣?(Legacy, keeping for now)
         self.policy_manager = PolicyManager()
@@ -757,11 +895,31 @@ class MarketDataManager:
         # Load Data
         self.history_candles = RealMarketLoader.load_history() if load_real_data else []
         self.sim_candles = []
+        self.trade_tape: List[Any] = []
+        self.replay_metrics: Dict[str, Any] = {}
         
         initial_price = self.history_candles[-1].close if self.history_candles else 3000.0
         
         # Initialize Core Engine
         self.engine = MatchingEngine(prev_close=initial_price, clock=self.clock)
+        self.bar_builder = TradeTapeBarBuilder(
+            seed=self.seed,
+            config_hash=self.config_hash,
+            feature_flags=self.feature_flags,
+            snapshot_info={"initial_price": initial_price, "load_real_data": bool(load_real_data)},
+        )
+        self.kernel = None
+        if self.feature_flags.get("market_kernel_v1", False):
+            from core.exchange.market_kernel import MarketKernel, MarketKernelConfig
+
+            self.kernel = MarketKernel(
+                symbol=self.engine.symbol,
+                prev_close=initial_price,
+                clock=self.clock,
+                matching_engine=self.engine,
+                regulatory_module=self.regulatory_module,
+                config=MarketKernelConfig(seed=self.seed, feature_flags=self.feature_flags),
+            )
         
         # State
         self.current_news = "Waiting for market open"
@@ -786,6 +944,8 @@ class MarketDataManager:
         """Reset simulation state"""
         self.sim_candles = []
         self.csad_history = []
+        self.trade_tape = []
+        self.replay_metrics = {}
         self.panic_level = 0.0
         self.text_factor_state = {
             "dominant_topic": "uncategorized",
@@ -800,6 +960,10 @@ class MarketDataManager:
         # Usually reset to last historical price
         initial_price = self.history_candles[-1].close if self.history_candles else 3000.0
         self.engine = MatchingEngine(prev_close=initial_price, clock=self.clock)
+        if self.kernel is not None:
+            self.kernel.clear()
+            self.kernel.engine = self.engine
+            self.kernel.prev_close = initial_price
 
     def apply_policy(self, text: str):
         params = self.interpreter.interpret(text)
@@ -934,7 +1098,33 @@ class MarketDataManager:
             return []
             
         # 4. Proceed to Matching
-        trades = self.engine.submit_order(order, self.policy.liquidity_injection)
+        if self.kernel is not None:
+            current_ts = self.clock.timestamp if self.clock else time.time()
+            trades = self.kernel.submit_order(
+                order,
+                current_timestamp=current_ts,
+                liquidity_injection_prob=self.policy.liquidity_injection,
+            )
+            self.trade_tape.extend(self.kernel.flush_step_trade_tape())
+        else:
+            trades = self.engine.submit_order(order, self.policy.liquidity_injection)
+            if trades:
+                current_ts = self.clock.timestamp if self.clock else time.time()
+                self.trade_tape.extend(
+                    [
+                        TradeTapeEntry(
+                            trade=t,
+                            tick=self.clock.ticks if self.clock else len(self.trade_tape),
+                            phase="continuous",
+                            event_type="trade",
+                            queue_position=0,
+                            latency_ticks=0,
+                            market_timestamp=current_ts,
+                            metadata={"source": "legacy_submit"},
+                        )
+                        for t in trades
+                    ]
+                )
         
         # 5. 娉ㄥ唽鎴愪氦鍒伴珮棰戠洃鎺у櫒锛圠egacy锛?
         if trades:
@@ -1008,20 +1198,43 @@ class MarketDataManager:
         and prepare the engine for the next step.
         """
         open_p = self.engine.last_price
+        current_ts = self.clock.timestamp if self.clock else time.time()
         
         # 1. Get Date
         new_date_str = ChinaTradingCalendar.get_next_trading_day(last_date_str)
         
         # 2. Get executed trades for this step
         if trades is None:
-            step_trades = self.engine.flush_step_trades()
+            if self.kernel is not None:
+                self.kernel.advance_to(current_ts)
+                step_trades = self.kernel.flush_step_trades()
+                step_trade_tape = self.kernel.flush_step_trade_tape()
+            else:
+                step_trades = self.engine.flush_step_trades()
+                step_trade_tape = []
         else:
-            step_trades = trades
+            step_trades = list(trades)
+            step_trade_tape = []
+        if not step_trade_tape and step_trades:
+            step_trade_tape = [
+                TradeTapeEntry(
+                    trade=t,
+                    tick=step_idx,
+                    phase="continuous",
+                    event_type="trade",
+                    queue_position=0,
+                    latency_ticks=0,
+                    market_timestamp=current_ts,
+                    metadata={"step_idx": step_idx, "source": "legacy_finalize"},
+                )
+                for t in step_trades
+            ]
+        self.trade_tape.extend(step_trade_tape)
         
         # 3. Generate Candle
         if not step_trades:
             # No trades: Simulate random drift based on panic
-            drift = random.normalvariate(0, 0.003)
+            drift = self.rng.normalvariate(0, 0.003)
             text_sentiment = self._safe_float(self.text_factor_state.get("sentiment_score"), 0.0)
             text_shock = self._safe_float(self.text_factor_state.get("policy_shock"), 0.0)
             text_regime = str(self.text_factor_state.get("regime_bias", "neutral"))
@@ -1045,45 +1258,47 @@ class MarketDataManager:
             low_p = min(open_p, close_p)
             vol = 0
             
-            c = Candle(
+            c = self.bar_builder.build_bar(
+                [],
                 symbol=self.engine.symbol,
-                step=step_idx, 
-                timestamp=new_date_str, 
-                open=open_p, 
-                high=high_p, 
-                low=low_p, 
-                close=close_p, 
-                volume=0, 
-                is_simulated=True
+                step=step_idx,
+                timestamp=new_date_str,
+                prev_close=self.engine.prev_close,
+                open_price=open_p,
+                is_simulated=True,
+                extra_metadata={"mode": "drift_fallback", "step_idx": step_idx},
             )
+            c.high = high_p
+            c.low = low_p
+            c.close = close_p
+            c.volume = 0
             self.engine.last_price = close_p
         else:
             # Policy Effect: Update Taxes on Trades
             for t in step_trades:
                 t.seller_tax = self.policy_manager.calculate_total_tax(t)
             
-            # Standard Candle Logic
-            prices = [t.price for t in step_trades]
-            high_p = max(prices)
-            low_p = min(prices)
-            close_p = prices[-1] # Close is the last trade price
-            vol = sum(t.quantity for t in step_trades)
-            
-            c = Candle(
+            c = self.bar_builder.build_bar(
+                step_trade_tape or step_trades,
                 symbol=self.engine.symbol,
-                step=step_idx, 
-                timestamp=new_date_str, 
-                open=prices[0],  # Open is first trade price of the step
-                high=high_p, 
-                low=low_p, 
-                close=close_p, 
-                volume=vol, 
-                is_simulated=True
+                step=step_idx,
+                timestamp=new_date_str,
+                prev_close=self.engine.prev_close,
+                open_price=step_trades[0].price,
+                is_simulated=True,
+                extra_metadata={
+                    "mode": "trade_tape",
+                    "step_idx": step_idx,
+                    "trade_count": len(step_trades),
+                },
             )
+            self.replay_metrics = self.bar_builder.build_replay_metrics(self.trade_tape, self.sim_candles + [c])
 
         # 5. Store Candle & Prepare next day
         self.sim_candles.append(c) # Fix: Append to sim_candles, not self.candles (which is a property)
         self.engine.update_prev_close(c.close) # Set Prev Close for next step's limit check
+        if self.kernel is not None:
+            self.kernel.prev_close = c.close
         
         return c
 

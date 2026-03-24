@@ -1,0 +1,294 @@
+{
+  "feature_flag": true,
+  "seed": 99,
+  "config_hash": "ea889afd3d204eb4a54a541b6325d53a4a6142c0f920378e57da1b8ea256ca87",
+  "snapshot_info": {
+    "real_points": 8,
+    "simulated_points": 8,
+    "timestamp_count": 8,
+    "real_price_min": 100.0,
+    "real_price_max": 104.9,
+    "sim_price_min": 100.0,
+    "sim_price_max": 104.5,
+    "real_volume_sum": 8650.0,
+    "sim_volume_sum": 8650.0,
+    "window_start": "2024-02-01",
+    "window_end": "2024-02-08"
+  },
+  "path_fit": {
+    "enabled": true,
+    "score": 0.9928826195094782,
+    "price_correlation": 0.9989660478535851,
+    "volatility_correlation": 0.9729321759601722,
+    "price_rmse": 0.002738612787525853,
+    "price_mae": 0.0025000000000000022,
+    "drawdown_shape": {
+      "real": {
+        "max_drawdown": 0.004807692307692291,
+        "average_drawdown": 0.004360793316272815,
+        "drawdown_duration": 1.0,
+        "recovery_speed": 0.5,
+        "shape_score": 0.9772975312358874
+      },
+      "simulated": {
+        "max_drawdown": 0.004821600771456103,
+        "average_drawdown": 0.004373508923510239,
+        "drawdown_duration": 1.0,
+        "recovery_speed": 0.5,
+        "shape_score": 0.977286066898646
+      }
+    }
+  },
+  "microstructure_fit": {
+    "enabled": true,
+    "volume_volatility_correlation": {
+      "real": 0.2338932949784659,
+      "simulated": 0.3465855705861067
+    },
+    "order_sign_autocorrelation": -0.39999999999999997,
+    "price_impact_curve": {
+      "slope": -0.00047600175845961996,
+      "correlation": -0.6072693652987343,
+      "bucketed_curve": [
+        {
+          "bucket": 1.0,
+          "signed_volume_mean": -12.0,
+          "future_return_mean": 0.013148353786433581
+        },
+        {
+          "bucket": 2.0,
+          "signed_volume_mean": 10.5,
+          "future_return_mean": 0.010940594059405954
+        },
+        {
+          "bucket": 3.0,
+          "signed_volume_mean": 12.0,
+          "future_return_mean": 0.0024077473089603885
+        },
+        {
+          "bucket": 4.0,
+          "signed_volume_mean": 14.0,
+          "future_return_mean": -0.004807692307692308
+        }
+      ]
+    },
+    "turning_point_f1": 1.0,
+    "score": 0.5424145256609216
+  },
+  "behavioral_fit": {
+    "enabled": true,
+    "return_autocorrelation": {
+      "real": -0.5730540190713918,
+      "simulated": -0.5929513582130299
+    },
+    "abs_return_autocorrelation": {
+      "real": -0.6518793574770432,
+      "simulated": -0.6823634625601316
+    },
+    "volatility_clustering": {
+      "real": -0.6796437620146856,
+      "simulated": -0.6549478321167984
+    },
+    "tail_heaviness_kurtosis": {
+      "real": -1.1528449098121802,
+      "simulated": -1.195696069806602
+    },
+    "csad_herding": {
+      "mean_csad": 0.0010938145211166455,
+      "gamma1": 0.11666666666666634,
+      "gamma2": -8.881784197001252e-15,
+      "herding_detected": false,
+      "strength": 0.0
+    },
+    "direction_accuracy": 1.0,
+    "score": 0.4983841854896711
+  },
+  "charts": [
+    {
+      "name": "price_overlay",
+      "kind": "line",
+      "series": [
+        {
+          "label": "real",
+          "values": [
+            100.0,
+            101.0,
+            102.2,
+            101.8,
+            103.1,
+            104.0,
+            103.5,
+            104.9
+          ]
+        },
+        {
+          "label": "simulated",
+          "values": [
+            100.0,
+            100.8,
+            101.9,
+            101.5,
+            102.9,
+            103.7,
+            103.2,
+            104.5
+          ]
+        }
+      ]
+    },
+    {
+      "name": "return_autocorrelation",
+      "kind": "paired",
+      "series": {
+        "real": -0.5730540190713918,
+        "simulated": -0.5929513582130299,
+        "abs_real": -0.6518793574770432,
+        "abs_simulated": -0.6823634625601316
+      }
+    },
+    {
+      "name": "price_impact_curve",
+      "kind": "structured",
+      "series": {
+        "slope": -0.00047600175845961996,
+        "correlation": -0.6072693652987343,
+        "bucketed_curve": [
+          {
+            "bucket": 1.0,
+            "signed_volume_mean": -12.0,
+            "future_return_mean": 0.013148353786433581
+          },
+          {
+            "bucket": 2.0,
+            "signed_volume_mean": 10.5,
+            "future_return_mean": 0.010940594059405954
+          },
+          {
+            "bucket": 3.0,
+            "signed_volume_mean": 12.0,
+            "future_return_mean": 0.0024077473089603885
+          },
+          {
+            "bucket": 4.0,
+            "signed_volume_mean": 14.0,
+            "future_return_mean": -0.004807692307692308
+          }
+        ]
+      }
+    }
+  ],
+  "credibility_score": 0.6778937768866903,
+  "metrics": {
+    "price_correlation": 0.9989660478535851,
+    "volatility_correlation": 0.9729321759601722,
+    "price_rmse": 0.002738612787525853,
+    "price_mae": 0.0025000000000000022,
+    "credibility_score": 0.6778937768866903,
+    "return_autocorrelation": {
+      "real": -0.5730540190713918,
+      "simulated": -0.5929513582130299
+    },
+    "abs_return_autocorrelation": {
+      "real": -0.6518793574770432,
+      "simulated": -0.6823634625601316
+    },
+    "volatility_clustering": {
+      "real": -0.6796437620146856,
+      "simulated": -0.6549478321167984
+    },
+    "tail_heaviness_kurtosis": {
+      "real": -1.1528449098121802,
+      "simulated": -1.195696069806602
+    },
+    "drawdown_shape": {
+      "real": {
+        "max_drawdown": 0.004807692307692291,
+        "average_drawdown": 0.004360793316272815,
+        "drawdown_duration": 1.0,
+        "recovery_speed": 0.5,
+        "shape_score": 0.9772975312358874
+      },
+      "simulated": {
+        "max_drawdown": 0.004821600771456103,
+        "average_drawdown": 0.004373508923510239,
+        "drawdown_duration": 1.0,
+        "recovery_speed": 0.5,
+        "shape_score": 0.977286066898646
+      }
+    },
+    "volume_volatility_correlation": {
+      "real": 0.2338932949784659,
+      "simulated": 0.3465855705861067
+    },
+    "csad_herding": {
+      "mean_csad": 0.0010938145211166455,
+      "gamma1": 0.11666666666666634,
+      "gamma2": -8.881784197001252e-15,
+      "herding_detected": false,
+      "strength": 0.0
+    },
+    "order_sign_autocorrelation": -0.39999999999999997,
+    "price_impact_curve": {
+      "slope": -0.00047600175845961996,
+      "correlation": -0.6072693652987343,
+      "bucketed_curve": [
+        {
+          "bucket": 1.0,
+          "signed_volume_mean": -12.0,
+          "future_return_mean": 0.013148353786433581
+        },
+        {
+          "bucket": 2.0,
+          "signed_volume_mean": 10.5,
+          "future_return_mean": 0.010940594059405954
+        },
+        {
+          "bucket": 3.0,
+          "signed_volume_mean": 12.0,
+          "future_return_mean": 0.0024077473089603885
+        },
+        {
+          "bucket": 4.0,
+          "signed_volume_mean": 14.0,
+          "future_return_mean": -0.004807692307692308
+        }
+      ]
+    },
+    "turning_point_f1": 1.0,
+    "direction_accuracy": 1.0
+  },
+  "report_meta": {
+    "report_no": "CIVITAS-REAL-20260324-095736",
+    "date_cn": "2026年03月24日",
+    "generated_at": "2026-03-24T09:57:36",
+    "issuer": "Civitas 政策仿真系统",
+    "classification": "内部研判材料",
+    "recipient": "内部研究与评估团队",
+    "title": "History Replay Realism"
+  },
+  "reproducibility": {
+    "seed": 99,
+    "config_hash": "ea889afd3d204eb4a54a541b6325d53a4a6142c0f920378e57da1b8ea256ca87",
+    "feature_flag": true,
+    "snapshot_info": {
+      "real_points": 8,
+      "simulated_points": 8,
+      "timestamp_count": 8,
+      "real_price_min": 100.0,
+      "real_price_max": 104.9,
+      "sim_price_min": 100.0,
+      "sim_price_max": 104.5,
+      "real_volume_sum": 8650.0,
+      "sim_volume_sum": 8650.0,
+      "window_start": "2024-02-01",
+      "window_end": "2024-02-08"
+    }
+  },
+  "notes": [
+    "feature_flag=on emits the full stylized-facts stack"
+  ],
+  "feature_flags": {
+    "stylized_facts_v2": true
+  },
+  "title": "History Replay Realism"
+}

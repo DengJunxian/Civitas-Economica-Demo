@@ -1,0 +1,16 @@
+{
+  "config_hash": "abc",
+  "dataset_version": "vtest",
+  "event_counts": {
+    "market_bar": 1,
+    "news": 2
+  },
+  "feature_flags": {
+    "event_store_v1": true
+  },
+  "metadata": {},
+  "scenario_id": "",
+  "seed": 7,
+  "snapshot_id": "20260324T021006Z_a9e515e95c51df74",
+  "timestamp": "2026-03-24T02:10:06+00:00"
+}

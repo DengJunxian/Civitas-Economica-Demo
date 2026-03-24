@@ -52,5 +52,11 @@
     "reasoning": "fallback: glm-4-flashx: Timeout should be used inside a task",
     "model_used": "deterministic_stub",
     "timestamp": 1773588399.7343476
+  },
+  "66e42b66215ff277beecd4f980ff598046e7646021b2c6263211a88c36abd407": {
+    "content": "{\"action\": \"SELL\", \"qty\": 80, \"confidence\": 0.522, \"error\": \"MODEL_UNAVAILABLE\", \"mode\": \"deterministic_stub\"}",
+    "reasoning": "fallback",
+    "model_used": "deterministic_stub",
+    "timestamp": 1774276341.4220304
   }
 }

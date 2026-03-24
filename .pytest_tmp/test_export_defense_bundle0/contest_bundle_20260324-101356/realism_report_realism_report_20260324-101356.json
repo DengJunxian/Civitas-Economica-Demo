@@ -1,0 +1,41 @@
+{
+  "title": "真实性评估报告",
+  "path_fit": {
+    "enabled": true,
+    "score": 0.5,
+    "price_correlation": 0.5,
+    "volatility_correlation": 0.5,
+    "price_rmse": 0.2,
+    "price_mae": 0.1
+  },
+  "microstructure_fit": {
+    "enabled": true,
+    "score": 0.4
+  },
+  "behavioral_fit": {
+    "enabled": true,
+    "score": 0.45
+  },
+  "reproducibility": {
+    "seed": 42,
+    "config_hash": "abc"
+  },
+  "snapshot_info": {
+    "snapshot_id": "snap1"
+  },
+  "charts": [],
+  "feature_flags": {
+    "stylized_facts_v2": true
+  },
+  "feature_flag": true,
+  "report_meta": {
+    "report_no": "CIVITAS-REAL-20260324-101356",
+    "date_cn": "2026年03月24日",
+    "generated_at": "2026-03-24T10:13:56",
+    "issuer": "Civitas 政策仿真系统",
+    "classification": "内部研判材料",
+    "recipient": "内部研究与评估团队",
+    "title": "真实性评估报告"
+  },
+  "config_hash": "b870616302fcf025b86b7c46a9b2c26617142820ce723d647f4c50c76d5f735c"
+}

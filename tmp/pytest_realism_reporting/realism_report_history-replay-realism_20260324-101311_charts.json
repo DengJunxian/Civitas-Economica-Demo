@@ -1,0 +1,74 @@
+[
+  {
+    "kind": "line",
+    "name": "price_overlay",
+    "series": [
+      {
+        "label": "real",
+        "values": [
+          100.0,
+          101.0,
+          102.2,
+          101.8,
+          103.1,
+          104.0,
+          103.5,
+          104.9
+        ]
+      },
+      {
+        "label": "simulated",
+        "values": [
+          100.0,
+          100.8,
+          101.9,
+          101.5,
+          102.9,
+          103.7,
+          103.2,
+          104.5
+        ]
+      }
+    ]
+  },
+  {
+    "kind": "paired",
+    "name": "return_autocorrelation",
+    "series": {
+      "abs_real": -0.6518793574770432,
+      "abs_simulated": -0.6823634625601316,
+      "real": -0.5730540190713918,
+      "simulated": -0.5929513582130299
+    }
+  },
+  {
+    "kind": "structured",
+    "name": "price_impact_curve",
+    "series": {
+      "bucketed_curve": [
+        {
+          "bucket": 1.0,
+          "future_return_mean": 0.013148353786433581,
+          "signed_volume_mean": -12.0
+        },
+        {
+          "bucket": 2.0,
+          "future_return_mean": 0.010940594059405954,
+          "signed_volume_mean": 10.5
+        },
+        {
+          "bucket": 3.0,
+          "future_return_mean": 0.0024077473089603885,
+          "signed_volume_mean": 12.0
+        },
+        {
+          "bucket": 4.0,
+          "future_return_mean": -0.004807692307692308,
+          "signed_volume_mean": 14.0
+        }
+      ],
+      "correlation": -0.6072693652987343,
+      "slope": -0.00047600175845961996
+    }
+  }
+]

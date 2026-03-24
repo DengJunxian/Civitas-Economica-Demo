@@ -1,0 +1,11 @@
+{
+  "best_config": {
+    "max_position": 0.8,
+    "policy_shock": 0.18825878071351443,
+    "rebalance_frequency": 3
+  },
+  "best_score": 0.6827077074198893,
+  "dataset_snapshot_id": "snap-calib-test",
+  "method": "bayesian_gp",
+  "seed": 11
+}

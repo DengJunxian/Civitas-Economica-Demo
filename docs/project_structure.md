@@ -6,6 +6,11 @@
 - `main.py`: fallback launcher that can prompt for API keys in interactive terminals
 - `agents/`: agent roles, brains, personas, manager logic, and trading behavior
 - `core/`: reusable domain modules such as routing, market engine, backtesting, diagnostics, and demo helpers
+  - includes reproducibility/runtime additions:
+    - `core/event_store.py`
+    - `core/experiment_manifest.py`
+    - `core/calibration_pipeline.py`
+    - `core/hybrid_simulation_benchmark.py`
 - `engine/`: simulation loop and market evolution logic
 - `ui/`: page-level Streamlit panels
 - `policy/`: policy engine used by the simulation
@@ -24,13 +29,36 @@
 ```text
 policy text / scenario data / market data
     -> data_flywheel + policy engine
-    -> agents (Analyst / Manager / Trader reasoning)
+    -> core/event_store.py (Parquet events + scenario/snapshot manifests)
+    -> agents (Manager orchestration / Trader execution / Population engine)
     -> engine/simulation_loop.py
     -> simulation_runner.py + simulation_ipc.py
     -> core/exchange/* matching engine
-    -> core/behavioral_finance.py + backtester.py
+    -> core/behavioral_finance.py + backtester.py + calibration_pipeline.py
+    -> core/experiment_manifest.py (git/config/seed/snapshot ledger)
     -> ui/* panels rendered by app.py
 ```
+
+### 2.1 Agent architecture
+
+```mermaid
+flowchart LR
+    NewsAnalyst --> ManagerAgent
+    QuantAnalyst --> ManagerAgent
+    RiskAnalyst --> ManagerAgent
+    ManagerAgent --> ExecutionIntent
+    ExecutionIntent --> TraderAgent
+    StratifiedPopulation --> AgentProtocol
+    TraderAgent -. conforms .-> AgentProtocol
+    SmartAgent -. conforms .-> AgentProtocol
+```
+
+- `ManagerAgent` is the orchestration class. It aggregates analyst reports, can optionally run a bull/bear debate, performs risk review, and emits structured `ExecutionIntent` payloads.
+- `TraderAgent` stays the execution agent. Existing code can keep importing it directly, and `ExecutionIntent.to_order()` acts as the compatibility bridge.
+- `Persona` is now modeled as `PersonaArchetype + MutableState`. The archetype layer captures stable mandate / benchmark / turnover / risk budget parameters, while mutable state stores episodic, semantic, and procedural memory.
+- `StratifiedPopulation` now exposes `AgentProtocol` and `PopulationEngine` interfaces, plus reproducibility metadata such as `seed`, `config_hash`, snapshot summaries, and market distribution reports.
+- Market composition is defined in `data/market_composition.json` and `data/market_composition.yaml`, with regime-specific archetype weights for default, bull, bear, rumor, and stabilization regimes.
+- The new paths are gated by feature flags so older UI and scripts can continue using the legacy execution flow.
 
 ## 3. UI page to module mapping
 
@@ -43,7 +71,8 @@ policy text / scenario data / market data
 ## 4. Key code paths judges may ask about
 
 - AI decision routing: `core/model_router.py`
-- Agent reasoning and decision schemas: `agents/brain.py`, `agents/debate_brain.py`, `agents/trader_agent.py`
+- Agent reasoning and decision schemas: `agents/brain.py`, `agents/debate_brain.py`, `agents/manager_agent.py`, `agents/trader_agent.py`
+- Population and protocol layer: `agents/population.py`, `agents/persona.py`
 - Simulation loop: `engine/simulation_loop.py`
 - Isolated matching runner: `simulation_runner.py`, `simulation_ipc.py`
 - C++ order book source: `core/exchange/c_core/`

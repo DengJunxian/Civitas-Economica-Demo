@@ -11,10 +11,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Literal, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -423,6 +424,180 @@ class BehavioralProfile:
             biases.append("💰 处置效应明显")
         
         return " | ".join(biases) if biases else "✅ 行为相对理性"
+
+
+@dataclass
+class InstitutionConstraintProfile:
+    """Institution-level behavioral constraints used by layered memory."""
+
+    institution_type: str
+    mandate: str
+    benchmark: str
+    holding_period: int
+    turnover_target: float
+    max_drawdown: float
+    liquidity_preference: float
+    leverage_limit: float
+    policy_channel_sensitivity: float
+    rumor_sensitivity: float
+    benchmark_tracking_pressure: float
+    redemption_pressure: float
+    inventory_limit: float
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+def build_institution_constraint_profile(institution_type: str) -> InstitutionConstraintProfile:
+    """Return a reproducible constraint profile for the requested institution class."""
+
+    key = str(institution_type or "retail_swing").strip().lower().replace(" ", "_")
+    profiles = {
+        "retail_day_trader": dict(
+            mandate="intraday tactical alpha",
+            benchmark="intraday_index",
+            holding_period=1,
+            turnover_target=0.85,
+            max_drawdown=0.18,
+            liquidity_preference=0.35,
+            leverage_limit=1.2,
+            policy_channel_sensitivity=0.45,
+            rumor_sensitivity=0.75,
+            benchmark_tracking_pressure=0.15,
+            redemption_pressure=0.0,
+            inventory_limit=0.10,
+        ),
+        "retail_swing": dict(
+            mandate="medium-horizon relative return",
+            benchmark="broad_market_index",
+            holding_period=5,
+            turnover_target=0.30,
+            max_drawdown=0.16,
+            liquidity_preference=0.45,
+            leverage_limit=1.0,
+            policy_channel_sensitivity=0.40,
+            rumor_sensitivity=0.55,
+            benchmark_tracking_pressure=0.20,
+            redemption_pressure=0.0,
+            inventory_limit=0.15,
+        ),
+        "mutual_fund": dict(
+            mandate="beat benchmark with controlled tracking error",
+            benchmark="broad_market_index",
+            holding_period=20,
+            turnover_target=0.10,
+            max_drawdown=0.12,
+            liquidity_preference=0.70,
+            leverage_limit=1.0,
+            policy_channel_sensitivity=0.60,
+            rumor_sensitivity=0.25,
+            benchmark_tracking_pressure=0.85,
+            redemption_pressure=0.70,
+            inventory_limit=0.08,
+        ),
+        "pension_fund": dict(
+            mandate="long-term capital preservation and liability matching",
+            benchmark="policy_adjusted_long_horizon_index",
+            holding_period=60,
+            turnover_target=0.04,
+            max_drawdown=0.08,
+            liquidity_preference=0.85,
+            leverage_limit=1.0,
+            policy_channel_sensitivity=0.35,
+            rumor_sensitivity=0.10,
+            benchmark_tracking_pressure=0.90,
+            redemption_pressure=0.15,
+            inventory_limit=0.05,
+        ),
+        "insurer": dict(
+            mandate="capital efficiency with solvency protection",
+            benchmark="liability_matching_index",
+            holding_period=45,
+            turnover_target=0.05,
+            max_drawdown=0.07,
+            liquidity_preference=0.90,
+            leverage_limit=1.0,
+            policy_channel_sensitivity=0.30,
+            rumor_sensitivity=0.10,
+            benchmark_tracking_pressure=0.75,
+            redemption_pressure=0.20,
+            inventory_limit=0.05,
+        ),
+        "prop_desk": dict(
+            mandate="short-horizon alpha with risk budget discipline",
+            benchmark="risk_neutral_pnl",
+            holding_period=3,
+            turnover_target=0.60,
+            max_drawdown=0.22,
+            liquidity_preference=0.40,
+            leverage_limit=2.5,
+            policy_channel_sensitivity=0.45,
+            rumor_sensitivity=0.35,
+            benchmark_tracking_pressure=0.10,
+            redemption_pressure=0.0,
+            inventory_limit=0.30,
+        ),
+        "market_maker": dict(
+            mandate="spread capture and inventory control",
+            benchmark="spread_capture",
+            holding_period=1,
+            turnover_target=1.00,
+            max_drawdown=0.06,
+            liquidity_preference=1.00,
+            leverage_limit=1.0,
+            policy_channel_sensitivity=0.20,
+            rumor_sensitivity=0.15,
+            benchmark_tracking_pressure=0.05,
+            redemption_pressure=0.0,
+            inventory_limit=0.02,
+        ),
+        "state_stabilization_fund": dict(
+            mandate="market stabilization over profit maximization",
+            benchmark="stability_index",
+            holding_period=30,
+            turnover_target=0.12,
+            max_drawdown=0.10,
+            liquidity_preference=0.95,
+            leverage_limit=1.0,
+            policy_channel_sensitivity=0.95,
+            rumor_sensitivity=0.55,
+            benchmark_tracking_pressure=0.05,
+            redemption_pressure=0.05,
+            inventory_limit=0.20,
+        ),
+        "rumor_trader": dict(
+            mandate="exploit narrative dislocations",
+            benchmark="event_driven_pnl",
+            holding_period=2,
+            turnover_target=0.90,
+            max_drawdown=0.30,
+            liquidity_preference=0.25,
+            leverage_limit=1.5,
+            policy_channel_sensitivity=0.25,
+            rumor_sensitivity=1.00,
+            benchmark_tracking_pressure=0.02,
+            redemption_pressure=0.0,
+            inventory_limit=0.12,
+        ),
+        "etf_arbitrageur": dict(
+            mandate="tight tracking between ETF and basket",
+            benchmark="etf_basket_spread",
+            holding_period=1,
+            turnover_target=0.75,
+            max_drawdown=0.05,
+            liquidity_preference=0.98,
+            leverage_limit=1.2,
+            policy_channel_sensitivity=0.40,
+            rumor_sensitivity=0.18,
+            benchmark_tracking_pressure=1.00,
+            redemption_pressure=0.85,
+            inventory_limit=0.03,
+        ),
+    }
+    default_profile = profiles["retail_swing"]
+    payload = dict(profiles.get(key, default_profile))
+    payload["institution_type"] = key if key in profiles else "retail_swing"
+    return InstitutionConstraintProfile(**payload)
 
 
 def create_behavioral_profile(
@@ -987,3 +1162,581 @@ class StylizedFactsTracker:
 
     def to_dict(self) -> Dict[str, object]:
         return asdict(self)
+
+
+def _to_float_array(values: Optional[Sequence[float]]) -> np.ndarray:
+    if values is None:
+        return np.zeros(0, dtype=float)
+    try:
+        arr = np.asarray([float(x) for x in values if x is not None], dtype=float)
+    except Exception:
+        return np.zeros(0, dtype=float)
+    return arr.astype(float, copy=False)
+
+
+def _safe_corrcoef(x: Sequence[float], y: Sequence[float]) -> float:
+    x_arr = _to_float_array(x)
+    y_arr = _to_float_array(y)
+    n = min(x_arr.size, y_arr.size)
+    if n < 2:
+        return 0.0
+    x0 = x_arr[:n]
+    y0 = y_arr[:n]
+    if float(np.std(x0)) < 1e-12 or float(np.std(y0)) < 1e-12:
+        return 0.0
+    corr = float(np.corrcoef(x0, y0)[0, 1])
+    return 0.0 if np.isnan(corr) else corr
+
+
+def _lag_autocorr(values: Sequence[float], lag: int = 1) -> float:
+    arr = _to_float_array(values)
+    if arr.size <= lag:
+        return 0.0
+    left = arr[:-lag]
+    right = arr[lag:]
+    return _safe_corrcoef(left, right)
+
+
+def _excess_kurtosis(values: Sequence[float]) -> float:
+    arr = _to_float_array(values)
+    if arr.size < 4:
+        return 0.0
+    centered = arr - float(np.mean(arr))
+    m2 = float(np.mean(centered ** 2))
+    if m2 < 1e-12:
+        return 0.0
+    m4 = float(np.mean(centered ** 4))
+    return float(m4 / (m2 ** 2) - 3.0)
+
+
+def _price_returns(values: Sequence[float]) -> np.ndarray:
+    arr = _to_float_array(values)
+    if arr.size < 2:
+        return np.zeros(0, dtype=float)
+    prev = np.maximum(arr[:-1], 1e-12)
+    return np.diff(arr) / prev
+
+
+def _normalize_prices(values: Sequence[float]) -> np.ndarray:
+    arr = _to_float_array(values)
+    if arr.size == 0:
+        return arr
+    base = float(arr[0]) if float(arr[0]) != 0 else 1.0
+    return arr / base
+
+
+def _turning_point_mask(values: Sequence[float]) -> np.ndarray:
+    arr = _to_float_array(values)
+    if arr.size < 3:
+        return np.zeros(arr.size, dtype=bool)
+    diffs = np.diff(arr)
+    signs = np.sign(diffs)
+    mask = np.zeros(arr.size, dtype=bool)
+    for idx in range(1, signs.size):
+        if signs[idx - 1] == 0 or signs[idx] == 0:
+            continue
+        if signs[idx - 1] != signs[idx]:
+            mask[idx] = True
+    return mask
+
+
+def _binary_f1(predicted: np.ndarray, truth: np.ndarray) -> float:
+    if predicted.size == 0 or truth.size == 0:
+        return 0.0
+    n = min(predicted.size, truth.size)
+    pred = predicted[:n].astype(bool, copy=False)
+    real = truth[:n].astype(bool, copy=False)
+    tp = float(np.sum(pred & real))
+    fp = float(np.sum(pred & ~real))
+    fn = float(np.sum(~pred & real))
+    if tp <= 0.0:
+        return 0.0
+    precision = tp / max(tp + fp, 1e-12)
+    recall = tp / max(tp + fn, 1e-12)
+    if precision + recall <= 1e-12:
+        return 0.0
+    return float(2.0 * precision * recall / (precision + recall))
+
+
+def _drawdown_shape(values: Sequence[float]) -> Dict[str, float]:
+    prices = _to_float_array(values)
+    if prices.size < 2:
+        return {
+            "max_drawdown": 0.0,
+            "average_drawdown": 0.0,
+            "drawdown_duration": 0.0,
+            "recovery_speed": 0.0,
+            "shape_score": 0.0,
+        }
+
+    running_max = np.maximum.accumulate(prices)
+    drawdowns = prices / np.maximum(running_max, 1e-12) - 1.0
+    underwater = drawdowns < 0
+    if not np.any(underwater):
+        return {
+            "max_drawdown": 0.0,
+            "average_drawdown": 0.0,
+            "drawdown_duration": 0.0,
+            "recovery_speed": 1.0,
+            "shape_score": 1.0,
+        }
+
+    max_drawdown = float(abs(np.min(drawdowns)))
+    average_drawdown = float(abs(np.mean(drawdowns[underwater])))
+    longest_duration = 0
+    current = 0
+    for flag in underwater:
+        if flag:
+            current += 1
+            longest_duration = max(longest_duration, current)
+        else:
+            current = 0
+    recovery_speed = float(1.0 / (1.0 + longest_duration))
+    shape_score = float(np.clip(1.0 - (0.55 * max_drawdown + 0.30 * average_drawdown + 0.15 * longest_duration / max(prices.size, 1)), 0.0, 1.0))
+    return {
+        "max_drawdown": max_drawdown,
+        "average_drawdown": average_drawdown,
+        "drawdown_duration": float(longest_duration),
+        "recovery_speed": recovery_speed,
+        "shape_score": shape_score,
+    }
+
+
+def _volume_volatility_correlation(volumes: Sequence[float], prices: Sequence[float]) -> float:
+    vol_arr = _to_float_array(volumes)
+    ret_arr = np.abs(_price_returns(prices))
+    n = min(vol_arr.size, ret_arr.size)
+    if n < 2:
+        return 0.0
+    return _safe_corrcoef(vol_arr[:n], ret_arr[:n])
+
+
+def _order_sign_autocorrelation(order_signs: Sequence[float]) -> float:
+    signs = _to_float_array(order_signs)
+    if signs.size < 3:
+        return 0.0
+    signs = np.sign(signs)
+    return _safe_corrcoef(signs[:-1], signs[1:])
+
+
+def _price_impact_curve(
+    *,
+    order_signs: Sequence[float],
+    trade_sizes: Optional[Sequence[float]],
+    forward_returns: Sequence[float],
+) -> Dict[str, Any]:
+    signs = _to_float_array(order_signs)
+    sizes = _to_float_array(trade_sizes) if trade_sizes is not None else np.ones_like(signs)
+    future = _to_float_array(forward_returns)
+    n = min(signs.size, sizes.size, future.size)
+    if n < 2:
+        return {
+            "slope": 0.0,
+            "correlation": 0.0,
+            "bucketed_curve": [],
+        }
+
+    signed_volume = np.sign(signs[:n]) * np.abs(sizes[:n])
+    response = future[:n]
+    corr = _safe_corrcoef(signed_volume, response)
+    var = float(np.var(signed_volume))
+    slope = float(np.cov(signed_volume, response)[0, 1] / max(var, 1e-12)) if var > 1e-12 else 0.0
+
+    order = np.argsort(signed_volume)
+    chunks = np.array_split(order, 4)
+    bucketed_curve: List[Dict[str, float]] = []
+    for idx, chunk in enumerate(chunks, start=1):
+        if chunk.size == 0:
+            continue
+        bucketed_curve.append(
+            {
+                "bucket": float(idx),
+                "signed_volume_mean": float(np.mean(signed_volume[chunk])),
+                "future_return_mean": float(np.mean(response[chunk])),
+            }
+        )
+
+    return {
+        "slope": slope,
+        "correlation": corr,
+        "bucketed_curve": bucketed_curve,
+    }
+
+
+def _csad_summary(
+    *,
+    market_returns: Sequence[float],
+    cross_sectional_returns: Optional[Sequence[Sequence[float]]],
+) -> Dict[str, Any]:
+    market = _to_float_array(market_returns)
+    if cross_sectional_returns is None:
+        return {
+            "mean_csad": 0.0,
+            "gamma1": 0.0,
+            "gamma2": 0.0,
+            "herding_detected": False,
+            "strength": 0.0,
+        }
+
+    matrix_rows = [np.asarray([float(x) for x in row], dtype=float) for row in cross_sectional_returns if row]
+    if not matrix_rows or market.size == 0:
+        return {
+            "mean_csad": 0.0,
+            "gamma1": 0.0,
+            "gamma2": 0.0,
+            "herding_detected": False,
+            "strength": 0.0,
+        }
+
+    width = min(len(row) for row in matrix_rows)
+    if width <= 0:
+        return {
+            "mean_csad": 0.0,
+            "gamma1": 0.0,
+            "gamma2": 0.0,
+            "herding_detected": False,
+            "strength": 0.0,
+        }
+
+    matrix = np.asarray([row[:width] for row in matrix_rows], dtype=float)
+    n = min(matrix.shape[0], market.size)
+    matrix = matrix[:n]
+    market = market[:n]
+    if n < 3:
+        return {
+            "mean_csad": float(np.mean(np.abs(matrix - market.reshape(-1, 1)))) if matrix.size else 0.0,
+            "gamma1": 0.0,
+            "gamma2": 0.0,
+            "herding_detected": False,
+            "strength": 0.0,
+        }
+
+    csad_series = np.asarray([calculate_csad(matrix[i], market[i]) for i in range(n)], dtype=float)
+    reg = csad_regression(matrix, market, window=min(20, n))
+    return {
+        "mean_csad": float(np.mean(csad_series)),
+        "gamma1": float(reg.get("gamma1", 0.0)),
+        "gamma2": float(reg.get("gamma2", 0.0)),
+        "herding_detected": bool(reg.get("herding_detected", False)),
+        "strength": float(reg.get("strength", 0.0)),
+    }
+
+
+def _config_hash(seed: int, config: Mapping[str, Any], feature_flag: bool, version: str) -> str:
+    payload = {
+        "seed": int(seed),
+        "feature_flag": bool(feature_flag),
+        "version": str(version),
+        "config": json.loads(json.dumps(dict(config), sort_keys=True, default=str)),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+@dataclass
+class StylizedFactsReport:
+    """Structured realism evaluation payload."""
+
+    feature_flag: bool
+    seed: int
+    config_hash: str
+    snapshot_info: Dict[str, Any]
+    path_fit: Dict[str, Any]
+    microstructure_fit: Dict[str, Any]
+    behavioral_fit: Dict[str, Any]
+    charts: List[Dict[str, Any]]
+    credibility_score: float
+    metrics: Dict[str, Any] = field(default_factory=dict)
+    report_meta: Dict[str, Any] = field(default_factory=dict)
+    reproducibility: Dict[str, Any] = field(default_factory=dict)
+    notes: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class StylizedFactsEvaluator:
+    """
+    Reproducible stylized-facts evaluator with feature flag gating.
+
+    When feature_flag=False, the evaluator only emits path-fit metrics and
+    minimal charts so legacy consumers can safely ignore the new framework.
+    """
+
+    feature_flag: bool = False
+    seed: int = 0
+    config: Dict[str, Any] = field(default_factory=dict)
+    version: str = "stylized_facts_v1"
+
+    def _build_snapshot_info(
+        self,
+        *,
+        real_prices: Sequence[float],
+        simulated_prices: Sequence[float],
+        real_volumes: Optional[Sequence[float]],
+        simulated_volumes: Optional[Sequence[float]],
+        timestamps: Optional[Sequence[Any]],
+    ) -> Dict[str, Any]:
+        real_arr = _to_float_array(real_prices)
+        sim_arr = _to_float_array(simulated_prices)
+        ts_list = [str(x) for x in timestamps] if timestamps is not None else []
+        snapshot = {
+            "real_points": int(real_arr.size),
+            "simulated_points": int(sim_arr.size),
+            "timestamp_count": int(len(ts_list)),
+            "real_price_min": float(np.min(real_arr)) if real_arr.size else 0.0,
+            "real_price_max": float(np.max(real_arr)) if real_arr.size else 0.0,
+            "sim_price_min": float(np.min(sim_arr)) if sim_arr.size else 0.0,
+            "sim_price_max": float(np.max(sim_arr)) if sim_arr.size else 0.0,
+            "real_volume_sum": float(np.sum(_to_float_array(real_volumes))) if real_volumes is not None else 0.0,
+            "sim_volume_sum": float(np.sum(_to_float_array(simulated_volumes))) if simulated_volumes is not None else 0.0,
+        }
+        if ts_list:
+            snapshot["window_start"] = ts_list[0]
+            snapshot["window_end"] = ts_list[-1]
+        return snapshot
+
+    def evaluate(
+        self,
+        *,
+        real_prices: Sequence[float],
+        simulated_prices: Sequence[float],
+        real_volumes: Optional[Sequence[float]] = None,
+        simulated_volumes: Optional[Sequence[float]] = None,
+        order_signs: Optional[Sequence[float]] = None,
+        trade_sizes: Optional[Sequence[float]] = None,
+        market_returns: Optional[Sequence[float]] = None,
+        cross_sectional_returns: Optional[Sequence[Sequence[float]]] = None,
+        timestamps: Optional[Sequence[Any]] = None,
+        legacy_metrics: Optional[Mapping[str, Any]] = None,
+        snapshot_info: Optional[Mapping[str, Any]] = None,
+    ) -> StylizedFactsReport:
+        real_arr = _to_float_array(real_prices)
+        sim_arr = _to_float_array(simulated_prices)
+        real_returns = _price_returns(real_arr)
+        sim_returns = _price_returns(sim_arr)
+        n = min(real_arr.size, sim_arr.size)
+        aligned_real = real_arr[:n]
+        aligned_sim = sim_arr[:n]
+        aligned_real_returns = real_returns[: max(0, n - 1)]
+        aligned_sim_returns = sim_returns[: max(0, n - 1)]
+
+        legacy = dict(legacy_metrics or {})
+        price_correlation = float(legacy.get("price_correlation", _safe_corrcoef(aligned_real, aligned_sim)))
+        real_vol = float(np.std(aligned_real_returns)) if aligned_real_returns.size else 0.0
+        sim_vol = float(np.std(aligned_sim_returns)) if aligned_sim_returns.size else 0.0
+        volatility_correlation = float(
+            legacy.get(
+                "volatility_correlation",
+                min(real_vol, sim_vol) / max(real_vol, sim_vol, 1e-12) if (real_vol > 0.0 or sim_vol > 0.0) else 0.0,
+            )
+        )
+        normalized_real = _normalize_prices(aligned_real)
+        normalized_sim = _normalize_prices(aligned_sim)
+        if normalized_real.size and normalized_sim.size:
+            delta = normalized_sim[: min(normalized_real.size, normalized_sim.size)] - normalized_real[: min(normalized_real.size, normalized_sim.size)]
+            price_rmse = float(legacy.get("price_rmse", np.sqrt(np.mean(delta ** 2))))
+            price_mae = float(legacy.get("price_mae", np.mean(np.abs(delta))))
+        else:
+            price_rmse = float(legacy.get("price_rmse", 0.0))
+            price_mae = float(legacy.get("price_mae", 0.0))
+
+        base_credibility = float(legacy.get("credibility_score", 0.0))
+        drawdown = {
+            "real": _drawdown_shape(aligned_real),
+            "simulated": _drawdown_shape(aligned_sim),
+        }
+
+        return_autocorr = {
+            "real": _lag_autocorr(aligned_real_returns),
+            "simulated": _lag_autocorr(aligned_sim_returns),
+        }
+        abs_return_autocorr = {
+            "real": _lag_autocorr(np.abs(aligned_real_returns)),
+            "simulated": _lag_autocorr(np.abs(aligned_sim_returns)),
+        }
+        volatility_clustering = {
+            "real": _lag_autocorr(aligned_real_returns ** 2),
+            "simulated": _lag_autocorr(aligned_sim_returns ** 2),
+        }
+        tail_heaviness = {
+            "real": _excess_kurtosis(aligned_real_returns),
+            "simulated": _excess_kurtosis(aligned_sim_returns),
+        }
+        direction_accuracy = float(_safe_corrcoef(np.sign(aligned_real_returns), np.sign(aligned_sim_returns)))
+        if aligned_real_returns.size and aligned_sim_returns.size:
+            direction_accuracy = float(np.mean(np.sign(aligned_real_returns) == np.sign(aligned_sim_returns)))
+        turning_point_f1 = float(_binary_f1(_turning_point_mask(aligned_sim), _turning_point_mask(aligned_real)))
+        real_volume_series = real_volumes if real_volumes is not None else []
+        simulated_volume_series = simulated_volumes if simulated_volumes is not None else []
+        order_sign_series = order_signs if order_signs is not None else []
+        market_return_series = market_returns if market_returns is not None else aligned_real_returns
+        cross_sectional_series = cross_sectional_returns if cross_sectional_returns is not None else None
+
+        volume_volatility_corr = {
+            "real": _volume_volatility_correlation(real_volume_series, aligned_real),
+            "simulated": _volume_volatility_correlation(simulated_volume_series, aligned_sim),
+        }
+        order_sign_autocorr = float(_order_sign_autocorrelation(order_sign_series))
+        price_impact = _price_impact_curve(
+            order_signs=order_sign_series,
+            trade_sizes=trade_sizes,
+            forward_returns=aligned_real_returns if aligned_real_returns.size else aligned_sim_returns,
+        )
+        csad = _csad_summary(
+            market_returns=market_return_series,
+            cross_sectional_returns=cross_sectional_series,
+        )
+
+        path_score_inputs = [
+            (price_correlation + 1.0) / 2.0,
+            max(0.0, 1.0 - price_rmse),
+            max(0.0, 1.0 - min(price_mae, 1.0)),
+            drawdown["simulated"]["shape_score"],
+        ]
+        path_fit_score = float(np.clip(np.mean(path_score_inputs), 0.0, 1.0))
+
+        micro_score_inputs = [
+            (volume_volatility_corr["simulated"] + 1.0) / 2.0,
+            (order_sign_autocorr + 1.0) / 2.0,
+            (price_impact["correlation"] + 1.0) / 2.0,
+            turning_point_f1,
+        ]
+        behavioral_score_inputs = [
+            (return_autocorr["simulated"] + 1.0) / 2.0,
+            (abs_return_autocorr["simulated"] + 1.0) / 2.0,
+            (volatility_clustering["simulated"] + 1.0) / 2.0,
+            float(np.clip(1.0 / (1.0 + abs(tail_heaviness["simulated"])), 0.0, 1.0)),
+            float(np.clip(1.0 / (1.0 + abs(csad["gamma2"])), 0.0, 1.0)),
+            direction_accuracy,
+        ]
+
+        if self.feature_flag:
+            microstructure_fit = {
+                "enabled": True,
+                "volume_volatility_correlation": volume_volatility_corr,
+                "order_sign_autocorrelation": order_sign_autocorr,
+                "price_impact_curve": price_impact,
+                "turning_point_f1": turning_point_f1,
+                "score": float(np.clip(np.mean(micro_score_inputs), 0.0, 1.0)),
+            }
+            behavioral_fit = {
+                "enabled": True,
+                "return_autocorrelation": return_autocorr,
+                "abs_return_autocorrelation": abs_return_autocorr,
+                "volatility_clustering": volatility_clustering,
+                "tail_heaviness_kurtosis": tail_heaviness,
+                "csad_herding": csad,
+                "direction_accuracy": direction_accuracy,
+                "score": float(np.clip(np.mean(behavioral_score_inputs), 0.0, 1.0)),
+            }
+            credibility_score = float(np.clip(np.mean([path_fit_score, microstructure_fit["score"], behavioral_fit["score"]]), 0.0, 1.0))
+            chart_specs = [
+                {
+                    "name": "price_overlay",
+                    "kind": "line",
+                    "series": [
+                        {"label": "real", "values": aligned_real.tolist()},
+                        {"label": "simulated", "values": aligned_sim.tolist()},
+                    ],
+                },
+                {
+                    "name": "return_autocorrelation",
+                    "kind": "paired",
+                    "series": {
+                        "real": return_autocorr["real"],
+                        "simulated": return_autocorr["simulated"],
+                        "abs_real": abs_return_autocorr["real"],
+                        "abs_simulated": abs_return_autocorr["simulated"],
+                    },
+                },
+                {
+                    "name": "price_impact_curve",
+                    "kind": "structured",
+                    "series": price_impact,
+                },
+            ]
+        else:
+            microstructure_fit = {
+                "enabled": False,
+                "feature_flag": "stylized_facts_v2",
+                "score": 0.0,
+            }
+            behavioral_fit = {
+                "enabled": False,
+                "feature_flag": "stylized_facts_v2",
+                "score": 0.0,
+            }
+            credibility_score = path_fit_score if base_credibility <= 0.0 else float(np.clip(base_credibility, 0.0, 1.0))
+            chart_specs = [
+                {
+                    "name": "price_overlay",
+                    "kind": "line",
+                    "series": [
+                        {"label": "real", "values": aligned_real.tolist()},
+                        {"label": "simulated", "values": aligned_sim.tolist()},
+                    ],
+                }
+            ]
+
+        snapshot = self._build_snapshot_info(
+            real_prices=aligned_real.tolist(),
+            simulated_prices=aligned_sim.tolist(),
+            real_volumes=real_volumes,
+            simulated_volumes=simulated_volumes,
+            timestamps=timestamps,
+        )
+        if snapshot_info:
+            snapshot.update(dict(snapshot_info))
+
+        report_metrics = {
+            "price_correlation": price_correlation,
+            "volatility_correlation": volatility_correlation,
+            "price_rmse": price_rmse,
+            "price_mae": price_mae,
+            "credibility_score": credibility_score,
+            "return_autocorrelation": return_autocorr,
+            "abs_return_autocorrelation": abs_return_autocorr,
+            "volatility_clustering": volatility_clustering,
+            "tail_heaviness_kurtosis": tail_heaviness,
+            "drawdown_shape": drawdown,
+            "volume_volatility_correlation": volume_volatility_corr,
+            "csad_herding": csad,
+            "order_sign_autocorrelation": order_sign_autocorr,
+            "price_impact_curve": price_impact,
+            "turning_point_f1": turning_point_f1,
+            "direction_accuracy": direction_accuracy,
+        }
+
+        return StylizedFactsReport(
+            feature_flag=bool(self.feature_flag),
+            seed=int(self.seed),
+            config_hash=_config_hash(self.seed, self.config, self.feature_flag, self.version),
+            snapshot_info=snapshot,
+            path_fit={
+                "enabled": True,
+                "score": path_fit_score,
+                "price_correlation": price_correlation,
+                "volatility_correlation": volatility_correlation,
+                "price_rmse": price_rmse,
+                "price_mae": price_mae,
+                "drawdown_shape": drawdown,
+            },
+            microstructure_fit=microstructure_fit,
+            behavioral_fit=behavioral_fit,
+            charts=chart_specs,
+            credibility_score=credibility_score,
+            metrics=report_metrics,
+            reproducibility={
+                "seed": int(self.seed),
+                "config_hash": _config_hash(self.seed, self.config, self.feature_flag, self.version),
+                "feature_flag": bool(self.feature_flag),
+                "snapshot_info": snapshot,
+            },
+            notes=[
+                "feature_flag=off emits only path-fit diagnostics for legacy compatibility"
+                if not self.feature_flag
+                else "feature_flag=on emits the full stylized-facts stack",
+            ],
+        )

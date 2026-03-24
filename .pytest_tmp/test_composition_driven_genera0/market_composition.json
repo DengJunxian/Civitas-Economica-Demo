@@ -1,0 +1,1 @@
+{"version": "1.0", "default_regime": "custom", "archetypes": ["market_maker", "retail_swing"], "regimes": {"custom": {"weights": {"market_maker": 1.0, "retail_swing": 0.0}}}}

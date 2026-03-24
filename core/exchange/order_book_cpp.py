@@ -1,6 +1,6 @@
 import time
 from typing import List, Optional, Dict, Tuple
-from core.exchange.order_book import OrderBook, Order, Trade, OrderStatus, OrderSide
+from core.exchange.order_book import OrderBook, Order, Trade, OrderStatus, OrderSide, OrderType
 
 try:
     import _civitas_lob
@@ -29,19 +29,16 @@ class OrderBookCPP(OrderBook):
             order.status = OrderStatus.REJECTED
             return []
             
-        if order.order_type == "limit":
-             # Optimization: Check primitive limit directly locally if needed, but keeping it simple
-             pass # C++ doesn't check limits in current logic, relying on pre-check or implementing it in C++
-             # For speed, we skip redundant Python checks if we trust caller or C++ handles it.
-             # But here we stick to verifying.
-             if not self._check_price_limit(order.price):
+        if order.order_type == OrderType.LIMIT:
+            # Keep validation consistent with the Python book.
+            if not self._check_price_limit(order.price):
                 order.status = OrderStatus.REJECTED
                 return []
         
-        if order.order_type == "market":
-             lower, upper = self.get_limit_prices()
-             # Convert to aggressive limit order
-             order.price = upper if order.side == OrderSide.BUY else lower
+        if order.order_type == OrderType.MARKET:
+            lower, upper = self.get_limit_prices()
+            # Convert to aggressive limit order
+            order.price = upper if order.side == OrderSide.BUY else lower
 
         # 2. Call C++ Exploded Interface (Fast)
         self.submitted_orders += 1
@@ -112,6 +109,24 @@ class OrderBookCPP(OrderBook):
         if success:
             self.cancelled_orders += 1
         return success
+
+    def estimate_queue_position(self, order: Order) -> int:
+        """Approximate queue position from the visible depth."""
+        depth = self.get_depth(levels=10)
+        queue_ahead = 0
+        if order.side == OrderSide.BUY:
+            for level in depth.get("bids", []):
+                price = float(level.get("price", 0.0))
+                qty = int(level.get("qty", 0))
+                if price > order.price or price == order.price:
+                    queue_ahead += qty
+        else:
+            for level in depth.get("asks", []):
+                price = float(level.get("price", 0.0))
+                qty = int(level.get("qty", 0))
+                if price < order.price or price == order.price:
+                    queue_ahead += qty
+        return int(queue_ahead)
     
     # Override data access methods
     def get_best_bid(self) -> Optional[float]:

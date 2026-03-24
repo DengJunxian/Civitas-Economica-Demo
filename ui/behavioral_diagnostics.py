@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
@@ -20,6 +20,78 @@ def _safe_get(report: Dict[str, Any], path: list[str], default: float = 0.0) -> 
         return float(cur)
     except Exception:
         return float(default)
+
+
+def _load_social_propagation_report(report_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    path = report_path or Path("outputs") / "social_propagation_report.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _render_social_propagation_report(report: Dict[str, Any]) -> None:
+    st.markdown("### 社会传播链")
+    cols = st.columns(4)
+    node_types = report.get("node_type_distribution", {})
+    source_rankings = report.get("source_rankings", [])
+    rumor = report.get("rumor_suppression", {})
+    with cols[0]:
+        st.metric("节点数", f"{int(report.get('snapshot_info', {}).get('node_count', 0))}")
+    with cols[1]:
+        st.metric("边数", f"{int(report.get('snapshot_info', {}).get('edge_count', 0))}")
+    with cols[2]:
+        st.metric("均值情绪", f"{float(report.get('mean_sentiment', 0.0)):.3f}")
+    with cols[3]:
+        st.metric("谣言压制差值", f"{float(rumor.get('delta', 0.0)):.3f}")
+
+    st.dataframe(
+        pd.DataFrame(
+            [{"Node type": key, "Count": value} for key, value in sorted(node_types.items(), key=lambda item: item[1], reverse=True)]
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    if source_rankings:
+        st.markdown("#### 传播影响力")
+        st.dataframe(
+            pd.DataFrame(source_rankings[:10]),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    chain = report.get("propagation_chain", [])
+    if chain:
+        st.markdown("#### 传播链")
+        chain_df = pd.DataFrame(chain)
+        if {"source_id", "target_id", "topic", "kind"} <= set(chain_df.columns):
+            cols = ["source_id", "target_id", "topic", "kind", "signal", "belief_delta", "delay", "received_tick"]
+            cols = [col for col in cols if col in chain_df.columns]
+            st.dataframe(chain_df[cols].head(20), use_container_width=True, hide_index=True)
+        else:
+            st.dataframe(chain_df.head(20), use_container_width=True, hide_index=True)
+
+    observation_packets = report.get("observation_packets", {})
+    if observation_packets:
+        st.markdown("#### 节点观察卡")
+        packet_rows: List[Dict[str, Any]] = []
+        for node_id, packet in list(observation_packets.items())[:10]:
+            packet_rows.append(
+                {
+                    "node_id": node_id,
+                    "node_type": packet.get("node_type", ""),
+                    "sentiment": packet.get("sentiment", 0.0),
+                    "first_seen_tick": packet.get("first_seen_tick", -1),
+                    "rumor_pressure": packet.get("memory_seed", {}).get("rumor_pressure", 0.0),
+                    "refutation_pressure": packet.get("memory_seed", {}).get("refutation_pressure", 0.0),
+                }
+            )
+        st.dataframe(pd.DataFrame(packet_rows), use_container_width=True, hide_index=True)
+
+    st.json(report)
 
 
 def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
@@ -132,3 +204,10 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
                 mime="application/json",
                 use_container_width=True,
             )
+
+    social_report = _load_social_propagation_report()
+    st.markdown("### 社会传播报告")
+    if social_report:
+        _render_social_propagation_report(social_report)
+    else:
+        st.info("未发现 outputs/social_propagation_report.json。可在社交传播引擎运行后导出。")

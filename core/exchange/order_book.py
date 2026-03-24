@@ -68,6 +68,82 @@ class OrderBook:
         lower, upper = self.get_limit_prices()
         return lower <= price <= upper
 
+    def _would_cross_book(self, order: Order) -> bool:
+        if order.side == OrderSide.BUY:
+            best_ask = self.get_best_ask()
+            return best_ask is not None and order.price >= best_ask
+        best_bid = self.get_best_bid()
+        return best_bid is not None and order.price <= best_bid
+
+    def estimate_available_qty(self, side: OrderSide, price: float) -> int:
+        """Estimate immediate executable quantity against the opposite book."""
+        if side == OrderSide.BUY:
+            candidates = [
+                o for o in self.orders.values()
+                if o.side == OrderSide.SELL and o.status not in [OrderStatus.CANCELLED, OrderStatus.FILLED, OrderStatus.REJECTED]
+                and o.price <= price
+            ]
+            candidates.sort(key=lambda o: (o.price, o.timestamp))
+        else:
+            candidates = [
+                o for o in self.orders.values()
+                if o.side == OrderSide.BUY and o.status not in [OrderStatus.CANCELLED, OrderStatus.FILLED, OrderStatus.REJECTED]
+                and o.price >= price
+            ]
+            candidates.sort(key=lambda o: (-o.price, o.timestamp))
+        return int(sum(max(0, o.remaining_qty) for o in candidates))
+
+    def estimate_queue_position(self, order: Order) -> int:
+        """Approximate the queue ahead of an incoming order."""
+        if order.side == OrderSide.BUY:
+            ahead = [
+                o for o in self.orders.values()
+                if o.side == OrderSide.BUY
+                and o.status not in [OrderStatus.CANCELLED, OrderStatus.FILLED, OrderStatus.REJECTED]
+                and (o.price > order.price or (o.price == order.price and o.timestamp < order.timestamp))
+            ]
+        else:
+            ahead = [
+                o for o in self.orders.values()
+                if o.side == OrderSide.SELL
+                and o.status not in [OrderStatus.CANCELLED, OrderStatus.FILLED, OrderStatus.REJECTED]
+                and (o.price < order.price or (o.price == order.price and o.timestamp < order.timestamp))
+            ]
+        return int(sum(max(0, o.remaining_qty) for o in ahead))
+
+    def modify_order(
+        self,
+        order_id: str,
+        *,
+        price: Optional[float] = None,
+        quantity: Optional[int] = None,
+        timestamp: Optional[float] = None,
+        original_order: Optional[Order] = None,
+    ) -> Optional[Order]:
+        """Create a cancel-replace order without mutating heap keys in place."""
+        source = original_order or self.orders.get(order_id)
+        if source is None or source.status in [OrderStatus.CANCELLED, OrderStatus.FILLED, OrderStatus.REJECTED]:
+            return None
+
+        self.cancel_order(order_id)
+        replacement = Order(
+            symbol=source.symbol,
+            price=float(price if price is not None else source.price),
+            quantity=int(quantity if quantity is not None else source.remaining_qty or source.quantity),
+            side=source.side,
+            order_type=source.order_type,
+            agent_id=source.agent_id,
+            timestamp=float(timestamp if timestamp is not None else time.time()),
+            metadata=dict(source.metadata),
+        )
+        replacement.metadata.update(
+            {
+                "replaces_order_id": order_id,
+                "replace_reason": "modify_order",
+            }
+        )
+        return replacement
+
     def add_order(self, order: Order) -> List[Trade]:
         """
         Add an order to the book and attempt to match immediately.
@@ -86,7 +162,19 @@ class OrderBook:
         if order.order_type == OrderType.MARKET:
             lower, upper = self.get_limit_prices()
             order.price = upper if order.side == OrderSide.BUY else lower
-            
+
+        # 2.5 Post-only / FOK pre-checks
+        if order.order_type == OrderType.POST_ONLY and self._would_cross_book(order):
+            order.status = OrderStatus.REJECTED
+            order.reason = "post-only order would take liquidity"
+            return []
+        if order.order_type == OrderType.FOK:
+            available = self.estimate_available_qty(order.side, order.price)
+            if available < order.quantity:
+                order.status = OrderStatus.REJECTED
+                order.reason = "insufficient liquidity for FOK"
+                return []
+
         # 3. Register Order
         self.orders[order.order_id] = order
         order.status = OrderStatus.PENDING
@@ -100,8 +188,12 @@ class OrderBook:
             trades = self._match_incoming_sell(order)
         
         # 5. If not filled, add to heap
-        if not order.is_filled and order.status not in [OrderStatus.CANCELLED, OrderStatus.REJECTED]:
+        resting_allowed = order.order_type in {OrderType.LIMIT, OrderType.POST_ONLY}
+        if not order.is_filled and resting_allowed and order.status not in [OrderStatus.CANCELLED, OrderStatus.REJECTED]:
             self._push_to_heap(order)
+        elif not order.is_filled and order.status not in [OrderStatus.CANCELLED, OrderStatus.REJECTED]:
+            # IOC / MARKET remainders are not allowed to rest.
+            order.reason = order.reason or "unfilled remainder canceled"
             
         return trades
 

@@ -31,6 +31,17 @@ class TradingRestriction(Enum):
 
 
 @dataclass
+class MarketControlEvent:
+    """Structured market control event produced by the sandbox."""
+
+    tick: int
+    event_type: str
+    reason: str
+    level: int = 0
+    payload: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class TradeRecord:
     """交易记录"""
     timestamp: float
@@ -471,12 +482,14 @@ class RegulatoryModule:
             监管状态字典
         """
         price_change = (price - prev_close) / prev_close if prev_close else 0
+        was_halted = self.circuit_breaker.is_halted
         
         result = {
             "tick": current_tick,
             "circuit_break": None,
             "intervention": None,
-            "trading_halted": False
+            "trading_halted": False,
+            "market_events": [],
         }
         
         # 1. 检查熔断
@@ -484,8 +497,35 @@ class RegulatoryModule:
         if halted:
             result["circuit_break"] = halt_msg
             result["trading_halted"] = True
+            result["market_events"].append(
+                MarketControlEvent(
+                    tick=current_tick,
+                    event_type="halt",
+                    reason=halt_msg,
+                    level=self.circuit_breaker.halt_level,
+                    payload={
+                        "price_change": price_change,
+                        "prev_close": prev_close,
+                        "price": price,
+                    },
+                ).__dict__
+            )
             if self._on_circuit_break:
                 self._on_circuit_break(halt_msg)
+        elif was_halted and not self.circuit_breaker.is_halted:
+            result["market_events"].append(
+                MarketControlEvent(
+                    tick=current_tick,
+                    event_type="resume",
+                    reason=halt_msg or "trading resumed",
+                    level=0,
+                    payload={
+                        "price_change": price_change,
+                        "prev_close": prev_close,
+                        "price": price,
+                    },
+                ).__dict__
+            )
         
         # 2. 检查是否需要国家队入场（熔断时不干预）
         if not halted and self.stability_fund.should_intervene(
@@ -495,6 +535,15 @@ class RegulatoryModule:
                 current_tick, price, panic_level
             )
             result["intervention"] = intervention
+            result["market_events"].append(
+                MarketControlEvent(
+                    tick=current_tick,
+                    event_type="intervention",
+                    reason=str(intervention.get("reason", "stability fund intervention")),
+                    level=int(intervention.get("level", 1)),
+                    payload=dict(intervention),
+                ).__dict__
+            )
             if self._on_intervention:
                 self._on_intervention(intervention)
         

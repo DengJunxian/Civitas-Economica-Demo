@@ -1,0 +1,62 @@
+{
+  "csad": {
+    "mean": 0.01935500738556495,
+    "std": 0.0051827003305078174,
+    "herding_regression": {
+      "gamma1": 2.5975436111831476,
+      "gamma2": 29.024884848757004,
+      "herding_detected": false,
+      "strength": 0.0
+    }
+  },
+  "pgr_plr": {
+    "pgr": 0.0,
+    "plr": 0.0,
+    "disposition_gap": 0.0,
+    "realized_gains": 0.0,
+    "realized_losses": 0.0,
+    "paper_gains": 1.0,
+    "paper_losses": 1.0
+  },
+  "volatility_clustering": {
+    "abs_return_lag1_autocorr": 0.0,
+    "squared_return_lag1_autocorr": 0.0,
+    "volatility_level": 0.0
+  },
+  "drawdown_distribution": {
+    "mean_drawdown": -0.014140322580645126,
+    "max_drawdown": -0.014140322580645126,
+    "median_drawdown": -0.014140322580645126,
+    "q90_drawdown": -0.014140322580645126,
+    "count": 1.0
+  },
+  "all_time_high_effect": {
+    "ath_hit_rate": 0.5,
+    "mean_return_on_ath": 0.024569692190484806,
+    "mean_return_off_ath": -0.014140322580645091,
+    "ath_outperformance": 0.0387100147711299
+  },
+  "loss_aversion_intensity": {
+    "mean": 2.96,
+    "p90": 3.472,
+    "n_obs": 2
+  },
+  "volatility clustering": {
+    "abs_return_lag1_autocorr": 0.0,
+    "squared_return_lag1_autocorr": 0.0,
+    "volatility_level": 0.0
+  },
+  "drawdown distribution": {
+    "mean_drawdown": -0.014140322580645126,
+    "max_drawdown": -0.014140322580645126,
+    "median_drawdown": -0.014140322580645126,
+    "q90_drawdown": -0.014140322580645126,
+    "count": 1.0
+  },
+  "all_time_high effect": {
+    "ath_hit_rate": 0.5,
+    "mean_return_on_ath": 0.024569692190484806,
+    "mean_return_off_ath": -0.014140322580645091,
+    "ath_outperformance": 0.0387100147711299
+  }
+}

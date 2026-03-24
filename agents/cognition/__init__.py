@@ -15,6 +15,7 @@ from agents.cognition.memory import TraumaMemory
 from agents.cognition.cognitive_agent import CognitiveAgent
 from agents.cognition.graph_storage import GraphMemoryBank, KnowledgeCapsule
 from agents.cognition.graph_builder import GraphExtractor
+from agents.cognition.layered_memory import BehaviorCard, LayeredMemory
 
 __all__ = [
     "ProspectTheory",
@@ -25,5 +26,7 @@ __all__ = [
     "CognitiveAgent",
     "GraphMemoryBank",
     "KnowledgeCapsule",
-    "GraphExtractor"
+    "GraphExtractor",
+    "BehaviorCard",
+    "LayeredMemory"
 ]

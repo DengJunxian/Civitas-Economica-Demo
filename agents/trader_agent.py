@@ -13,6 +13,7 @@ TraderAgent 瀹炵幇 鈥?鍩轰簬璁ょ煡闂幆鐨勪氦鏄撴櫤鑳戒綋
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import random
@@ -22,10 +23,11 @@ import numpy as np
 
 from agents.base_agent import BaseAgent, MarketSnapshot
 from agents.brain import DeepSeekBrain
-from core.types import Order, OrderSide, OrderType, OrderStatus
+from core.types import Order, OrderSide, OrderType, OrderStatus, ExecutionPlan
 from core.behavioral_finance import (
     ReferencePoints,
     ReferenceShiftConfig,
+    build_institution_constraint_profile,
     behavioral_update_step,
     initialize_reference_points,
     predict_next_return,
@@ -53,6 +55,8 @@ class TraderAgent(BaseAgent):
         persona: Optional[Persona] = None,
         use_llm: bool = True,
         model_priority: Optional[List[str]] = None,
+        execution_plan_enabled: bool = False,
+        execution_seed: Optional[int] = None,
         news_config: Optional[Dict[str, Any]] = None,
         news_max_articles: int = 5,
         ram_cooldown_steps: int = 3
@@ -60,6 +64,12 @@ class TraderAgent(BaseAgent):
         super().__init__(agent_id, cash_balance, portfolio, psychology_profile)
         
         self.use_llm = use_llm
+        self.execution_plan_enabled = bool(execution_plan_enabled)
+        self.execution_seed = int(execution_seed if execution_seed is not None else 42)
+        self.behavior_layer_enabled = bool(
+            os.environ.get("CIVITAS_LAYERED_MEMORY_V1", "").strip().lower() in {"1", "true", "yes", "on"}
+            or (isinstance(psychology_profile, dict) and bool(psychology_profile.get("behavior_layer_enabled", False)))
+        )
         
         # 浜烘牸鐢诲儚闆嗘垚
         self.persona = persona if persona else Persona(name=agent_id)
@@ -77,6 +87,9 @@ class TraderAgent(BaseAgent):
         }
         if psychology_profile:
             self.profile.update(psychology_profile)
+        self.institution_type = ""
+        if isinstance(psychology_profile, dict) and psychology_profile.get("institution_type"):
+            self.institution_type = str(psychology_profile.get("institution_type", "")).strip().lower().replace(" ", "_")
 
         # Initialize Brain
         if agent_id.startswith("Debate_"):
@@ -85,7 +98,8 @@ class TraderAgent(BaseAgent):
                 agent_id=agent_id,
                 persona={
                     "risk_preference": self.persona.risk_appetite.value,
-                    "loss_aversion": self.profile.get("loss_sensitivity", 1.5)
+                    "loss_aversion": self.profile.get("loss_sensitivity", 1.5),
+                    "institution_type": self.institution_type,
                 },
                 api_key=None
             )
@@ -96,10 +110,17 @@ class TraderAgent(BaseAgent):
                 agent_id=agent_id,
                 persona={
                     "risk_preference": self.persona.risk_appetite.value,
-                    "loss_aversion": self.profile.get("loss_sensitivity", 1.5)
+                    "loss_aversion": self.profile.get("loss_sensitivity", 1.5),
+                    "institution_type": self.institution_type,
                 },
                 model_router=model_router
             )
+        if hasattr(self.brain, "layered_memory"):
+            self.brain.layered_memory.enabled = self.behavior_layer_enabled
+            if isinstance(psychology_profile, dict) and psychology_profile.get("institution_type"):
+                institution_type = str(psychology_profile.get("institution_type", "")).strip().lower().replace(" ", "_")
+                self.brain.layered_memory.institution_type = institution_type
+                self.brain.layered_memory.constraint_profile = build_institution_constraint_profile(institution_type)
         # 娉ㄥ叆妯″瀷浼樺厛绾?(濡傛灉 Brain 鏀寔)
         if hasattr(self.brain, 'model_priority'):
             self.brain.model_priority = model_priority
@@ -111,6 +132,7 @@ class TraderAgent(BaseAgent):
         self._last_news_count = 0
         self._last_social_sentiment = "neutral"
         self._fast_mode_consecutive_steps = 0
+        self.last_behavior_card: Dict[str, Any] = {}
         
         # GraphRAG 璁板繂灞?
         self.graph_memory = GraphMemoryBank(agent_id=self.agent_id)
@@ -127,7 +149,7 @@ class TraderAgent(BaseAgent):
         # === Risk Alert Meeting (RAM) State ===
         self._portfolio_value_history: List[float] = []
         self._last_cvar: Optional[float] = None
-        self._ram_until_step: int = 0
+        self._ram_until_step: int = -1
         self._ram_last_trigger: str = ""
         self._ram_cooldown_steps: int = max(1, int(ram_cooldown_steps))
 
@@ -145,6 +167,7 @@ class TraderAgent(BaseAgent):
         self.current_trading_intent: float = 0.0
         self.current_loss_aversion_intensity: float = float(self.persona.loss_aversion)
         self.last_behavioral_state: Dict[str, Any] = {}
+        self.execution_config_hash = self._build_execution_config_hash()
 
     def _map_persona_to_risk_aversion(self) -> float:
         mapping = {
@@ -154,6 +177,24 @@ class TraderAgent(BaseAgent):
             RiskAppetite.GAMBLER: 0.1
         }
         return mapping.get(self.persona.risk_appetite, 0.5)
+
+    def _build_execution_config_hash(self) -> str:
+        payload = {
+            "agent_id": self.agent_id,
+            "cash_balance": float(self.cash_balance),
+            "portfolio": dict(self.portfolio),
+            "persona": {
+                "name": self.persona.name,
+                "risk_appetite": getattr(self.persona.risk_appetite, "value", str(self.persona.risk_appetite)),
+                "investment_horizon": getattr(self.persona.investment_horizon, "value", str(self.persona.investment_horizon)),
+                "conformity": float(self.persona.conformity),
+                "influence": float(self.persona.influence),
+                "patience": float(self.persona.patience),
+            },
+            "execution_plan_enabled": bool(self.execution_plan_enabled),
+            "execution_seed": int(self.execution_seed),
+        }
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
     @staticmethod
     def _emotion_to_sentiment(emotion: str) -> float:
@@ -272,6 +313,40 @@ class TraderAgent(BaseAgent):
         decision["qty"] = max(0, int(qty))
         decision["price"] = float(price)
         decision_payload["behavioral_state"] = dict(self.last_behavioral_state)
+        behavior_bundle = self.brain._apply_behavior_layer(
+            decision=decision,
+            market_state={
+                "price": float(snapshot.last_price),
+                "last_price": float(snapshot.last_price),
+                "trend": getattr(snapshot, "market_trend", 0.0),
+                "market_trend": getattr(snapshot, "market_trend", 0.0),
+                "panic_level": float(getattr(snapshot, "panic_level", 0.0)),
+                "policy_description": getattr(snapshot, "policy_description", ""),
+                "policy_news": getattr(snapshot, "policy_news", ""),
+                "text_sentiment_score": float(getattr(snapshot, "text_sentiment_score", 0.0)),
+                "text_policy_shock": float(getattr(snapshot, "text_policy_shock", 0.0)),
+                "text_regime_bias": getattr(snapshot, "text_regime_bias", "neutral"),
+                "news_source": getattr(snapshot, "news_source", "market"),
+            },
+            account_state={
+                "cash": float(self.cash_balance),
+                "market_value": float(self.portfolio.get(snapshot.symbol, 0) * snapshot.last_price),
+                "pnl_pct": float(getattr(self, "last_pnl_pct", 0.0) or 0.0),
+            },
+            emotional_state=str(getattr(self, "emotional_state", "Neutral")),
+            social_signal=str(getattr(self, "_last_social_sentiment", "neutral")),
+            snapshot_info={
+                "symbol": snapshot.symbol,
+                "timestamp": snapshot.timestamp,
+                "price": float(snapshot.last_price),
+                "market_trend": float(getattr(snapshot, "market_trend", 0.0)),
+                "panic_level": float(getattr(snapshot, "panic_level", 0.0)),
+            },
+        )
+        decision_payload["decision"] = behavior_bundle.get("decision", decision)
+        decision_payload["behavior_card"] = behavior_bundle.get("behavior_card", {})
+        decision_payload["behavior_context"] = behavior_bundle.get("behavior_context", {})
+        self.last_behavior_card = dict(decision_payload["behavior_card"])
         return decision_payload
 
     def bind_social_node(self, node_id: int, graph: SocialGraph):
@@ -475,13 +550,16 @@ class TraderAgent(BaseAgent):
             qty = max(100, int(qty * (0.85 + 0.6 * abs(min(0.0, intent_score)))))
 
         reasoning = f"(System 1) Fast response. Trend={trend_val:.3f}, Emotion={emotional_state}"
-        return {
+        decision_payload = {
             "decision": {"action": action, "qty": qty, "price": price},
             "reasoning": reasoning,
             "symbol": snapshot.symbol,
             "timestamp": snapshot.timestamp,
             "behavioral_state": dict(self.last_behavioral_state),
         }
+        decision_payload = self._apply_behavioral_intent_overlay(decision_payload, snapshot)
+        self.last_behavior_card = dict(decision_payload.get("behavior_card", {}))
+        return decision_payload
 
     async def _async_extract_and_store(self, text: str, current_time: float, is_news: bool = False):
         """Background graph extraction to avoid blocking the trade loop."""
@@ -672,7 +750,9 @@ class TraderAgent(BaseAgent):
                     "symbol": snapshot.symbol,
                     "timestamp": snapshot.timestamp,
                     "analyst_reports": perceived_data.get("analyst_reports", {}),
-                    "risk_mode": "RAM"
+                    "risk_mode": "RAM",
+                    "behavior_card": {},
+                    "behavior_context": {"enabled": False, "mode": "RAM"},
                 }
             return {
                 "decision": {"action": "HOLD"},
@@ -680,7 +760,9 @@ class TraderAgent(BaseAgent):
                 "symbol": snapshot.symbol,
                 "timestamp": snapshot.timestamp,
                 "analyst_reports": perceived_data.get("analyst_reports", {}),
-                "risk_mode": "RAM"
+                "risk_mode": "RAM",
+                "behavior_card": {},
+                "behavior_context": {"enabled": False, "mode": "RAM"},
             }
 
         # 1. System 1 (Rule-based) Enforcement
@@ -777,6 +859,7 @@ class TraderAgent(BaseAgent):
             decision_output["symbol"] = snapshot.symbol
             decision_output["timestamp"] = snapshot.timestamp
             decision_output = self._apply_behavioral_intent_overlay(decision_output, snapshot)
+            self.last_behavior_card = dict(decision_output.get("behavior_card", {}))
             return decision_output
             
         except Exception as e:
@@ -836,61 +919,241 @@ class TraderAgent(BaseAgent):
         else:
             return "Market is quiet."
 
+    def _reference_price_for_plan(self, reasoning_output: Dict[str, Any], decision: Dict[str, Any]) -> float:
+        price = decision.get("price")
+        if price is None:
+            price = reasoning_output.get("price")
+        if price is None and self._price_history:
+            price = self._price_history[-1]
+        return float(max(0.0, float(price or 0.0)))
+
+    def _default_slicing_rule(self, action: str, qty: int, target_notional: Optional[float]) -> str:
+        if qty >= 1000 or (target_notional is not None and target_notional > self.cash_balance * 0.2):
+            horizon = str(getattr(self.persona.investment_horizon, "value", "")).lower()
+            if "long" in horizon:
+                return "vwap-like"
+            return "twap-like"
+        if action in {"BUY", "SELL"} and self.current_trading_intent > 0.75:
+            return "twap-like"
+        return "single"
+
+    def _default_order_type(self, action: str, qty: int, slicing_rule: str) -> OrderType:
+        if slicing_rule in {"twap-like", "vwap-like"}:
+            return OrderType.LIMIT
+        if action == "BUY" and self.current_trading_intent >= 0.85:
+            return OrderType.MARKET
+        if action == "SELL" and self.current_trading_intent <= -0.85:
+            return OrderType.IOC
+        return OrderType.LIMIT
+
+    def _default_cancel_replace_policy(self, order_type: OrderType, slicing_rule: str) -> str:
+        if order_type in {OrderType.MARKET, OrderType.IOC, OrderType.FOK}:
+            return "none"
+        if slicing_rule in {"twap-like", "vwap-like"}:
+            return "cancel-replace"
+        return "none"
+
+    def _default_max_slippage(self, order_type: OrderType, urgency: float) -> float:
+        if order_type == OrderType.MARKET:
+            return min(0.05, 0.02 + 0.03 * urgency)
+        if order_type == OrderType.IOC:
+            return min(0.03, 0.01 + 0.02 * urgency)
+        if order_type == OrderType.FOK:
+            return 0.0
+        if order_type == OrderType.POST_ONLY:
+            return 0.005
+        return min(0.02, 0.005 + 0.015 * urgency)
+
+    def _build_execution_plan(self, reasoning_output: Dict[str, Any]) -> Optional[ExecutionPlan]:
+        decision = dict(reasoning_output.get("decision", {}) or {})
+        action = str(decision.get("action") or decision.get("side") or "HOLD").strip().upper()
+        if action in {"", "HOLD"}:
+            return None
+        if action not in {"BUY", "SELL"}:
+            return None
+
+        symbol = str(reasoning_output.get("symbol", "UNKNOWN"))
+        timestamp = float(reasoning_output.get("timestamp", time.time()))
+        side = OrderSide.BUY if action == "BUY" else OrderSide.SELL
+        reference_price = self._reference_price_for_plan(reasoning_output, decision)
+
+        target_qty = decision.get("target_qty", decision.get("qty"))
+        if target_qty is not None:
+            target_qty = max(0, int(target_qty))
+        target_notional = decision.get("target_notional")
+        if target_notional is not None:
+            target_notional = max(0.0, float(target_notional))
+        if target_qty is None and target_notional is not None and reference_price > 0:
+            target_qty = int(target_notional / reference_price)
+
+        if target_qty is None:
+            target_qty = 0
+
+        legacy_mode = not self.execution_plan_enabled
+
+        if action == "BUY" and reference_price > 0:
+            if legacy_mode:
+                affordable = int(self.cash_balance / reference_price) // 100 * 100
+            else:
+                affordable = int(self.cash_balance / reference_price)
+            target_qty = min(target_qty, affordable)
+        elif action == "SELL":
+            target_qty = min(target_qty, int(self.portfolio.get(symbol, 0)))
+
+        if target_qty <= 0 and (target_notional is None or target_notional <= 0):
+            return None
+
+        urgency = float(decision.get("urgency", max(0.0, min(1.0, abs(self.current_trading_intent)))))
+        if not 0.0 <= urgency <= 1.0:
+            urgency = max(0.0, min(1.0, urgency))
+
+        if legacy_mode:
+            order_type = OrderType.LIMIT
+            slicing_rule = "single"
+            cancel_replace_policy = "none"
+            time_horizon = 1
+        else:
+            order_type = OrderType.LIMIT
+            if "order_type" in decision:
+                try:
+                    order_type = OrderType(str(decision["order_type"]).strip().lower().replace("_", "-"))
+                except Exception:
+                    order_type = OrderType.LIMIT
+            else:
+                order_type = self._default_order_type(action, target_qty, str(decision.get("slicing_rule", "")).lower())
+
+            slicing_rule = str(decision.get("slicing_rule") or self._default_slicing_rule(action, target_qty, target_notional)).strip().lower()
+            cancel_replace_policy = str(decision.get("cancel_replace_policy") or self._default_cancel_replace_policy(order_type, slicing_rule)).strip().lower()
+            time_horizon = int(decision.get("time_horizon", 1 if slicing_rule == "single" else max(2, min(10, target_qty // 100 if target_qty >= 100 else 3))))
+        if time_horizon <= 0:
+            time_horizon = 1
+
+        participation_rate = float(decision.get("participation_rate", 0.1 if slicing_rule == "single" else 0.2))
+        if not 0.0 <= participation_rate <= 1.0:
+            participation_rate = max(0.0, min(1.0, participation_rate))
+
+        max_slippage = float(decision.get("max_slippage", 0.01 if legacy_mode else self._default_max_slippage(order_type, urgency)))
+        if max_slippage < 0:
+            max_slippage = 0.0
+
+        child_order_schedule = decision.get("child_order_schedule", [])
+        if not isinstance(child_order_schedule, list):
+            child_order_schedule = []
+        child_order_schedule = [max(0, int(q)) for q in child_order_schedule if int(q) > 0]
+
+        if not legacy_mode and not child_order_schedule and slicing_rule in {"twap-like", "vwap-like"}:
+            plan_qty = max(target_qty, 1)
+            parts = max(1, time_horizon)
+            base = plan_qty // parts
+            remainder = plan_qty % parts
+            child_order_schedule = [base + (1 if i < remainder else 0) for i in range(parts) if base + (1 if i < remainder else 0) > 0]
+
+        snapshot_info = {
+            "symbol": symbol,
+            "timestamp": timestamp,
+            "last_price": reference_price,
+            "cash_balance": float(self.cash_balance),
+            "position": int(self.portfolio.get(symbol, 0)),
+            "portfolio_value": float(self.get_total_value({symbol: reference_price}) if reference_price > 0 else self.cash_balance),
+            "risk_appetite": float(self.current_risk_appetite),
+            "trading_intent": float(self.current_trading_intent),
+            "persona": {
+                "risk_appetite": getattr(self.persona.risk_appetite, "value", str(self.persona.risk_appetite)),
+                "investment_horizon": getattr(self.persona.investment_horizon, "value", str(self.persona.investment_horizon)),
+            },
+        }
+
+        plan = ExecutionPlan(
+            symbol=symbol,
+            agent_id=self.agent_id,
+            action=action,
+            side=side,
+            target_qty=target_qty if target_qty > 0 else None,
+            target_notional=target_notional,
+            urgency=urgency,
+            order_type=order_type,
+            max_slippage=max_slippage,
+            participation_rate=participation_rate,
+            slicing_rule=slicing_rule,
+            cancel_replace_policy=cancel_replace_policy,
+            time_horizon=time_horizon,
+            price=reference_price,
+            timestamp=timestamp,
+            child_order_schedule=child_order_schedule,
+            seed=self.execution_seed,
+            snapshot_info=snapshot_info,
+        )
+
+        config_payload = {
+            "agent_id": self.agent_id,
+            "execution_seed": self.execution_seed,
+            "execution_plan_enabled": self.execution_plan_enabled,
+            "symbol": symbol,
+            "action": action,
+            "side": plan.side.value,
+            "target_qty": plan.target_qty,
+            "target_notional": plan.target_notional,
+            "urgency": plan.urgency,
+            "order_type": plan.order_type.value,
+            "max_slippage": plan.max_slippage,
+            "participation_rate": plan.participation_rate,
+            "slicing_rule": plan.slicing_rule,
+            "cancel_replace_policy": plan.cancel_replace_policy,
+            "time_horizon": plan.time_horizon,
+            "snapshot_info": snapshot_info,
+        }
+        plan.config_hash = hashlib.sha256(json.dumps(config_payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+        plan.metadata.update(
+            {
+                "config_hash": plan.config_hash,
+                "execution_seed": self.execution_seed,
+                "feature_flag_execution_plan": self.execution_plan_enabled,
+                "snapshot_info": snapshot_info,
+            }
+        )
+        return plan
+
     async def decide(
         self,
         reasoning_output: Dict[str, Any],
-    ) -> Optional[Order]:
-        """Convert reasoning output into an executable order."""
-        decision = reasoning_output.get("decision", {})
-        action = decision.get("action", "HOLD")
-        if action == "HOLD" or not action:
-            return None
-
-        qty = int(decision.get("qty", 0) or 0)
-        price = float(decision.get("price", 0.0) or 0.0)
-        symbol = reasoning_output.get("symbol", "UNKNOWN")
-        timestamp = reasoning_output.get("timestamp", time.time())
-
-        if action == "BUY":
-            side = OrderSide.BUY
-        elif action == "SELL":
-            side = OrderSide.SELL
-        else:
-            return None
-        if qty <= 0:
+    ) -> Optional[Any]:
+        """Convert reasoning output into an executable order or execution plan."""
+        plan = self._build_execution_plan(reasoning_output)
+        if plan is None:
             return None
 
         wind_report = self._wind_tunnel_predict()
+        decision = dict(reasoning_output.get("decision", {}) or {})
         decision["wind_tunnel"] = wind_report
         if wind_report.get("valid"):
             pred = float(wind_report.get("predicted_return", 0.0))
             conf = float(wind_report.get("confidence", 0.5))
-            if action == "BUY" and pred < -0.005 and conf > 0.6:
+            if plan.is_buy and pred < -0.005 and conf > 0.6:
                 return None
-            if action == "SELL" and pred > 0.005 and conf > 0.6:
+            if plan.is_sell and pred > 0.005 and conf > 0.6:
                 return None
 
-        if side == OrderSide.BUY:
-            cost = price * qty
+        if plan.is_buy:
+            cost = plan.price * plan.resolved_qty(plan.price)
             if cost > self.cash_balance:
-                qty = int(self.cash_balance / price) // 100 * 100 if price > 0 else 0
-                if qty <= 0:
+                if legacy_mode:
+                    adjusted_qty = int(self.cash_balance / plan.price) // 100 * 100 if plan.price > 0 else 0
+                else:
+                    adjusted_qty = int(self.cash_balance / plan.price) if plan.price > 0 else 0
+                if adjusted_qty <= 0:
                     return None
-        elif side == OrderSide.SELL:
-            holding = self.portfolio.get(symbol, 0)
-            qty = min(qty, int(holding))
-            if qty <= 0:
+                plan.target_qty = adjusted_qty
+        elif plan.is_sell:
+            holding = self.portfolio.get(plan.symbol, 0)
+            plan.target_qty = min(int(plan.target_qty or 0), int(holding))
+            if plan.target_qty <= 0:
                 return None
 
-        return Order(
-            symbol=symbol,
-            price=price,
-            quantity=qty,
-            side=side,
-            order_type=OrderType.LIMIT,
-            agent_id=self.agent_id,
-            timestamp=timestamp,
-        )
+        if self.execution_plan_enabled:
+            plan.metadata["feature_flag_execution_plan"] = True
+            return plan
+
+        return plan.to_order()
 
     async def update_memory(
         self,
@@ -901,6 +1164,23 @@ class TraderAgent(BaseAgent):
         pnl = float(outcome.get("pnl", 0.0) or 0.0)
         pnl_pct = 0.0
         self.brain.state.update_after_trade(pnl, pnl_pct)
+        if hasattr(self.brain, "layered_memory"):
+            try:
+                self.brain.layered_memory.record_outcome(
+                    decision=decision,
+                    outcome=outcome,
+                    market_state={
+                        "news_source": outcome.get("source", "market"),
+                        "panic_level": float(outcome.get("panic_level", 0.0) or 0.0),
+                        "policy_description": outcome.get("policy_description", ""),
+                    },
+                    account_state={
+                        "pnl_pct": pnl_pct,
+                        "market_value": float(outcome.get("market_value", 0.0) or 0.0),
+                    },
+                )
+            except Exception:
+                pass
 
         if abs(pnl) > 1000:
             content = f"Decision: {decision}. Outcome: {outcome}"

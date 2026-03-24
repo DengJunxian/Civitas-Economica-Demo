@@ -1,0 +1,23 @@
+{
+  "total_events": 1,
+  "events": [
+    {
+      "tick": 2,
+      "type": "spoofing_like_pattern",
+      "agent_id": "spoofing_agent",
+      "detail": {
+        "target_order_id": "spoofing_agent_layer_1",
+        "qty": 5500,
+        "lifetime": 1,
+        "tag": "spoof_layer"
+      }
+    }
+  ],
+  "agent_submit_count": {
+    "rumor_manipulator_agent": 2,
+    "spoofing_agent": 2
+  },
+  "agent_cancel_count": {
+    "spoofing_agent": 2
+  }
+}

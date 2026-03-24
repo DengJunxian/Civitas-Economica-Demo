@@ -1,15 +1,50 @@
 ﻿# file: agents/population.py
 
-import numpy as np
-from typing import List, Dict, Tuple, Optional, Any
-from dataclasses import dataclass, field
+import os
 import random
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List, Dict, Tuple, Optional, Any, Iterable, Protocol, runtime_checkable
+
+import numpy as np
 
 from core.exchange.evolution import EvolutionOperators, StrategyGenome
 
 from config import GLOBAL_CONFIG
 from agents.brain import DeepSeekBrain
 from agents.debate_brain import DebateBrain
+from agents.brain import build_runtime_metadata, resolve_feature_flags, stable_json_hash
+from agents.persona import Persona, PersonaGenerator
+
+
+@runtime_checkable
+class AgentProtocol(Protocol):
+    """Shared agent contract for trader/persona/population compatibility."""
+
+    agent_id: str
+    cash_balance: float
+    persona: Persona
+
+
+@runtime_checkable
+class PopulationEngine(Protocol):
+    """Shared population contract for live, replay, and calibration flows."""
+
+    seed: int
+    config_hash: str
+    feature_flags: Dict[str, bool]
+
+    def iter_agents(self) -> Iterable[AgentProtocol]: ...
+
+    def get_agent_by_id(self, agent_id: str) -> Optional[AgentProtocol]: ...
+
+    def register_agent(self, agent: AgentProtocol) -> None: ...
+
+    def snapshot_metadata(self) -> Dict[str, Any]: ...
+
+    def build_market_distribution_report(self, personas: Optional[List[Persona]] = None, *, regime: Optional[str] = None, seed: Optional[int] = None) -> Dict[str, Any]: ...
+
+    def render_market_distribution_report(self, personas: Optional[List[Persona]] = None) -> str: ...
 
 # --- Tier 1: 鏅鸿兘浣撳畾涔?---
 
@@ -24,6 +59,7 @@ class SmartAgent:
     cash: float
     holdings: int
     cost_basis: float
+    persona: Persona = field(default_factory=Persona)
     
     # 褰卞搷鍔涚郴鏁?(鍐冲畾鑳借鐩栧灏?Tier 2 鑺傜偣)
     influence_factor: float = 1.0
@@ -31,11 +67,40 @@ class SmartAgent:
     risk_appetite: float = 0.5
     trading_intent: float = 0.0
     strategy_genome: Optional[StrategyGenome] = None
+    runtime_metadata: Dict[str, Any] = field(default_factory=dict)
     
     @property
     def market_value(self) -> float:
         # 娉? 闇€澶栭儴娉ㄥ叆褰撳墠浠锋牸璁＄畻锛屾澶勪粎涓哄崰浣?
         return 0.0
+
+    @property
+    def agent_id(self) -> str:
+        return self.id
+
+    @property
+    def cash_balance(self) -> float:
+        return float(self.cash)
+
+    def profile_signature(self) -> str:
+        payload = {
+            "agent_id": self.id,
+            "cash": float(self.cash),
+            "holdings": int(self.holdings),
+            "cost_basis": float(self.cost_basis),
+            "persona": self.persona.to_dict(),
+        }
+        return stable_json_hash(payload)
+
+    def snapshot_metadata(self) -> Dict[str, Any]:
+        return {
+            "agent_id": self.id,
+            "cash_balance": float(self.cash),
+            "holdings": int(self.holdings),
+            "cost_basis": float(self.cost_basis),
+            "persona_signature": self.persona.stable_signature(),
+            "profile_signature": self.profile_signature(),
+        }
 
 # --- Tier 2: 鍚戦噺鍖栫兢浣?---
 
@@ -56,19 +121,48 @@ class StratifiedPopulation:
     IDX_COGNITIVE_TYPE = 4  # 璁ょ煡绫诲瀷: 0=鎶€鏈淳, 1=娑堟伅娲? 2=璺熼娲?
     IDX_CONFIDENCE = 5  # 淇″績鎸囨暟: 0-100
     
-    def __init__(self, n_smart: int = 50, n_vectorized: int = 9950, api_key: str = None, smart_agents: List[Any] = None):
+    def __init__(
+        self,
+        n_smart: int = 50,
+        n_vectorized: int = 9950,
+        api_key: str = None,
+        smart_agents: List[Any] = None,
+        *,
+        seed: Optional[int] = None,
+        feature_flags: Optional[Dict[str, bool]] = None,
+        agents: Optional[List[AgentProtocol]] = None,
+        personas: Optional[List[Persona]] = None,
+        market_regime: str = "default",
+        market_composition_path: Optional[str | Path] = None,
+    ):
         self.n_smart = n_smart
         self.n_vectorized = n_vectorized
         self._api_key = api_key
+        self.seed = self._resolve_seed(seed)
+        self.feature_flags = resolve_feature_flags(feature_flags)
+        self.market_regime = str(market_regime or "default")
+        self.market_composition_path = Path(market_composition_path) if market_composition_path else None
+        self.market_composition = PersonaGenerator.load_market_composition(self.market_composition_path)
+        self._seed_rng(self.seed)
         
         # 1. 鍒濆鍖?Tier 1 (Smart Agents)
+        self.compat_agents: List[AgentProtocol] = []
         if smart_agents is not None:
-             self.smart_agents = smart_agents
-             self.n_smart = len(smart_agents)
-             print(f"[*] 浣跨敤澶栭儴浼犲叆鐨?{self.n_smart} 涓?Smart Agents")
+            self.smart_agents = smart_agents
+            self.n_smart = len(smart_agents)
+            print(f"[*] 浣跨敤澶栭儴浼犲叆鐨?{self.n_smart} 涓?Smart Agents")
+        elif personas is not None:
+            self.smart_agents = []
+            self.n_smart = len(personas)
+            self._init_smart_agents_from_personas(personas)
+            print(f"[*] 浣跨敤澶栭儴浼犲叆鐨?{self.n_smart} 涓?Smart Agents")
         else:
             self.smart_agents: List[SmartAgent] = []
             self._init_smart_agents()
+
+        if agents:
+            for agent in agents:
+                self.register_agent(agent)
         
         # 2. 鍒濆鍖?Tier 2 (Vectorized Matrix)
         # Shape: (N, 6) -> [Cash, Holdings, Cost, Sentiment, CognitiveType, Confidence]
@@ -97,16 +191,60 @@ class StratifiedPopulation:
         self.evolution_ops = EvolutionOperators(mutation_rate=0.20, mutation_scale=0.12)
         self.smart_genomes: Dict[str, StrategyGenome] = {}
         self._init_strategy_genomes()
+        self.snapshot_info = self._describe_snapshot()
+        self.runtime_metadata = build_runtime_metadata(
+            seed=self.seed,
+            config=self._build_config_signature(),
+            snapshot=self.snapshot_info,
+            feature_flags=self.feature_flags,
+        )
+        self.config_hash = self.runtime_metadata["config_hash"]
+        self.data_snapshot_info = dict(self.snapshot_info)
+        self.market_distribution_report = self.build_market_distribution_report()
+
+    def _resolve_seed(self, seed: Optional[int]) -> int:
+        if seed is not None:
+            return int(seed)
+        env_seed = os.environ.get("CIVITAS_SEED")
+        if env_seed is not None and env_seed.strip():
+            try:
+                return int(env_seed)
+            except ValueError:
+                pass
+        return 0
+
+    def _seed_rng(self, seed: int) -> None:
+        random.seed(seed)
+        np.random.seed(seed)
+
+    def _build_config_signature(self) -> Dict[str, Any]:
+        return {
+            "n_smart": int(self.n_smart),
+            "n_vectorized": int(self.n_vectorized),
+            "api_key_enabled": bool(self._api_key),
+            "feature_flags": dict(self.feature_flags),
+            "market_regime": self.market_regime,
+            "market_composition_path": str(self.market_composition_path) if self.market_composition_path else "",
+            "market_composition_hash": stable_json_hash(self.market_composition),
+        }
+
+    def _describe_snapshot(self) -> Dict[str, Any]:
+        return {
+            "smart_agent_count": len(getattr(self, "smart_agents", [])),
+            "compat_agent_count": len(getattr(self, "compat_agents", [])),
+            "vectorized_shape": list(self.state.shape) if hasattr(self, "state") else [0, 0],
+            "market_regime": getattr(self, "market_regime", "default"),
+            "market_composition_path": str(self.market_composition_path) if getattr(self, "market_composition_path", None) else "",
+        }
         
     def _init_smart_agents(self):
         """Initialize Tier-1 smart agents."""
+        if self.n_smart <= 0:
+            self.smart_agents = []
+            return
         print(f"[*] 鍒濆鍖?{self.n_smart} 浣?DeepSeek 鏅鸿兘浣?..")
         for i in range(self.n_smart):
-            # 闅忔満鐢熸垚涓€浜涘樊寮傚寲鐨勪汉璁?
-            persona = {
-                "risk_preference": random.choice(["aggressive", "balanced", "conservative"]),
-                "loss_aversion": random.uniform(1.5, 3.0)
-            }
+            persona = self._random_persona_template(i)
             # 鍓?涓狝gent榛樿浣跨敤DebateBrain锛堝惎鐢ㄨ京璁哄姛鑳斤級
             if i < 5:
                 brain = DebateBrain(agent_id=f"Debate_{i}", persona=persona, api_key=self._api_key)
@@ -141,6 +279,52 @@ class StratifiedPopulation:
                 "peer_anchor": anchor,
                 "policy_anchor": anchor,
             }
+            self.smart_agents.append(agent)
+
+    def _random_persona_template(self, index: int) -> Persona:
+        """Build a deterministic persona template for synthetic agents."""
+        if not self.feature_flags.get("population_protocol_v1", True):
+            from agents.persona import InvestmentHorizon, RiskAppetite
+
+            return Persona(
+                name=f"SmartPersona_{index:03d}",
+                risk_appetite=random.choice(list(RiskAppetite)),
+                investment_horizon=random.choice(list(InvestmentHorizon)),
+                conformity=random.betavariate(2, 2),
+                influence=min(0.95, random.paretovariate(3) / 5.0),
+                patience=random.uniform(0.2, 0.9),
+                loss_aversion=random.uniform(1.5, 3.0),
+                overconfidence=random.uniform(0.0, 0.6),
+                reference_adaptivity=random.uniform(0.2, 0.8),
+            )
+
+        rng = random.Random(self.seed + index)
+        weights = PersonaGenerator._resolve_composition_weights(regime=self.market_regime, composition=self.market_composition)
+        archetype_key = PersonaGenerator._sample_archetype_key(rng, weights)
+        persona = Persona.from_archetype(
+            archetype_key,
+            name=f"SmartPersona_{index:03d}",
+            mutable_state=PersonaGenerator._generate_mutable_state(rng),
+        )
+        persona.name = persona.name or f"SmartPersona_{index:03d}"
+        persona.mutable_state.update_semantic("population_index", index)
+        return persona
+
+    def _init_smart_agents_from_personas(self, personas: List[Persona]) -> None:
+        self.smart_agents = []
+        for idx, persona in enumerate(personas):
+            agent = SmartAgent(
+                id=persona.name or f"Persona_{idx:03d}",
+                brain=DeepSeekBrain(
+                    agent_id=persona.name or f"Persona_{idx:03d}",
+                    persona={"risk_preference": persona.risk_appetite.value, "loss_aversion": persona.loss_aversion},
+                    api_key=self._api_key,
+                ),
+                cash=GLOBAL_CONFIG.DEFAULT_CASH,
+                holdings=int(random.uniform(1000, 10000)),
+                cost_basis=3000.0,
+                persona=persona,
+            )
             self.smart_agents.append(agent)
 
     def _init_strategy_genomes(self) -> None:
@@ -200,7 +384,87 @@ class StratifiedPopulation:
         for agent in self.smart_agents:
             if agent.id == agent_id:
                 return agent
+        for agent in self.compat_agents:
+            candidate_id = getattr(agent, "agent_id", getattr(agent, "id", None))
+            if candidate_id == agent_id:
+                return agent  # type: ignore[return-value]
         return None
+
+    @property
+    def agents(self) -> List[AgentProtocol]:
+        return list(self.iter_agents())
+
+    def iter_agents(self) -> Iterable[AgentProtocol]:
+        yield from self.smart_agents
+        yield from self.compat_agents
+
+    def register_agent(self, agent: AgentProtocol) -> None:
+        """Register a trader/persona-compatible agent into the shared engine."""
+        if isinstance(agent, SmartAgent):
+            self.smart_agents.append(agent)
+            return
+        if not hasattr(agent, "persona"):
+            setattr(agent, "persona", Persona(name=str(getattr(agent, "agent_id", getattr(agent, "id", "Anonymous")))))
+        self.compat_agents.append(agent)
+
+    def build_market_distribution_report(
+        self,
+        personas: Optional[List[Persona]] = None,
+        *,
+        regime: Optional[str] = None,
+        seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        def _extract_persona(agent: Any) -> Optional[Persona]:
+            direct = getattr(agent, "persona", None)
+            if direct is not None:
+                return direct
+            core = getattr(agent, "core", None)
+            if core is not None:
+                return getattr(core, "persona", None)
+            return None
+
+        if personas is not None:
+            source_personas = personas
+        else:
+            source_personas = [p for p in (_extract_persona(agent) for agent in self.smart_agents) if p is not None]
+            if not source_personas:
+                source_personas = [p for p in (_extract_persona(agent) for agent in self.compat_agents) if p is not None]
+        report = PersonaGenerator.build_market_distribution_report(
+            source_personas,
+            regime=regime or self.market_regime,
+            seed=self.seed if seed is None else int(seed),
+            composition_path=self.market_composition_path,
+            snapshot=self.snapshot_metadata() if hasattr(self, "runtime_metadata") else {},
+        )
+        self.market_distribution_report = report
+        return report
+
+    def render_market_distribution_report(self, personas: Optional[List[Persona]] = None) -> str:
+        if personas is None and getattr(self, "market_distribution_report", None):
+            return str(self.market_distribution_report.get("markdown", ""))
+        report = self.build_market_distribution_report(personas=personas)
+        return str(report.get("markdown", ""))
+
+    def snapshot_metadata(self) -> Dict[str, Any]:
+        payload = dict(self.runtime_metadata)
+        signatures: List[str] = []
+        for agent in self.smart_agents:
+            if hasattr(agent, "profile_signature"):
+                signatures.append(str(agent.profile_signature()))
+                continue
+            core = getattr(agent, "core", None)
+            persona = getattr(core, "persona", None)
+            if persona is not None and hasattr(persona, "stable_signature"):
+                signatures.append(str(persona.stable_signature()))
+                continue
+            agent_id = getattr(agent, "agent_id", getattr(agent, "id", "unknown"))
+            signatures.append(stable_json_hash({"agent_id": agent_id}))
+        payload["agent_signatures"] = signatures
+        payload["smart_agent_count"] = len(self.smart_agents)
+        payload["compat_agent_count"] = len(self.compat_agents)
+        payload["market_regime"] = self.market_regime
+        payload["market_distribution_report"] = dict(getattr(self, "market_distribution_report", {}) or {})
+        return payload
 
     def _init_vectorized_state(self):
         """Initialize Tier-2 vectorized state matrix."""
@@ -344,9 +608,14 @@ class StratifiedPopulation:
             adjacency matrix (N_vec, N_smart) 鐨勭瀵嗚〃绀烘垨绱㈠紩鍒楄〃
             杩欓噷绠€鍖栦负: 姣忎釜 Tier 2 鍙湁涓€涓富瑕佸叧娉ㄧ殑 Tier 1 (Guru)
         """
+        if self.n_smart <= 0:
+            return np.zeros(self.n_vectorized, dtype=np.int32)
         # 甯曠疮鎵樺垎甯冿細灏戞暟澶鎷ユ湁缁濆ぇ澶氭暟绮変笣
         weights = np.random.pareto(a=2.0, size=self.n_smart)
-        weights /= weights.sum()
+        total = float(weights.sum())
+        if total <= 0:
+            return np.zeros(self.n_vectorized, dtype=np.int32)
+        weights /= total
         
         # 涓烘瘡涓暎鎴峰垎閰嶄竴涓?甯﹀ご澶у摜"
         guru_indices = np.random.choice(
@@ -366,13 +635,19 @@ class StratifiedPopulation:
         Returns:
             Dict[agent_id, List[鍏虫敞鐨刟gent_id]]
         """
+        if self.n_smart <= 0 or not self.smart_agents:
+            return {}
         network = {}
         agent_ids = [a.id for a in self.smart_agents]
         
         for i, agent_id in enumerate(agent_ids):
             # 姣忎釜Agent鍏虫敞2-4涓叾浠朅gent
-            n_follow = random.randint(2, min(4, self.n_smart - 1))
+            max_follow = max(1, min(4, self.n_smart - 1))
+            n_follow = random.randint(1, max_follow)
             others = [aid for aid in agent_ids if aid != agent_id]
+            if not others:
+                network[agent_id] = []
+                continue
             
             # 鏉冮噸锛氬€惧悜浜庡叧娉ㄧ紪鍙风浉杩戠殑锛堟ā鎷熷湀瀛愭晥搴旓級
             weights = [1.0 / (1 + abs(j - i)) for j in range(len(others))]

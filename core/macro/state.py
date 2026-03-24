@@ -70,6 +70,9 @@ class MacroContextDTO:
     sector_outlook: Dict[str, float] = field(default_factory=dict)
     household_risk_shift: float = 0.0
     firm_hiring_signal: float = 0.0
+    policy_event: Dict[str, Any] = field(default_factory=dict)
+    policy_package: Dict[str, Any] = field(default_factory=dict)
+    transmission_layers: Dict[str, Any] = field(default_factory=dict)
 
     def to_payload(self) -> Dict[str, Any]:
         """Serialize for transport through generic dict-based APIs."""
@@ -80,6 +83,9 @@ class MacroContextDTO:
             "sector_outlook": {k: float(v) for k, v in self.sector_outlook.items()},
             "household_risk_shift": float(self.household_risk_shift),
             "firm_hiring_signal": float(self.firm_hiring_signal),
+            "policy_event": dict(self.policy_event),
+            "policy_package": dict(self.policy_package),
+            "transmission_layers": dict(self.transmission_layers),
             "macro_state": self.macro_state.to_dict(),
         }
 
@@ -101,6 +107,9 @@ class MacroContextDTO:
             sector_outlook=sector_outlook,
             household_risk_shift=float(payload.get("household_risk_shift", 0.0)),
             firm_hiring_signal=float(payload.get("firm_hiring_signal", 0.0)),
+            policy_event=dict(payload.get("policy_event", {})) if isinstance(payload, Mapping) else {},
+            policy_package=dict(payload.get("policy_package", {})) if isinstance(payload, Mapping) else {},
+            transmission_layers=dict(payload.get("transmission_layers", {})) if isinstance(payload, Mapping) else {},
         )
 
     @classmethod

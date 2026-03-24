@@ -1,12 +1,13 @@
 # file: agents/brain.py
 
+import hashlib
 import json
 import os
 import re
 import time
 from collections import OrderedDict, defaultdict, deque
 import numpy as np
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Mapping
 from dataclasses import dataclass, field
 from openai import OpenAI
 from config import GLOBAL_CONFIG
@@ -18,6 +19,68 @@ from core.validator import (
     export_decision_trace,
     validate_analyst_card,
 )
+from agents.cognition.layered_memory import LayeredMemory
+
+
+def env_flag(name: str, default: bool = False) -> bool:
+    """Parse a boolean environment flag."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    return str(raw).strip().lower() in {"1", "true", "yes", "on", "y"}
+
+
+def stable_json_hash(payload: Any) -> str:
+    """Return a deterministic SHA-256 hash for a JSON-serializable payload."""
+    try:
+        encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+    except TypeError:
+        encoded = json.dumps(str(payload), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def resolve_feature_flags(overrides: Optional[Mapping[str, bool]] = None) -> Dict[str, bool]:
+    """Resolve feature flags from environment defaults plus explicit overrides."""
+    defaults = {
+        "manager_orchestration_v1": True,
+        "manager_external_analysts_v1": False,
+        "manager_debate_v1": False,
+        "manager_metadata_v1": True,
+        "population_protocol_v1": True,
+    }
+    flags = {name: env_flag(f"CIVITAS_{name.upper()}", default) for name, default in defaults.items()}
+    if overrides:
+        for name, value in overrides.items():
+            flags[str(name)] = bool(value)
+    return flags
+
+
+def build_runtime_metadata(
+    *,
+    seed: int,
+    config: Mapping[str, Any],
+    snapshot: Optional[Mapping[str, Any]] = None,
+    feature_flags: Optional[Mapping[str, bool]] = None,
+) -> Dict[str, Any]:
+    """Create reproducible metadata for logs, reports, and tests."""
+    snapshot_payload = dict(snapshot or {})
+    feature_payload = dict(feature_flags or {})
+    config_payload = dict(config)
+    config_hash = stable_json_hash(
+        {
+            "seed": int(seed),
+            "config": config_payload,
+            "feature_flags": feature_payload,
+            "snapshot": snapshot_payload,
+        }
+    )
+    return {
+        "seed": int(seed),
+        "config_hash": config_hash,
+        "config": config_payload,
+        "snapshot": snapshot_payload,
+        "feature_flags": feature_payload,
+    }
 
 # --- 1. 向量记忆模块 (Vector Memory) ---
 
@@ -233,6 +296,14 @@ class DeepSeekBrain:
         self.persona = persona
         self.memory = VectorMemory()
         self.state = AgentState()  # 持久化状态
+        self.layered_memory_enabled = env_flag("CIVITAS_LAYERED_MEMORY_V1", False)
+        self.layered_memory = LayeredMemory(
+            agent_id=self.agent_id,
+            seed=self._derive_layered_memory_seed(),
+            enabled=self.layered_memory_enabled,
+            institution_type=self._infer_institution_type(),
+            config={"persona": self.persona},
+        )
         self._api_healthy = False
         self._last_error = None
         
@@ -259,6 +330,61 @@ class DeepSeekBrain:
         self._api_healthy = True
         self.risk_committee = RiskCommittee()
         self.policy_committee = PolicyCommittee()
+
+    def _derive_layered_memory_seed(self) -> int:
+        payload = {
+            "agent_id": self.agent_id,
+            "persona": self.persona,
+        }
+        digest = stable_json_hash(payload)
+        return int(digest[:8], 16)
+
+    def _infer_institution_type(self) -> str:
+        persona = self.persona if isinstance(self.persona, dict) else {}
+        candidates = [
+            str(persona.get("institution_type", "")),
+            str(persona.get("role", "")),
+            str(persona.get("agent_class", "")),
+            str(self.agent_id),
+        ]
+        label = " ".join(candidates).lower()
+        mapping = {
+            "state_stabilization_fund": ["state", "stabil", "national team", "national_team", "证金", "平准"],
+            "pension_fund": ["pension", "养老"],
+            "mutual_fund": ["mutual", "公募", "fund_manager", "asset_manager"],
+            "insurer": ["insurer", "insurance", "保险"],
+            "market_maker": ["maker", "做市"],
+            "prop_desk": ["prop", "desk", "自营"],
+            "etf_arbitrageur": ["etf", "arb", "arbitrage"],
+            "rumor_trader": ["rumor", "谣言"],
+            "retail_day_trader": ["day_trader", "daytrader", "intraday"],
+            "retail_swing": ["retail", "swing", "个人", "散户"],
+        }
+        for institution, tokens in mapping.items():
+            if any(token in label for token in tokens):
+                return institution
+        return "retail_swing"
+
+    def _apply_behavior_layer(
+        self,
+        *,
+        decision: Dict[str, Any],
+        market_state: Dict[str, Any],
+        account_state: Dict[str, Any],
+        emotional_state: str,
+        social_signal: str,
+        snapshot_info: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if not hasattr(self, "layered_memory") or self.layered_memory is None:
+            return {"decision": dict(decision), "behavior_card": {}, "behavior_context": {"enabled": False}}
+        return self.layered_memory.apply_decision_overlay(
+            decision,
+            market_state=market_state,
+            account_state=account_state,
+            emotional_state=emotional_state,
+            social_signal=social_signal,
+            snapshot_info=snapshot_info,
+        )
     
     def _generate_cache_key(self, market_state: Dict, account_state: Dict) -> str:
         """
@@ -748,12 +874,28 @@ JSON 格式示例：
 
         manager_final_card = aggregate_analyst_cards(analyst_cards, risk_alert=risk_alert)
         decision_json = self._decision_from_manager_card(manager_final_card, account_state, market_state)
+        behavior_bundle = self._apply_behavior_layer(
+            decision=decision_json,
+            market_state=market_state,
+            account_state=account_state,
+            emotional_state=emotional_state,
+            social_signal=social_signal,
+            snapshot_info={
+                "price": _safe_float(market_state.get("price", market_state.get("last_price", 0.0)), 0.0),
+                "trend": market_state.get("trend", "neutral"),
+                "panic_level": _safe_float(market_state.get("panic_level", 0.0), 0.0),
+                "policy_description": policy_event,
+            },
+        )
+        decision_json = behavior_bundle["decision"]
+        behavior_card = behavior_bundle["behavior_card"]
 
         reasoning = (
             f"manager_action={manager_final_card.get('recommended_action', 'hold')}; "
             f"signal={manager_final_card.get('aggregated_signal', 0.0):.3f}; "
             f"calibrated_conf={manager_final_card.get('calibrated_confidence', 0.0):.3f}; "
-            f"risk_level={risk_alert.get('level', 'normal')}"
+            f"risk_level={risk_alert.get('level', 'normal')}; "
+            f"behavior_budget={behavior_card.get('current_risk_budget', 0.0):.3f}"
         )
         emotion_score = self._analyze_emotion(reasoning, decision_json)
 
@@ -768,6 +910,7 @@ JSON 格式示例：
             "risk_alert": risk_alert,
             "policy_conditions": policy_update,
             "decision": decision_json,
+            "behavior_card": behavior_card,
             "model_used": model_used,
         }
         trace_path = export_decision_trace(decision_trace)
@@ -796,6 +939,8 @@ JSON 格式示例：
             "risk_alerts": risk_alert,
             "policy_conditions": policy_update,
             "calibration": manager_final_card.get("calibration", {}),
+            "behavior_card": behavior_card,
+            "behavior_context": behavior_bundle.get("behavior_context", {}),
             "decision_trace_path": trace_path,
         }
 
@@ -975,9 +1120,42 @@ JSON 格式示例：
             "qty": max(0, qty),
             "confidence": abs(total_signal)
         }
-        
+
+        behavior_bundle = self._apply_behavior_layer(
+            decision=decision,
+            market_state={
+                "price": float(price),
+                "last_price": float(price),
+                "trend": trend,
+                "market_trend": trend,
+                "panic_level": float(panic_level),
+                "policy_description": str(text_regime),
+                "policy_news": str(text_regime),
+                "text_sentiment_score": float(text_sentiment),
+                "text_policy_shock": float(text_policy_shock),
+                "text_regime_bias": str(text_regime),
+                "news_source": "local_rules",
+            },
+            account_state={
+                "cash": float(cash),
+                "market_value": float(market_value),
+                "pnl_pct": float(pnl_pct),
+            },
+            emotional_state=str(emotional_state),
+            social_signal=str(social_signal),
+            snapshot_info={
+                "price": float(price),
+                "trend": trend,
+                "panic_level": float(panic_level),
+                "pnl_pct": float(pnl_pct),
+            },
+        )
+        decision = behavior_bundle.get("decision", decision)
+        behavior_card = behavior_bundle.get("behavior_card", {})
+
         reasoning = "【快速决策模式】\n" + "\n".join([f"• {p}" for p in reasoning_parts])
-        
+        reasoning += f"\n• behavior_budget={behavior_card.get('current_risk_budget', 0.0):.3f}"
+
         # 记录思维链历史
         thought_record = ThoughtRecord(
             agent_id=self.agent_id,
@@ -990,11 +1168,13 @@ JSON 格式示例：
         DeepSeekBrain.thought_history[self.agent_id].append(thought_record)
         if len(DeepSeekBrain.thought_history[self.agent_id]) > 20:
             DeepSeekBrain.thought_history[self.agent_id].pop(0)
-        
+
         return {
             "decision": decision,
             "reasoning": reasoning,
             "raw_content": "",
             "emotion_score": emotion_score,
-            "model_used": "local_rules"
+            "model_used": "local_rules",
+            "behavior_card": behavior_card,
+            "behavior_context": behavior_bundle.get("behavior_context", {}),
         }

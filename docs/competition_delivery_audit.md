@@ -4,13 +4,14 @@ Audit perspective: provincial / national style review for the AI application cat
 
 ## 1. What was verified in the repository
 
-The following checks were executed locally on 2026-03-16:
+The following checks were executed locally on 2026-03-24:
 
 - `python -m pip check`: passed
-- `python -m compileall -q .`: passed
-- `pytest -q`: passed, `227 passed` in the latest full run
+- `python -m compileall -q app.py main.py config.py simulation_ipc.py simulation_runner.py regulator_agent.py agents core engine policy ui tests`: passed
+- `pytest -q`: passed, `279 passed` in the latest full run
 - `import app`: passed
 - `main.check_environment()`: passed in a non-interactive terminal without API keys
+- `python -m streamlit run app.py --server.headless true --server.port 8501`: returned `HTTP 200`
 
 ## 2. Engineering fixes completed during this audit
 
@@ -20,8 +21,11 @@ The following checks were executed locally on 2026-03-16:
 - Added `requirements-lock.txt` for the verified local environment.
 - Rewrote `.env.example` into a readable and submission-ready template.
 - Added one-click startup scripts and a preflight delivery check script.
+- Added Windows asyncio + pyzmq compatibility handling for IPC runtime warnings.
+- Narrowed the preflight `compileall` scope to project source directories, avoiding temporary directory scan noise.
 - Updated the demo script to match the current five-entry UI and added backup demo paths.
 - Added delivery docs, deployment docs, user manual, structure guide, interface spec, data/model provenance note, and defense Q&A.
+- Added the contest-facing design specification and project summary documents.
 - Added `readme.txt` for compressed-package distribution where Markdown rendering may be unavailable.
 
 ## 3. A. Engineering deliverable completeness

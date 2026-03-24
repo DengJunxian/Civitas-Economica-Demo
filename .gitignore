@@ -22,6 +22,9 @@ build/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+.pytest_tmp/
+.pytest_tmp_check/
+.tmp/
 
 # Generated runtime outputs
 .playwright-cli/
@@ -33,6 +36,7 @@ outputs/*.html
 outputs/*.png
 outputs/*.json
 outputs/*.csv
+tmp/pytest_realism_reporting/
 
 # Temporary and local data caches
 tmp_akshare_test.py

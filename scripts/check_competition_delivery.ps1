@@ -44,6 +44,20 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 $pythonExe = Resolve-PythonExe -RepoRoot $repoRoot
 $script:checks = @()
+$compileTargets = @(
+    "app.py",
+    "main.py",
+    "config.py",
+    "simulation_ipc.py",
+    "simulation_runner.py",
+    "regulator_agent.py",
+    "agents",
+    "core",
+    "engine",
+    "policy",
+    "ui",
+    "tests"
+)
 
 Write-Host "[Civitas] Repo root: $repoRoot"
 Write-Host "[Civitas] Python: $pythonExe"
@@ -107,8 +121,8 @@ try {
 }
 
 try {
-    & $pythonExe -m compileall -q . | Out-Host
-    Add-Check -Name "compileall" -Status "PASS" -Detail "python files compile"
+    & $pythonExe -m compileall -q @compileTargets | Out-Host
+    Add-Check -Name "compileall" -Status "PASS" -Detail (($compileTargets -join ", ") + " compile")
 } catch {
     Add-Check -Name "compileall" -Status "FAIL" -Detail $_.Exception.Message
 }

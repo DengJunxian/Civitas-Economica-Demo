@@ -1,262 +1,272 @@
-# Civitas Economica Demo
+﻿# Civitas Economica：面向计算机设计大赛人工智能应用赛道的多智能体金融政策风洞沙盘
 
-Civitas Economica 是一个多智能体社会经济与金融市场仿真沙箱，核心包含 C++ 限价撮合引擎（LOB）、IPC 调度机制与 Streamlit 可视化前端。
+## 项目简介
+Civitas Economica 是一个将大语言模型、多智能体仿真、金融市场微观结构、政策推演与监管优化结合起来的人工智能应用项目。系统围绕“政策输入 -> 智能体决策 -> 市场撮合 -> 风险评估 -> 可视化解释”构建完整闭环，用于演示宏观政策、谣言冲击、监管干预等情景下的市场行为演化。
 
-## 项目亮点
+项目当前提供本地离线演示模式，评委无需配置云端 API Key 即可启动内置场景并完成完整展示；若需要联网扩展，也支持 DeepSeek 与智谱模型接口。
 
-## 2026 重构新增（可复现优先）
+## 已完成的本地实机验证
+2026-03-24 在当前仓库环境完成如下验证：
 
-- 新增统一事件库：`core/event_store.py`（Parquet + snapshot/scenario manifest + `visibility_time` 防未来泄漏）。
-- 新增统一实验账本：`core/experiment_manifest.py`（`git_commit/config_hash/seed/dataset_snapshot_id`）。
-- 新增自动校准管线：`core/calibration_pipeline.py`（Gaussian Process Bayesian Optimization + Evolutionary 两后端，train/validation/holdout）。
-- 监管闭环升级：`regulator_agent.py` 新增 A/B 反事实与 Pareto 前沿输出入口 `run_regulatory_closed_loop(...)`，前端新增独立 `监管优化` 可视化页。
-- 新增 hybrid 规模化基准：`core/hybrid_simulation_benchmark.py`（1k/5k/10k/50k agent 指标）。
-- 前端入口重命名为六类能力页，并保留旧入口兼容映射（`app.py`）。
-- 新增合规文档三件套：
-  - `THIRD_PARTY_OPEN_SOURCE_DISCLOSURE.md`
-  - `AI_TOOL_DISCLOSURE.md`
-  - `CONTEST_DELIVERY_CHECKLIST.md`
+- `python -m pip check`：通过
+- `python -m compileall -q app.py main.py config.py simulation_ipc.py simulation_runner.py regulator_agent.py agents core engine policy ui tests`：通过
+- `pytest -q`：`279 passed`，总耗时约 `6 分 35 秒`
+- `python -m streamlit run app.py --server.headless true --server.port 8501`：本地启动成功，返回 `HTTP 200`
+- `powershell -ExecutionPolicy Bypass -File scripts\check_competition_delivery.ps1`：通过
 
-### 最小验证命令
-
-```bash
-pytest -q tests/test_event_store_pipeline.py tests/test_experiment_manifest.py tests/test_calibration_pipeline.py tests/test_regulator_closed_loop.py tests/test_hybrid_benchmark.py tests/test_reporting_bundle_export.py
-```
-
-- `ManagerAgent + 专家分析师（News / Quant / Risk）` 的协同决策机制。
-- LLM 仅输出意图，订单由 FCN（Fundamental-Chartist-Noise）映射层生成，便于可解释与风控。
-- 社会网络传播与行为金融指标（如 CSAD、恐慌热度）联动。
-- 支持 `DEMO_MODE` 答辩演示与 `LIVE_MODE` 联机运行。
-- 内置比赛材料自动生成功能（摘要、提纲、演示脚本、图表索引）。
-
-## 比赛交付快速入口
-
-如果你的目标是“评委机器上尽快跑起来并完成 10 分钟展示”，优先看下面几项：
-
-- 快速启动：`scripts\start_competition_demo.bat`
-- 赛前检查：`powershell -ExecutionPolicy Bypass -File scripts\check_competition_delivery.ps1`
-- 依赖锁定：`requirements-lock.txt`
-- 环境变量示例：`.env.example`
-- 交付总审查：`docs/competition_delivery_audit.md`
-- 部署说明：`docs/deployment_guide.md`
-- 用户手册：`docs/user_manual.md`
-- 项目结构与模块关系：`docs/project_structure.md`
-- 接口说明：`docs/interface_spec.md`
-- 数据/模型/第三方来源说明：`docs/data_model_thirdparty.md`
-- 答辩问答准备：`docs/defense_qa.md`
-- 10 分钟演示脚本：`docs/demo_script.md`
-
-> 说明：`DEMO_MODE` 不依赖 API Key，可直接离线演示。
+## 主要功能
+- 多智能体政策推演：输入政策或载入预设场景，观察价格、成交量、恐慌度、羊群效应等指标变化
+- 历史回放与对照：支持因子回测与 Agent 视角重放，便于展示“仿真世界”和“历史世界”的差异
+- 行为金融诊断：输出市场情绪、CSAD、风险事件链等行为金融指标
+- 监管优化：基于强化学习与 A/B 反事实评估，搜索更优监管动作组合
+- 复现实验能力：提供事件仓库、实验清单、校准管线和基准测试模块
+- 比赛材料导出：可生成答辩摘要、设计提纲、演示脚本与图表索引
 
 ## 1. 硬件环境和操作系统
+说明：除一般 PC 计算机外，无额外专用硬件强制要求；若启用本地大模型推理，则建议增加 GPU 与存储空间。
 
-说明：一般 PC 即可运行；若启用本地大模型（非 API）会显著提高硬件要求。
+| 项目 | 最低要求 | 推荐配置 | 说明 |
+| --- | --- | --- | --- |
+| CPU | x86_64 4 核 | Intel i5 / Ryzen 5 及以上 | 一般演示与测试即可运行 |
+| 内存 | 8 GB | 16 GB 及以上 | 全量测试与多页面切换更稳定 |
+| 磁盘 | 5 GB 可用空间 | 10 GB 及以上 | 依赖安装、输出文件、缓存 |
+| GPU | 非必须 | 8 GB+ 显存 | 仅在本地模型推理时建议 |
+| 操作系统 | Windows 10/11 64 位 | Windows 11 64 位 | 当前仓库已实测 Windows 路径 |
+| 浏览器 | Edge / Chrome | 最新稳定版 | 用于访问 Streamlit 页面 |
 
-- 必须（基础演示）
-  - CPU：x86_64 4 核及以上（推荐 Intel i5 / Ryzen 5 及以上）
-  - 内存：8 GB 及以上（推荐 16 GB）
-  - 磁盘：至少 5 GB 可用空间（依赖安装 + 输出文件）
-  - 操作系统：Windows 10/11 64 位（本项目当前已验证）
-- 推荐（稳定演示）
-  - 内存：16 GB+
-  - 磁盘：10 GB+
-  - 网络：可访问 Python 包源与外部 API（DeepSeek / 智谱）
-- 可选（本地模型推理）
-  - GPU：8 GB+ 显存可尝试轻量模型，24 GB+ 适合更完整本地推理
-  - 额外磁盘：20 GB+（模型文件缓存）
+重要说明：
 
-> 注：仓库已包含 Windows 平台预编译扩展 `_civitas_lob.cp314-win_amd64.pyd`，与 Python 3.14 兼容。
+- 仓库内已包含 Windows + Python 3.14 对应的预编译二进制：`_civitas_lob.cp314-win_amd64.pyd`
+- 若评委机器使用 `Windows + Python 3.14.x`，通常无需重新编译 C++ 撮合扩展
+- 若 Python 版本与该二进制不匹配，则需要安装 Visual Studio Build Tools 后执行重编译
 
 ## 2. 开发平台（含开源/第三方工具）
+说明：以下工具安装完成后，评委即可打开工程并按说明运行。
 
-说明：评委按以下工具安装后可直接打开并运行工程。
+### 2.1 核心开发工具
 
-### 2.1 必装工具
+| 类别 | 名称 | 版本要求 | 用途 |
+| --- | --- | --- | --- |
+| 编程语言 | Python | 推荐 `3.14.x`；兼容 `3.11+` | 项目主运行环境 |
+| 包管理 | pip | `24+`，实测 `25.3` | 安装依赖 |
+| 虚拟环境 | `venv` | Python 内置 | 隔离运行环境 |
+| 版本管理 | Git | 任意稳定版本 | 获取/管理项目源码 |
+| 代码编辑器 | VS Code / PyCharm | 任意稳定版本 | 打开与编辑工程 |
+| C++ 编译工具 | Visual Studio Build Tools 2022 | 含 MSVC v143 | 仅在需要重编译 `_civitas_lob` 时使用 |
 
-- Python：`3.11 ~ 3.14`（本地已验证 `3.14.2`）
-- pip：`24+`（本地已验证 `26.0.1`）
-- 虚拟环境：`venv`（Python 内置）
-- Git：用于拉取或解压后版本管理（可选但推荐）
+### 2.2 本地部署所必须的 Python requirements
+以下依赖为项目当前 `requirements.txt` 的完整内容，本地部署时必须安装：
 
-### 2.2 Windows 下 C++ 扩展相关（仅在需要重编译时）
+```txt
+mesa>=3.0.0
+streamlit>=1.30.0
+pandas>=2.0.0
+numpy>=1.24.0
+plotly>=5.18.0
+openai>=1.0.0
+pyyaml>=6.0.0
+matplotlib>=3.7.0
+sortedcontainers>=2.4.0
+networkx>=3.0.0
+akshare>=1.18.0
+yfinance>=0.2.40
+httpx>=0.27.0
+tenacity>=8.2.0
+scipy>=1.11.0
+pytest>=7.0.0
+pytest-asyncio>=1.0.0
+nest_asyncio>=1.5.0
+pyzmq>=26.0.0
+pybind11>=2.10.0
+setuptools>=42.0.0
+kaleido==0.2.1
+python-docx>=1.1.0
+reportlab>=4.0.0
+```
 
-- Visual Studio Build Tools 2022（MSVC v143，含 C++ 生成工具）
-- 说明：若仅使用仓库内已提供的 `.pyd` 文件，可不重编译。
+### 2.3 依赖用途说明
 
-### 2.3 开源核心依赖（Python）
-
-所有依赖已汇总在 `requirements.txt` 中。可以使用 `pip install -r requirements.txt` 一键安装。
-
-本项目主要模块及其用途如下：
-
-- **仿真框架与可视化前端**：`mesa`, `streamlit`, `plotly`
-- **图表图片导出支持**：`kaleido==0.2.1`（解决“导出 PNG”不可用的问题）
-- **数据分析与科学计算**：`pandas`, `numpy`, `scipy`, `matplotlib`, `networkx`（支持社会网络拓扑）
-- **大模型 API 与并发请求**：`openai`, `httpx`, `tenacity`
-- **金融数据获取**：`akshare`, `yfinance`
-- **自动化报告与文档生成**：`python-docx`, `reportlab`
-- **工程通信与跨语言交互**：`pyzmq` (C++引擎 IPC 通信), `pybind11` (C++ 扩展绑定), `pyyaml`
-- **并发与自动化测试**：`pytest`, `pytest-asyncio`, `nest_asyncio`
-
-> **说明**：上述基础依赖已被纳入当前的 `requirements.txt` 中，确保环境的最小化复现。
-
-### 2.4 第三方服务（按需）
-
-- DeepSeek API（可选）：`DEEPSEEK_API_KEY`
-- 智谱 API（可选）：`ZHIPU_API_KEY`
-
-`DEMO_MODE` 可在无 API Key 情况下完成答辩演示。
+| 依赖类别 | 主要包 | 功能说明 |
+| --- | --- | --- |
+| Web 与界面 | `streamlit`, `plotly` | 构建比赛展示页面、交互控件与图表 |
+| 多智能体/仿真 | `mesa` | 支撑 Agent 仿真框架 |
+| 数据分析 | `pandas`, `numpy`, `scipy`, `matplotlib`, `networkx` | 指标分析、统计计算、图表与网络结构分析 |
+| 模型与接口 | `openai`, `httpx`, `tenacity` | 调用外部模型接口与重试控制 |
+| 金融数据 | `akshare`, `yfinance` | 外部市场数据支持 |
+| 并发通信 | `pyzmq`, `nest_asyncio` | IPC 与异步兼容 |
+| C++ 扩展 | `pybind11`, `setuptools` | 撮合引擎绑定与编译 |
+| 测试 | `pytest`, `pytest-asyncio` | 单元测试与集成测试 |
+| 文档导出 | `kaleido`, `python-docx`, `reportlab` | PNG、Word、PDF 等比赛材料导出 |
+| 配置 | `pyyaml` | 场景包与配置文件解析 |
 
 ## 3. 运行环境和安装说明（包括运行时需要作的配置）
+说明：以下步骤按照“评委机器最小可复现路径”编写。
 
-说明：以下步骤可保证评委最小化复现。
+### 3.1 推荐运行环境
+- 单机本地部署，属于集中式架构
+- 默认 Web 端口：`8501`
+- 实时 IPC 端口：`5555`（PUB）、`5556`（PULL）
+- 推荐浏览器：Edge 或 Chrome
+- 离线演示无需联网；联网模式仅在调用外部模型 API 时需要访问公网
 
-### 3.1 安装步骤
+### 3.2 安装步骤
 
-```bash
+```powershell
 # 1) 进入项目根目录
 cd C:\Users\Deng Junxian\Desktop\Civitas_new
 
-# 2) 创建并激活虚拟环境（Windows PowerShell）
+# 2) 创建虚拟环境
 python -m venv venv
+
+# 3) 激活虚拟环境
 .\venv\Scripts\Activate.ps1
 
-# 3) 安装依赖
+# 4) 升级 pip
 python -m pip install --upgrade pip
+
+# 5) 安装 requirements
 pip install -r requirements.txt
 ```
 
-如需尽量与当前开发机保持一致，可直接安装锁定版本：
+若希望尽量与已验证环境保持一致，可使用锁定版本：
 
-```bash
+```powershell
 pip install -r requirements-lock.txt
 ```
 
-### 3.2 可选：重编译 C++ 撮合扩展
-
-仅在以下情况需要：
-- 本机 Python 版本与仓库内 `.pyd` 不匹配
-- 需要自行修改 `core/exchange/c_core/*` 并重新编译
-
-```bash
-python setup.py build_ext --inplace
-```
-
-### 3.3 环境变量配置（按需）
-
-PowerShell 示例：
+### 3.3 环境变量配置
+项目支持离线演示，因此下列配置均为可选项：
 
 ```powershell
-# 可选：云端 API
-$env:DEEPSEEK_API_KEY="你的DeepSeekKey"
-$env:ZHIPU_API_KEY="你的智谱Key"
+# 可选：云端模型 API
+$env:DEEPSEEK_API_KEY="你的 DeepSeek Key"
+$env:ZHIPU_API_KEY="你的 智谱 Key"
 
-# 可选：推理模式（lite / standard / enterprise）
+# 可选：推理模式
 $env:CIVITAS_INFERENCE_MODE="lite"
 
-# 可选：本地模型路径与 vLLM 模型名
-$env:CIVITAS_LOCAL_MODEL_PATH="D:\\models\\xxx.gguf"
+# 可选：本地模型路径与名称
+$env:CIVITAS_LOCAL_MODEL_PATH="D:\models\xxx.gguf"
 $env:CIVITAS_VLLM_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 ```
 
+模板文件位于：`.env.example`
+
 ### 3.4 启动方式
 
-推荐启动（无交互、评委复现更稳定）：
-
-```bash
+#### 方式 A：比赛推荐启动方式
+```powershell
 python -m streamlit run app.py --server.port 8501
 ```
 
-备用启动（会在无 Key 时要求命令行输入，非交互终端可能报 EOF）：
+#### 方式 B：一键脚本启动
+```powershell
+scripts\start_competition_demo.bat
+```
 
-```bash
+或：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\start_competition_demo.ps1
+```
+
+#### 方式 C：备用入口
+```powershell
 python main.py
 ```
 
 说明：
-- 当前版本已对 `main.py` 做非交互终端兜底：在无 TTY 环境下会自动跳过 API Key 输入，不会因 `input()` 阻塞。
-- 比赛现场建议优先使用 `streamlit run app.py`，避免任何终端交互依赖。
+- `app.py` 是比赛展示推荐入口
+- `main.py` 是兼容入口，适合开发调试，不建议作为评委首选入口
+- 离线演示模式不依赖 API Key
 
-浏览器访问：
+### 3.5 浏览器访问
+启动成功后访问：
 
-- `http://127.0.0.1:8501`
+- [http://127.0.0.1:8501](http://127.0.0.1:8501)
 
-### 3.5 端口与网络要求
+### 3.6 预编译 C++ 撮合扩展说明
+若满足以下条件，通常无需重编译：
 
-- Streamlit 默认端口：`8501`
-- IPC（实时模式）默认端口：`5555`（PUB）/ `5556`（PULL）
-- 若调用外部模型 API，需要可访问公网
+- 操作系统为 Windows 64 位
+- Python 版本为 `3.14.x`
+- 仓库中的 `_civitas_lob.cp314-win_amd64.pyd` 可正常加载
 
-### 3.6 最小演示路径（无 API Key）
+仅在以下场景需要重编译：
+- Python 版本与 `.pyd` 不匹配
+- 修改了 `core/exchange/c_core/*`
+- 需要在其他环境重新生成本地扩展
 
-1. 启动 `streamlit run app.py`
-2. 首页进入“答辩模式”
-3. 选择场景：
-   - `tax_cut_liquidity_boost`
-   - `rumor_panic_selloff`
-   - `regulator_stabilization_intervention`
-4. 点击自动播放，完成 KPI 与叙事链路演示
+重编译命令：
 
-### 3.7 演示前检查清单（建议答辩前 5 分钟执行）
+```powershell
+python setup.py build_ext --inplace
+```
 
-```bash
+### 3.7 比赛前建议执行的检查命令
+
+```powershell
 python -m pip check
-python -m compileall -q .
-pytest -q tests/test_competition_demo_mode.py
-python -m streamlit run app.py --server.port 8501
-```
-
-通过标准：
-- 首页可正常打开（无白屏）
-- 答辩模式中场景可一键加载
-- 自动播放、下一步、重置按钮可用
-- `tax_cut_liquidity_boost` / `rumor_panic_selloff` / `regulator_stabilization_intervention` 三场景可切换
-
-## 测试命令
-
-```bash
-# 基础测试
+python -m compileall -q app.py main.py config.py simulation_ipc.py simulation_runner.py regulator_agent.py agents core engine policy ui tests
 pytest -q
-
-# 示例：答辩模式相关测试
-pytest -q tests/test_competition_demo_mode.py
+powershell -ExecutionPolicy Bypass -File scripts\check_competition_delivery.ps1
 ```
 
-## 项目结构
+### 3.8 最小演示路径
+无需 API Key，建议使用以下 3 个场景进行展示：
 
-- `agents/`：多智能体实现（manager、analyst、trader 等）
-- `core/`：核心引擎、行为金融、IPC、推理路由、回测与绩效模块
-- `engine/`：仿真循环与进化逻辑
-- `ui/`：Streamlit 页面与组件
-- `data_flywheel/`：新闻抓取与事件流处理
-- `demo_scenarios/`：答辩演示场景数据
-- `docs/`：交付文档、用户手册、答辩脚本与审查报告
-- `tests/`：单元测试与集成测试
-- `scripts/`：启动脚本、赛前检查脚本、训练/敏感性分析脚本
-- `outputs/`：自动生成的比赛材料与图表产物
-- `output/`：工具输出目录（非比赛交付主目录）
-- `artifacts/`：验证日志与构建日志
+- `tax_cut_liquidity_boost`
+- `rumor_panic_selloff`
+- `regulator_stabilization_intervention`
+
+推荐流程：
+1. 启动 `app.py`
+2. 载入内置场景
+3. 展示价格、成交量、恐慌度、CSAD 等指标
+4. 展示行为诊断与监管优化结果
+5. 导出比赛材料或演示脚本
+
+## 项目目录说明
+- `app.py`：Streamlit 前端入口
+- `main.py`：备用启动入口
+- `agents/`：多智能体角色、脑模型、人格与管理器
+- `core/`：核心业务模块、事件仓库、实验清单、校准与评估模块
+- `engine/`：仿真调度与市场循环逻辑
+- `ui/`：前端页面组件
+- `policy/`：政策引擎
+- `demo_scenarios/`：比赛内置场景包
+- `data/`：本地数据、缓存、图结构与快照
+- `outputs/`：运行时输出与比赛材料
+- `docs/`：部署文档、用户手册、答辩脚本等
+- `tests/`：测试代码
+- `scripts/`：启动脚本与赛前检查脚本
 
 ## 常见问题
+### 1. 页面打不开
+- 检查 `8501` 端口是否被占用
+- 可改用：`scripts\start_competition_demo.ps1 -Port 8510`
 
-- 运行 `python main.py` 无法输入 API Key
-  - 当前版本行为：非交互终端会自动跳过输入并继续运行离线可演示模式。
-  - 建议：比赛环境仍优先使用 `python -m streamlit run app.py`。
-- `ModuleNotFoundError: No module named 'zmq'`
-  - 处理：`pip install pyzmq`
-- 测试出现 `Unknown config option: asyncio_mode`
-  - 处理：`pip install pytest-asyncio`
-- 导出 PNG 按钮不可用
-  - 原因：未安装或未适配正确版本的 `kaleido`。
-  - 处理：`pip install kaleido==0.2.1`（已在 requirements.txt 中指定，重新安装即可）。
+### 2. 缺少 `zmq` 或异步测试报错
+- 重新执行：`pip install -r requirements.txt`
 
-## AI 赛道答辩支撑矩阵
+### 3. Python 版本不匹配导致 `_civitas_lob` 无法加载
+- 优先切换到 `Python 3.14.x`
+- 或安装 Build Tools 后执行 `python setup.py build_ext --inplace`
 
-已补充答辩材料映射文件：
-- `docs/ai_competition_support_matrix.md`
+### 4. 没有 API Key 能否演示
+- 可以，项目支持离线演示模式
 
-该文件用于直接支撑：
-- 设计说明书（问题定义、AI 技术路线、自主实现边界）
-- 作品小结（创新点、工程完成度、可复现性）
-- 用户手册（启动方式、演示主链路、常见故障）
-- 展示视频脚本（建议镜头顺序与讲解重点）
+## 提交建议
+比赛提交时建议至少包含以下文件：
+
+- `README.md`
+- `requirements.txt`
+- `requirements-lock.txt`
+- `.env.example`
+- `app.py`
+- `scripts/start_competition_demo.bat`
+- `scripts/start_competition_demo.ps1`
+- `scripts/check_competition_delivery.ps1`
+- `桌面\\设计说明书.md`
+- `桌面\\项目作品小结.md`
+- 其他 `docs/` 下的部署、答辩与说明文档

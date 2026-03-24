@@ -4,6 +4,10 @@ import logging
 import json
 from typing import List
 
+from core.ipc.runtime_compat import ensure_zmq_asyncio_compatibility
+
+ensure_zmq_asyncio_compatibility()
+
 import zmq
 import zmq.asyncio
 

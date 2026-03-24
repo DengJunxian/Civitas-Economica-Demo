@@ -19,6 +19,25 @@ from agents.cognition.utility import InvestorType
 from core.time_manager import SimulationClock
 from core.utils import truncate_text
 
+
+def social_snapshot_to_orderflow_reversal(snapshot: Dict[str, Any]) -> Dict[str, float]:
+    """Translate social contagion output into an order-flow direction proxy."""
+    suppression = dict(snapshot.get("rumor_suppression", {})) if isinstance(snapshot, dict) else {}
+    sentiment = snapshot.get("node_sentiment", {}) if isinstance(snapshot, dict) else {}
+    mean_sentiment = 0.0
+    if isinstance(sentiment, dict) and sentiment:
+        mean_sentiment = float(sum(float(v) for v in sentiment.values()) / len(sentiment))
+    suppression_ratio = float(suppression.get("suppression_ratio", 0.0))
+    rumor_heat_before = float(suppression.get("rumor_heat_before", 0.0))
+    refutation_heat = float(suppression.get("refutation_heat", 0.0))
+    orderflow_bias = float(np.clip(mean_sentiment + 0.5 * suppression_ratio, -1.0, 1.0))
+    reversal_strength = float(np.clip(refutation_heat - 0.35 * rumor_heat_before, -1.0, 1.0))
+    return {
+        "orderflow_bias": orderflow_bias,
+        "reversal_strength": reversal_strength,
+        "suppression_ratio": suppression_ratio,
+    }
+
 class CivitasModel(Model):
     """
     Civitas Mesa Model

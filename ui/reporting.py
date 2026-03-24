@@ -561,6 +561,8 @@ def export_defense_bundle(
     causal_chain_graph: Dict[str, Any],
     defense_outline_markdown: str,
     feature_flags: Optional[Dict[str, Any]] = None,
+    compliance_artifacts: Optional[Dict[str, Any]] = None,
+    social_propagation_artifacts: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Export one-click defense materials package:
@@ -569,6 +571,8 @@ def export_defense_bundle(
     - policy A/B report
     - architecture / causal chain graph data
     - defense speech outline
+    - competition compliance artifacts
+    - social propagation export
     """
     root_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -581,6 +585,7 @@ def export_defense_bundle(
     architecture_path = bundle_root / "architecture_graph.json"
     causal_chain_path = bundle_root / "causal_chain_graph.json"
     outline_path = bundle_root / "defense_outline.md"
+    social_path = bundle_root / "social_propagation_report.json"
     manifest_path = bundle_root / "bundle_manifest.json"
 
     design_path.write_text(design_chapter_markdown, encoding="utf-8")
@@ -588,10 +593,15 @@ def export_defense_bundle(
     architecture_path.write_text(json.dumps(architecture_graph, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     causal_chain_path.write_text(json.dumps(causal_chain_graph, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     outline_path.write_text(defense_outline_markdown, encoding="utf-8")
+    if social_propagation_artifacts:
+        social_path.write_text(
+            json.dumps(serializable_payload(social_propagation_artifacts), ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
 
     realism_bundle = write_realism_report_artifacts(
         root_dir=bundle_root,
-        title=str(realism_payload.get("title", "真实性评估报告")),
+        title=str(realism_payload.get("title", "???????")),
         payload=realism_payload,
         feature_flag=bool((feature_flags or {}).get("stylized_facts_v2", True)),
     )
@@ -612,10 +622,19 @@ def export_defense_bundle(
             "defense_outline": str(outline_path),
         },
     }
+    if social_propagation_artifacts:
+        manifest["files"]["social_propagation_report"] = str(social_path)
+    if compliance_artifacts:
+        for key, value in dict(compliance_artifacts.get("files", {})).items():
+            manifest["files"][key] = str(value)
+        if "manifest" in compliance_artifacts:
+            manifest["competition_compliance"] = serializable_payload(dict(compliance_artifacts["manifest"]))
+
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     return {
         "bundle_root": bundle_root,
         "manifest": manifest,
         "manifest_path": manifest_path,
         "realism_bundle": realism_bundle,
+        "social_path": social_path if social_propagation_artifacts else None,
     }

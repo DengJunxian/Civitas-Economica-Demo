@@ -72,3 +72,56 @@ def test_agent_replay_is_reproducible_with_fixed_seed():
 
     assert result_a.simulated_prices == result_b.simulated_prices
     assert result_a.metadata["config_hash"] == result_b.metadata["config_hash"]
+
+
+def test_agent_replay_event_driven_v2_emits_variant_and_reference_bars():
+    cfg = BacktestConfig(
+        strategy_name="portfolio_system",
+        lookback=12,
+        rebalance_frequency=4,
+        period_days=0,
+        random_seed=13,
+        feature_flags={
+            "agent_replay": True,
+            "history_replay_event_driven_v2": True,
+        },
+    )
+    frame = _mock_daily_frame(45)
+    engine = AgentReplayEngine(cfg)
+    engine.historical_data = frame
+    engine.benchmark_data = frame[["date", "close"]].rename(columns={"close": "benchmark_close"})
+
+    result = engine.run_backtest()
+
+    assert result.metadata["replay_variant"] == "event_driven_v2"
+    assert result.metadata["event_schedule"]["total_events"] > 0
+    assert len(result.metadata["reference_bars"]) == len(frame)
+    assert any("event" in trade for trade in result.trade_log)
+    assert all("timestamp" in trade for trade in result.trade_log[: min(5, len(result.trade_log))])
+
+
+def test_agent_replay_rolling_calibration_records_metadata():
+    cfg = BacktestConfig(
+        strategy_name="portfolio_system",
+        lookback=12,
+        rebalance_frequency=4,
+        period_days=0,
+        random_seed=17,
+        feature_flags={
+            "agent_replay": True,
+            "history_replay_event_driven_v2": True,
+            "history_replay_rolling_calibration_v1": True,
+        },
+    )
+    frame = _mock_daily_frame(55)
+    engine = AgentReplayEngine(cfg)
+    engine.historical_data = frame
+    engine.benchmark_data = frame[["date", "close"]].rename(columns={"close": "benchmark_close"})
+
+    result = engine.run_backtest()
+
+    calibration = result.metadata["rolling_calibration"]
+    assert calibration["enabled"] is True
+    assert calibration["window_count"] > 0
+    assert calibration["latest_signal_scale"] > 0
+    assert result.metadata["rolling_calibration_enabled"] is True

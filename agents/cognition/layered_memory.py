@@ -47,6 +47,10 @@ class EpisodicMemoryItem:
     source: str = "market"
     policy_tag: str = ""
     event_type: str = "decision"
+    memory_horizon: str = "short_term"
+    salience: float = 0.5
+    confidence: float = 0.5
+    decay: float = 0.92
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -67,6 +71,7 @@ class BehaviorCard:
     seed: int
     config_hash: str
     snapshot_info: Dict[str, Any]
+    memory_layers: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -103,10 +108,22 @@ class LayeredMemory:
         self.semantic = {
             "source_credibility": {},
             "themes": {},
+            "mid_term_narratives": {},
             "narrative_anchor": "",
             "policy_signature": "",
             "policy_delay_remaining": 0,
             "last_belief": "",
+            "long_term_style": {
+                "institution_type": self.institution_type,
+                "dominant_theme": "neutral",
+                "style_conviction": 0.50,
+                "credibility_anchor": 0.50,
+            },
+            "memory_decay": {
+                "short_term": 0.90,
+                "mid_term": 0.95,
+                "long_term": 0.985,
+            },
         }
         self.procedural = {
             "base_attention_span": 3,
@@ -114,6 +131,91 @@ class LayeredMemory:
             "recent_win_streak": 0,
             "trauma_level": 0.0,
             "attention_fatigue": 0.0,
+        }
+
+    def _episode_salience(self, *, outcome: float, event_type: str, policy_tag: str, source: str) -> float:
+        salience = 0.35 + min(0.45, abs(float(outcome)) * 0.80)
+        if event_type in {"loss", "gain"}:
+            salience += 0.10
+        if policy_tag:
+            salience += 0.08
+        if source not in {"market", ""}:
+            salience += 0.05
+        return _clip(salience, 0.05, 1.0)
+
+    def _episode_confidence(self, *, source: str, outcome: float) -> float:
+        credibility = self.semantic.setdefault("source_credibility", {})
+        base = _safe_float(credibility.get(source, 0.5), 0.5)
+        if outcome > 0:
+            base = 0.60 * base + 0.40 * 0.80
+        elif outcome < 0:
+            base = 0.70 * base + 0.30 * 0.30
+        return _clip(base, 0.05, 1.0)
+
+    def _decay_memory_layers(self) -> None:
+        decay_cfg = dict(self.semantic.get("memory_decay", {}))
+        short_decay = _safe_float(decay_cfg.get("short_term", 0.90), 0.90)
+        mid_decay = _safe_float(decay_cfg.get("mid_term", 0.95), 0.95)
+        long_decay = _safe_float(decay_cfg.get("long_term", 0.985), 0.985)
+
+        pruned: List[EpisodicMemoryItem] = []
+        for item in self.episodic:
+            item.salience = _clip(float(item.salience) * float(item.decay), 0.0, 1.0)
+            if item.salience >= 0.03:
+                pruned.append(item)
+        self.episodic = pruned[-60:]
+
+        themes = self.semantic.setdefault("themes", {})
+        for key in list(themes.keys()):
+            themes[key] = float(themes[key]) * mid_decay
+            if themes[key] < 0.02:
+                themes.pop(key, None)
+
+        narratives = self.semantic.setdefault("mid_term_narratives", {})
+        for key in list(narratives.keys()):
+            narratives[key] = float(narratives[key]) * mid_decay
+            if narratives[key] < 0.02:
+                narratives.pop(key, None)
+
+        long_term_style = self.semantic.setdefault("long_term_style", {})
+        long_term_style["style_conviction"] = _clip(
+            _safe_float(long_term_style.get("style_conviction", 0.50), 0.50) * long_decay,
+            0.10,
+            1.0,
+        )
+        long_term_style["credibility_anchor"] = _clip(
+            _safe_float(long_term_style.get("credibility_anchor", 0.50), 0.50) * long_decay + 0.01,
+            0.10,
+            1.0,
+        )
+        if themes:
+            self.semantic["narrative_anchor"] = max(themes.items(), key=lambda kv: kv[1])[0]
+
+    def _memory_layers_snapshot(self) -> Dict[str, Any]:
+        short_items = [
+            {
+                "summary": item.summary,
+                "salience": round(float(item.salience), 4),
+                "confidence": round(float(item.confidence), 4),
+                "horizon": item.memory_horizon,
+            }
+            for item in sorted(self.episodic[-8:], key=lambda entry: float(entry.salience), reverse=True)[:3]
+        ]
+        mid_term = dict(
+            sorted(
+                (
+                    (str(key), round(float(value), 4))
+                    for key, value in dict(self.semantic.get("mid_term_narratives", {})).items()
+                ),
+                key=lambda kv: abs(kv[1]),
+                reverse=True,
+            )[:3]
+        )
+        long_term_style = dict(self.semantic.get("long_term_style", {}))
+        return {
+            "short_term": short_items or [{"summary": "cold_start", "salience": 0.0, "confidence": 0.5, "horizon": "short_term"}],
+            "mid_term": mid_term,
+            "long_term": long_term_style,
         }
 
     def _append_episode(
@@ -126,6 +228,9 @@ class LayeredMemory:
         event_type: str = "decision",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
+        self._decay_memory_layers()
+        salience = self._episode_salience(outcome=outcome, event_type=event_type, policy_tag=policy_tag, source=source)
+        confidence = self._episode_confidence(source=source, outcome=outcome)
         item = EpisodicMemoryItem(
             timestamp=time.time(),
             summary=str(summary),
@@ -133,6 +238,10 @@ class LayeredMemory:
             source=str(source or "market"),
             policy_tag=str(policy_tag or ""),
             event_type=str(event_type or "decision"),
+            memory_horizon="short_term",
+            salience=salience,
+            confidence=confidence,
+            decay=_safe_float(self.semantic.get("memory_decay", {}).get("short_term", 0.90), 0.90),
             metadata=dict(metadata or {}),
         )
         self.episodic.append(item)
@@ -142,14 +251,28 @@ class LayeredMemory:
         theme_key = self._extract_theme(item.summary, item.policy_tag)
         if theme_key:
             themes = self.semantic.setdefault("themes", {})
-            themes[theme_key] = float(themes.get(theme_key, 0.0)) + 1.0
+            themes[theme_key] = float(themes.get(theme_key, 0.0)) + float(item.salience)
+            narratives = self.semantic.setdefault("mid_term_narratives", {})
+            narratives[theme_key] = float(narratives.get(theme_key, 0.0)) + float(item.salience * 0.60 + item.confidence * 0.40)
             self.semantic["narrative_anchor"] = max(themes.items(), key=lambda kv: kv[1])[0]
+            long_term_style = self.semantic.setdefault("long_term_style", {})
+            dominant_theme = str(long_term_style.get("dominant_theme", "neutral"))
+            current_strength = _safe_float(long_term_style.get("style_conviction", 0.50), 0.50)
+            if dominant_theme == "neutral" or float(narratives[theme_key]) >= current_strength:
+                long_term_style["dominant_theme"] = theme_key
+            long_term_style["style_conviction"] = _clip(current_strength * 0.94 + item.salience * 0.12, 0.10, 1.0)
 
         if item.source:
             credibility = self.semantic.setdefault("source_credibility", {})
             current = _safe_float(credibility.get(item.source, 0.5), 0.5)
             target = 0.75 if item.outcome > 0 else 0.25 if item.outcome < 0 else 0.5
             credibility[item.source] = _clip(current * 0.8 + target * 0.2, 0.0, 1.0)
+            long_term_style = self.semantic.setdefault("long_term_style", {})
+            long_term_style["credibility_anchor"] = _clip(
+                _safe_float(long_term_style.get("credibility_anchor", 0.50), 0.50) * 0.92 + credibility[item.source] * 0.08,
+                0.10,
+                1.0,
+            )
 
     def _extract_theme(self, summary: str, policy_tag: str) -> str:
         text = f"{summary} {policy_tag}".lower()
@@ -361,10 +484,11 @@ class LayeredMemory:
             f"policy_lag={state['policy_delay_remaining']}; "
             f"attention={state['attention_fatigue']:.2f}"
         )
+        memory_layers = self._memory_layers_snapshot()
         key_memories = [item.summary for item in self.episodic[-3:]]
         if not key_memories:
             key_memories = ["cold_start"]
-        narrative = self.semantic.get("narrative_anchor") or "neutral"
+        narrative = self.semantic.get("narrative_anchor") or memory_layers.get("long_term", {}).get("dominant_theme", "neutral")
         if self.institution_type in {"mutual_fund", "pension_fund", "insurer"} and state["policy_delay_remaining"] > 0:
             narrative = f"{narrative}: policy lag"
         elif self.institution_type == "market_maker":
@@ -380,6 +504,7 @@ class LayeredMemory:
                 "effective_policy_delay": state["policy_delay_remaining"],
                 "trauma_level": state["trauma_level"],
                 "attention_fatigue": state["attention_fatigue"],
+                "memory_layers": memory_layers,
             }
         )
 
@@ -425,10 +550,11 @@ class LayeredMemory:
             seed=int(self.seed),
             config_hash=self.config_hash,
             snapshot_info=snapshot,
+            memory_layers=memory_layers,
             metadata={
                 "institution_type": self.institution_type,
                 "enabled": bool(self.enabled),
-                "behavior_version": "layered_memory_v1",
+                "behavior_version": "layered_memory_v2",
             },
         )
 
@@ -449,6 +575,7 @@ class LayeredMemory:
             risk_budget = self._risk_budget(account_state=account_state, market_state=market_state)
             current_delay = int(self.semantic.get("policy_delay_remaining", 0))
             source_credibility = dict(sorted(self.semantic.get("source_credibility", {}).items(), key=lambda kv: kv[1], reverse=True)[:5])
+            memory_layers = self._memory_layers_snapshot()
             current_belief = (
                 f"risk_budget={risk_budget:.2f}; "
                 f"trauma={self.procedural.get('trauma_level', 0.0):.2f}; "
@@ -456,7 +583,7 @@ class LayeredMemory:
                 f"attention={self.procedural.get('attention_fatigue', 0.0):.2f}"
             )
             key_memories = [item.summary for item in self.episodic[-3:]] or ["cold_start"]
-            narrative = self.semantic.get("narrative_anchor") or "neutral"
+            narrative = self.semantic.get("narrative_anchor") or memory_layers.get("long_term", {}).get("dominant_theme", "neutral")
             behavior_constraints = self.constraint_profile.to_dict()
             behavior_constraints.update(
                 {
@@ -464,6 +591,7 @@ class LayeredMemory:
                     "effective_policy_delay": current_delay,
                     "trauma_level": float(self.procedural.get("trauma_level", 0.0)),
                     "attention_fatigue": float(self.procedural.get("attention_fatigue", 0.0)),
+                    "memory_layers": memory_layers,
                 }
             )
             credibility_term = max(source_credibility.values()) if source_credibility else 0.0
@@ -506,10 +634,11 @@ class LayeredMemory:
                 seed=int(self.seed),
                 config_hash=self.config_hash,
                 snapshot_info=snapshot,
+                memory_layers=memory_layers,
                 metadata={
                     "institution_type": self.institution_type,
                     "enabled": False,
-                    "behavior_version": "layered_memory_v1",
+                    "behavior_version": "layered_memory_v2",
                 },
             )
             return {"decision": decision_out, "behavior_card": card.to_dict(), "behavior_context": {"enabled": False}}

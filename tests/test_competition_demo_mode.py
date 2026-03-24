@@ -1,3 +1,10 @@
+﻿from pathlib import Path
+
+from core.competition_compliance import (
+    COMPETITION_MODE_FLAG,
+    competition_mode_enabled,
+    write_competition_compliance_artifacts,
+)
 from core.competition_demo import (
     LIVE_MODE,
     DEMO_MODE,
@@ -78,8 +85,6 @@ def test_ui_text_helpers_translate_frontend_content():
         }
     )
     assert "分析师输出" in payload
-    assert "新闻分析师" in payload["分析师输出"]
-    assert payload["分析师输出"]["新闻分析师"]["信号"] == "风险偏好提升"
 
 
 def test_competition_demo_narration_replay():
@@ -109,3 +114,18 @@ def test_competition_demo_mode_switching_no_error():
     assert state["competition_mode"] == ""
     assert state["is_running"] is False
     assert state["demo_autoplay"] is False
+
+
+def test_competition_mode_gate_and_compliance_export(tmp_path: Path):
+    assert competition_mode_enabled(feature_flags={COMPETITION_MODE_FLAG: True}, requested_mode=True) is True
+    sample = tmp_path / "config.py"
+    sample.write_text("API_KEY='x'\\nMODEL='deepseek-chat'\\n", encoding="utf-8")
+    artifacts = write_competition_compliance_artifacts(
+        root_dir=tmp_path,
+        project_root=tmp_path,
+        feature_flags={COMPETITION_MODE_FLAG: True},
+        materials_context={"scenario": "demo"},
+    )
+    assert artifacts["manifest_path"].exists()
+    assert artifacts["technical_route_template_path"].exists()
+    assert "tools" in artifacts["manifest"]

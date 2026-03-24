@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -35,6 +36,7 @@ BACKGROUND_TEMPLATES = {
 }
 
 HISTORY_REPORT_DIR = Path("outputs") / "history_reports"
+HISTORY_CASE_GLOB = "history_case_*.json"
 
 
 def _default_window() -> tuple[date, date]:
@@ -57,7 +59,59 @@ def _compile_policy_score(policy_text: str, strength: float, background: str) ->
     return float(np.clip(base * strength + BACKGROUND_TEMPLATES.get(background, 0.0), -1.0, 1.0))
 
 
-def _build_replay_metrics(result: BacktestResult) -> Dict[str, float]:
+def _load_history_case_templates() -> List[Dict[str, Any]]:
+    root = Path("demo_scenarios")
+    templates: List[Dict[str, Any]] = []
+    if not root.exists():
+        return templates
+
+    for path in sorted(root.glob(HISTORY_CASE_GLOB)):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        background = payload.get("background")
+        if background not in BACKGROUND_TEMPLATES:
+            background = next(iter(BACKGROUND_TEMPLATES.keys()))
+        templates.append(
+            {
+                "title": str(payload.get("title", path.stem)),
+                "policy_text": str(payload.get("policy_text", payload.get("summary", path.stem))),
+                "recommended_intensity": float(payload.get("recommended_intensity", 1.0)),
+                "background": background,
+                "start_date": payload.get("start_date"),
+                "end_date": payload.get("end_date"),
+                "symbol": payload.get("symbol"),
+                "case_payload": payload,
+                "source_path": str(path),
+            }
+        )
+    return templates
+
+
+def _safe_corr(left: np.ndarray, right: np.ndarray) -> float:
+    if left.size < 2 or right.size < 2 or left.size != right.size:
+        return 0.0
+    if float(np.std(left)) < 1e-12 or float(np.std(right)) < 1e-12:
+        return 0.0
+    return float(np.corrcoef(left, right)[0, 1])
+
+
+def _max_drawdown(prices: np.ndarray) -> float:
+    if prices.size == 0:
+        return 0.0
+    peaks = np.maximum.accumulate(prices)
+    dd = prices / np.maximum(peaks, 1e-12) - 1.0
+    return float(abs(dd.min()))
+
+
+def _safe_autocorr(values: np.ndarray, lag: int = 1) -> float:
+    if values.size <= lag:
+        return 0.0
+    return _safe_corr(values[:-lag], values[lag:])
+
+
+def _compute_path_layer(result: BacktestResult) -> Dict[str, float]:
     if len(result.real_prices) < 3 or len(result.simulated_prices) < 3:
         return {
             "trend_alignment": 0.0,
@@ -65,37 +119,176 @@ def _build_replay_metrics(result: BacktestResult) -> Dict[str, float]:
             "drawdown_gap": 0.0,
             "vol_similarity": 0.0,
             "response_gap": 0.0,
+            "return_correlation": 0.0,
+            "normalized_rmse": 0.0,
         }
 
     real = np.asarray(result.real_prices, dtype=float)
     sim = np.asarray(result.simulated_prices, dtype=float)
     real_ret = np.diff(real) / np.maximum(real[:-1], 1e-12)
     sim_ret = np.diff(sim) / np.maximum(sim[:-1], 1e-12)
-
     sign_match = float(np.mean(np.sign(real_ret) == np.sign(sim_ret)))
     real_turn = np.sign(np.diff(np.sign(real_ret), prepend=real_ret[0]))
     sim_turn = np.sign(np.diff(np.sign(sim_ret), prepend=sim_ret[0]))
     turning_point_match = float(np.mean(real_turn == sim_turn))
-
-    def _max_drawdown(prices: np.ndarray) -> float:
-        peaks = np.maximum.accumulate(prices)
-        dd = prices / np.maximum(peaks, 1e-12) - 1.0
-        return float(abs(dd.min()))
-
-    drawdown_gap = abs(_max_drawdown(real) - _max_drawdown(sim))
-    vol_similarity = float(np.clip(result.volatility_correlation, 0.0, 1.0))
-
     threshold = 0.015
     real_days = next((idx for idx, value in enumerate(np.cumsum(real_ret), start=1) if abs(value) >= threshold), len(real_ret))
     sim_days = next((idx for idx, value in enumerate(np.cumsum(sim_ret), start=1) if abs(value) >= threshold), len(sim_ret))
-    response_gap = float(abs(real_days - sim_days))
 
     return {
         "trend_alignment": sign_match,
         "turning_point_match": turning_point_match,
-        "drawdown_gap": drawdown_gap,
-        "vol_similarity": vol_similarity,
-        "response_gap": response_gap,
+        "drawdown_gap": abs(_max_drawdown(real) - _max_drawdown(sim)),
+        "vol_similarity": float(np.clip(result.volatility_correlation, 0.0, 1.0)),
+        "response_gap": float(abs(real_days - sim_days)),
+        "return_correlation": _safe_corr(real_ret, sim_ret),
+        "normalized_rmse": float(result.price_rmse),
+    }
+
+
+def _compute_microstructure_layer(result: BacktestResult) -> Dict[str, float]:
+    bars = pd.DataFrame(result.simulated_bars or [])
+    reference_bars = pd.DataFrame(result.metadata.get("reference_bars", []) or [])
+    if bars.empty:
+        return {
+            "avg_intraday_range": 0.0,
+            "range_fit": 0.0,
+            "volume_fit": 0.0,
+            "cancel_rate_proxy": 0.0,
+            "order_imbalance": 0.0,
+            "impact_decay": 0.0,
+        }
+
+    sim_range = (bars["high"] - bars["low"]) / np.maximum(bars["close"], 1e-12)
+    volume_fit = 0.0
+    range_fit = 0.0
+    if not reference_bars.empty:
+        merged = reference_bars.merge(bars, on="date", how="inner", suffixes=("_real", "_sim"))
+        if not merged.empty:
+            real_range = (merged["high_real"] - merged["low_real"]) / np.maximum(merged["close_real"], 1e-12)
+            sim_range_aligned = (merged["high_sim"] - merged["low_sim"]) / np.maximum(merged["close_sim"], 1e-12)
+            range_gap = float(np.mean(np.abs(real_range - sim_range_aligned)))
+            range_fit = float(np.clip(1.0 - range_gap / 0.05, 0.0, 1.0))
+            real_volume = merged["volume_real"].astype(float).values
+            sim_volume = merged["volume_sim"].astype(float).values
+            volume_fit = float(np.clip(_safe_corr(real_volume, sim_volume), -1.0, 1.0))
+
+    order_attempts = int(result.metadata.get("event_schedule", {}).get("total_events", len(result.trade_log)))
+    cancel_rate_proxy = float(np.clip((order_attempts - len(result.trade_log)) / max(order_attempts, 1), 0.0, 1.0))
+    sides = np.asarray([1.0 if trade.get("side") == "buy" else -1.0 for trade in result.trade_log if trade.get("side") in {"buy", "sell"}], dtype=float)
+    prices = np.asarray(result.simulated_prices, dtype=float)
+    returns = np.diff(prices) / np.maximum(prices[:-1], 1e-12) if prices.size > 1 else np.asarray([], dtype=float)
+
+    return {
+        "avg_intraday_range": float(sim_range.mean()),
+        "range_fit": range_fit,
+        "volume_fit": volume_fit,
+        "cancel_rate_proxy": cancel_rate_proxy,
+        "order_imbalance": float(abs(sides.mean())) if sides.size else 0.0,
+        "impact_decay": float(abs(_safe_autocorr(np.abs(returns), lag=1))) if returns.size > 2 else 0.0,
+    }
+
+
+def _compute_stylized_facts_layer(result: BacktestResult) -> Dict[str, float]:
+    real = np.asarray(result.real_prices, dtype=float)
+    sim = np.asarray(result.simulated_prices, dtype=float)
+    if real.size < 4 or sim.size < 4:
+        return {
+            "tail_fit": 0.0,
+            "volatility_clustering": 0.0,
+            "volume_autocorr": 0.0,
+            "herding_proxy": 0.0,
+            "regime_switch_alignment": 0.0,
+        }
+
+    real_ret = np.diff(real) / np.maximum(real[:-1], 1e-12)
+    sim_ret = np.diff(sim) / np.maximum(sim[:-1], 1e-12)
+    real_tail = float(np.mean(np.abs(real_ret) > np.std(real_ret) * 1.5))
+    sim_tail = float(np.mean(np.abs(sim_ret) > np.std(sim_ret) * 1.5))
+    sim_volume = np.asarray([float(bar.get("volume", 0.0)) for bar in result.simulated_bars], dtype=float)
+    side_signs = np.asarray([1.0 if trade.get("side") == "buy" else -1.0 for trade in result.trade_log if trade.get("side") in {"buy", "sell"}], dtype=float)
+    regime_real = np.sign(np.diff(np.sign(real_ret), prepend=real_ret[0]))
+    regime_sim = np.sign(np.diff(np.sign(sim_ret), prepend=sim_ret[0]))
+
+    return {
+        "tail_fit": float(np.clip(1.0 - abs(real_tail - sim_tail) / 0.5, 0.0, 1.0)),
+        "volatility_clustering": float(abs(_safe_autocorr(np.abs(sim_ret), lag=1))),
+        "volume_autocorr": float(abs(_safe_autocorr(sim_volume, lag=1))) if sim_volume.size > 2 else 0.0,
+        "herding_proxy": float(abs(side_signs.mean())) if side_signs.size else 0.0,
+        "regime_switch_alignment": float(np.mean(regime_real == regime_sim)),
+    }
+
+
+def _build_authenticity_layers(result: BacktestResult) -> Dict[str, Dict[str, float]]:
+    return {
+        "path": _compute_path_layer(result),
+        "microstructure": _compute_microstructure_layer(result),
+        "stylized_facts": _compute_stylized_facts_layer(result),
+    }
+
+
+def _flatten_authenticity_layers(layers: Dict[str, Dict[str, float]]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for layer_name, metrics in layers.items():
+        for metric_name, value in metrics.items():
+            rows.append(
+                {
+                    "layer": layer_name,
+                    "metric": metric_name,
+                    "value": float(value),
+                }
+            )
+    return rows
+
+
+def _build_authenticity_chart_data(
+    result: BacktestResult,
+    layers: Dict[str, Dict[str, float]],
+    baseline: Optional[BacktestResult] = None,
+) -> List[Dict[str, Any]]:
+    path_series = [
+        {
+            "date": date_value,
+            "real": float(real_price),
+            "simulated": float(sim_price),
+        }
+        for date_value, real_price, sim_price in zip(result.dates, result.real_prices, result.simulated_prices)
+    ]
+    if baseline and baseline.simulated_prices:
+        for idx, baseline_price in enumerate(baseline.simulated_prices[: len(path_series)]):
+            path_series[idx]["baseline"] = float(baseline_price)
+
+    layer_scores = []
+    for layer_name, metrics in layers.items():
+        values = list(metrics.values())
+        score = float(np.mean(values)) if values else 0.0
+        layer_scores.append({"layer": layer_name, "score": score})
+
+    volume_compare = [
+        {
+            "date": str(bar.get("date", "")),
+            "simulated_volume": float(bar.get("volume", 0.0)),
+        }
+        for bar in result.simulated_bars
+    ]
+    for idx, ref_bar in enumerate(result.metadata.get("reference_bars", [])[: len(volume_compare)]):
+        volume_compare[idx]["real_volume"] = float(ref_bar.get("volume", 0.0))
+
+    return [
+        {"chart": "path_series", "data": path_series},
+        {"chart": "layer_scores", "data": layer_scores},
+        {"chart": "volume_compare", "data": volume_compare},
+    ]
+
+
+def _build_replay_metrics(result: BacktestResult) -> Dict[str, float]:
+    path_layer = _compute_path_layer(result)
+    return {
+        "trend_alignment": float(path_layer["trend_alignment"]),
+        "turning_point_match": float(path_layer["turning_point_match"]),
+        "drawdown_gap": float(path_layer["drawdown_gap"]),
+        "vol_similarity": float(path_layer["vol_similarity"]),
+        "response_gap": float(path_layer["response_gap"]),
     }
 
 
@@ -217,6 +410,9 @@ def _render_baseline_delta_cards(result: BacktestResult, baseline: Optional[Back
 
 def _build_replay_brief(bundle: Dict[str, Any], metrics: Dict[str, float]) -> List[Dict[str, Any]]:
     engine_mode = bundle.get("engine_mode", "factor")
+    layers = bundle.get("authenticity_layers", {})
+    micro = layers.get("microstructure", {})
+    stylized = layers.get("stylized_facts", {})
     return [
         {
             "title": "Path fit",
@@ -231,8 +427,8 @@ def _build_replay_brief(bundle: Dict[str, Any], metrics: Dict[str, float]) -> Li
             "title": "Microstructure fit",
             "summary": "Focuses on OHLCV consistency and trade-tape behavior.",
             "lines": [
-                f"Vol similarity: {metrics['vol_similarity']:.0%}",
-                f"Drawdown gap: {metrics['drawdown_gap']:.2%}",
+                f"Range fit: {micro.get('range_fit', 0.0):.0%}",
+                f"Cancel-rate proxy: {micro.get('cancel_rate_proxy', 0.0):.0%}",
                 "Agent mode uses trade-tape close for simulated prices.",
             ],
         },
@@ -241,6 +437,7 @@ def _build_replay_brief(bundle: Dict[str, Any], metrics: Dict[str, float]) -> Li
             "summary": "Explains whether the replay reacts like a policy-driven market.",
             "lines": [
                 f"Response lag: {metrics['response_gap']:.0f} days",
+                f"Tail fit: {stylized.get('tail_fit', 0.0):.0%}",
                 f"Feature flags: {bundle.get('feature_flags', {})}",
                 "This is for comparison and defense, not a pixel-perfect clone.",
             ],
@@ -320,6 +517,9 @@ def _render_agent_readout(policy_text: str, result: BacktestResult, metrics: Dic
 def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> Dict[str, Any]:
     result: BacktestResult = bundle["result"]
     baseline: Optional[BacktestResult] = bundle.get("baseline_result")
+    authenticity_layers = bundle.get("authenticity_layers") or _build_authenticity_layers(result)
+    authenticity_rows = _flatten_authenticity_layers(authenticity_layers)
+    chart_data = bundle.get("chart_data") or _build_authenticity_chart_data(result, authenticity_layers, baseline)
     report_meta = official_report_meta("history_replay", bundle["policy_name"])
     payload = {
         "report_meta": report_meta,
@@ -333,10 +533,14 @@ def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> 
         "engine_mode": bundle.get("engine_mode", "factor"),
         "feature_flags": bundle.get("feature_flags", {}),
         "metrics": metrics,
+        "authenticity_layers": authenticity_layers,
+        "authenticity_metrics_flat": authenticity_rows,
+        "chart_data": chart_data,
         "result_summary": _compute_result_summary(result),
         "baseline_summary": _compute_result_summary(baseline) if baseline else None,
         "replay_brief": bundle.get("replay_cards", []),
         "simulated_bars": result.simulated_bars,
+        "reference_bars": result.metadata.get("reference_bars", []),
     }
     markdown = [
         f"# History replay report: {bundle['policy_name']}",
@@ -359,6 +563,19 @@ def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> 
         f"- Drawdown gap: {metrics['drawdown_gap']:.2%}",
         f"- Vol similarity: {metrics['vol_similarity']:.0%}",
         f"- Response lag: {metrics['response_gap']:.0f} days",
+        "",
+        "## Authenticity layers",
+        "### Path layer",
+        f"- Return correlation: {authenticity_layers['path'].get('return_correlation', 0.0):.3f}",
+        f"- Normalized RMSE: {authenticity_layers['path'].get('normalized_rmse', 0.0):.4f}",
+        "### Microstructure layer",
+        f"- Range fit: {authenticity_layers['microstructure'].get('range_fit', 0.0):.0%}",
+        f"- Volume fit: {authenticity_layers['microstructure'].get('volume_fit', 0.0):.3f}",
+        f"- Cancel-rate proxy: {authenticity_layers['microstructure'].get('cancel_rate_proxy', 0.0):.0%}",
+        "### Stylized facts layer",
+        f"- Tail fit: {authenticity_layers['stylized_facts'].get('tail_fit', 0.0):.0%}",
+        f"- Volatility clustering: {authenticity_layers['stylized_facts'].get('volatility_clustering', 0.0):.3f}",
+        f"- Regime-switch alignment: {authenticity_layers['stylized_facts'].get('regime_switch_alignment', 0.0):.0%}",
     ]
     if baseline:
         markdown.extend(
@@ -388,7 +605,18 @@ def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> 
         markdown_text="\n".join(markdown),
         payload=payload,
     )
+    csv_frame = pd.DataFrame(authenticity_rows)
+    csv_text = csv_frame.to_csv(index=False)
+    csv_path = HISTORY_REPORT_DIR / f"{export_bundle['stem']}_metrics.csv"
+    csv_path.write_text(csv_text, encoding="utf-8")
+    charts_text = json.dumps(chart_data, ensure_ascii=False, indent=2)
+    charts_path = HISTORY_REPORT_DIR / f"{export_bundle['stem']}_charts.json"
+    charts_path.write_text(charts_text, encoding="utf-8")
     export_bundle["report_meta"] = report_meta
+    export_bundle["csv_path"] = csv_path
+    export_bundle["csv_text"] = csv_text
+    export_bundle["charts_path"] = charts_path
+    export_bundle["charts_text"] = charts_text
     return export_bundle
 
 
@@ -408,8 +636,8 @@ def _render_report_export(export_bundle: Dict[str, Any]) -> None:
             unsafe_allow_html=True,
         )
     with right:
-        top_row = st.columns(2)
-        bottom_row = st.columns(2)
+        top_row = st.columns(3)
+        bottom_row = st.columns(3)
         with top_row[0]:
             st.download_button(
                 "Download Word",
@@ -427,6 +655,15 @@ def _render_report_export(export_bundle: Dict[str, Any]) -> None:
                 mime="application/pdf",
                 use_container_width=True,
                 key=f"history_pdf_{export_bundle['stem']}",
+            )
+        with top_row[2]:
+            st.download_button(
+                "Download CSV",
+                data=export_bundle["csv_text"],
+                file_name=f"{export_bundle['stem']}_metrics.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key=f"history_csv_{export_bundle['stem']}",
             )
         with bottom_row[0]:
             st.download_button(
@@ -446,6 +683,15 @@ def _render_report_export(export_bundle: Dict[str, Any]) -> None:
                 use_container_width=True,
                 key=f"history_json_{export_bundle['stem']}",
             )
+        with bottom_row[2]:
+            st.download_button(
+                "Download Chart Data",
+                data=export_bundle["charts_text"],
+                file_name=f"{export_bundle['stem']}_charts.json",
+                mime="application/json",
+                use_container_width=True,
+                key=f"history_charts_{export_bundle['stem']}",
+            )
 
 
 def render_history_replay() -> None:
@@ -464,27 +710,58 @@ def render_history_replay() -> None:
         st.session_state.history_replay_result = None
 
     template_map = {item["title"]: item for item in _load_policy_templates()}
+    history_case_templates = _load_history_case_templates()
+    history_case_map = {item["title"]: item for item in history_case_templates}
     selected_template_label = st.selectbox("Template", options=list(template_map.keys()), index=0)
     selected_template = template_map[selected_template_label]
+    selected_history_case_label = st.selectbox("History case", options=["None"] + list(history_case_map.keys()), index=0)
+    selected_history_case = history_case_map.get(selected_history_case_label) if selected_history_case_label != "None" else None
     entry_mode = str(st.session_state.get("history_replay_entry_mode", "factor")).strip().lower()
     default_engine_mode = "agent" if entry_mode == "agent" else "factor"
 
     default_start, default_end = _default_window()
+    if selected_history_case:
+        case_start = pd.to_datetime(selected_history_case.get("start_date"), errors="coerce")
+        case_end = pd.to_datetime(selected_history_case.get("end_date"), errors="coerce")
+        if pd.notna(case_start):
+            default_start = case_start.date()
+        if pd.notna(case_end):
+            default_end = case_end.date()
     with st.form("history_replay_form"):
         col1, col2 = st.columns([1.2, 1.0])
         with col1:
             start_date = st.date_input("Start date", value=default_start)
             end_date = st.date_input("End date", value=default_end)
-            symbol_label = st.selectbox("Index", options=list(INDEX_OPTIONS.keys()), index=1)
-            policy_name = st.text_input("Policy name", value=f"{selected_template['title']} history replay")
-            policy_text = st.text_area("Policy text", value=str(selected_template["policy_text"]), height=110)
+            default_symbol_index = 1
+            if selected_history_case and selected_history_case.get("symbol"):
+                resolved_index = next(
+                    (
+                        idx
+                        for idx, value in enumerate(INDEX_OPTIONS.values())
+                        if value == selected_history_case.get("symbol")
+                    ),
+                    default_symbol_index,
+                )
+                default_symbol_index = resolved_index
+            symbol_label = st.selectbox("Index", options=list(INDEX_OPTIONS.keys()), index=default_symbol_index)
+            policy_name_default = f"{selected_template['title']} history replay"
+            if selected_history_case:
+                policy_name_default = f"{selected_history_case['title']} replay"
+            policy_text_default = str(selected_history_case.get("policy_text")) if selected_history_case else str(selected_template["policy_text"])
+            policy_name = st.text_input("Policy name", value=policy_name_default)
+            policy_text = st.text_area("Policy text", value=policy_text_default, height=110)
         with col2:
-            background = st.selectbox("Backdrop", options=list(BACKGROUND_TEMPLATES.keys()), index=1)
+            default_background = selected_history_case.get("background") if selected_history_case else list(BACKGROUND_TEMPLATES.keys())[1]
+            background = st.selectbox(
+                "Backdrop",
+                options=list(BACKGROUND_TEMPLATES.keys()),
+                index=list(BACKGROUND_TEMPLATES.keys()).index(default_background) if default_background in BACKGROUND_TEMPLATES else 1,
+            )
             strength = st.slider(
                 "Replay intensity",
                 min_value=0.3,
                 max_value=1.6,
-                value=float(selected_template.get("recommended_intensity", 1.0)),
+                value=float((selected_history_case or selected_template).get("recommended_intensity", 1.0)),
                 step=0.1,
             )
             rebalance_frequency = st.select_slider("Rebalance cadence", options=[1, 2, 3, 5, 10], value=5)
@@ -496,6 +773,8 @@ def render_history_replay() -> None:
                 index=1 if default_engine_mode == "agent" else 0,
             )
             enable_agent_replay = st.toggle("Enable agent replay feature flag", value=False)
+            enable_event_driven_v2 = st.toggle("Enable event-driven replay v2", value=False)
+            enable_rolling_calibration = st.toggle("Enable rolling calibration + OOS", value=False)
             enable_event_store = st.toggle("Enable EventStore feature flag", value=False)
             enable_baseline = st.toggle("Include factor baseline", value=True)
             dataset_version = st.text_input("EventStore dataset_version", value="default")
@@ -527,6 +806,8 @@ def render_history_replay() -> None:
             random_seed=42,
             feature_flags={
                 "agent_replay": bool(enable_agent_replay),
+                "history_replay_event_driven_v2": bool(enable_event_driven_v2),
+                "history_replay_rolling_calibration_v1": bool(enable_rolling_calibration),
                 "event_store_v1": bool(enable_event_store),
             },
         )
@@ -580,7 +861,10 @@ def render_history_replay() -> None:
             "result": result,
             "baseline_result": baseline_result,
             "metrics": _build_replay_metrics(result),
+            "history_case": selected_history_case.get("case_payload") if selected_history_case else None,
         }
+        bundle["authenticity_layers"] = _build_authenticity_layers(result)
+        bundle["chart_data"] = _build_authenticity_chart_data(result, bundle["authenticity_layers"], baseline_result)
         bundle["replay_cards"] = _build_replay_brief(bundle, bundle["metrics"])
         bundle["export_bundle"] = _build_history_report(bundle, bundle["metrics"])
         st.session_state.history_replay_result = bundle

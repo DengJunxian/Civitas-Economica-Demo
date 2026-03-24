@@ -17,9 +17,15 @@ import random
 import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Tuple
 
 import numpy as np
+
+
+DEFAULT_REGULATOR_FEATURE_FLAGS: Dict[str, bool] = {
+    "regulator_real_env_v1": True,
+    "regulator_toy_fallback_v1": True,
+}
 
 
 def _run_coro_blocking(coro: Any, *, timeout: float) -> Any:
@@ -151,22 +157,104 @@ class RewardFunction:
     w_intervention_cost_penalty: float = 0.6
     w_welfare_confidence_reward: float = 0.7
     w_stability_improve: float = 0.6
+    w_financing_function_reward: float = 0.5
+    w_fairness_compliance_reward: float = 0.4
 
-    def __call__(self, obs: EnvObservation, prev_obs: Optional[EnvObservation] = None) -> float:
+    def explain(self, obs: EnvObservation, prev_obs: Optional[EnvObservation] = None) -> Dict[str, Any]:
         liquidity_shortage = float(obs.extras.get("liquidity_shortage", 0.0)) if obs.extras else 0.0
         intervention_cost = float(obs.extras.get("intervention_cost", 0.0)) if obs.extras else 0.0
         welfare_confidence = float(obs.extras.get("welfare_confidence", 1.0 - obs.panic_level)) if obs.extras else float(1.0 - obs.panic_level)
-        reward = (
-            self.w_macro_stability * float(obs.macro_stability)
-            - self.w_crash_risk_penalty * float(obs.crash_loss_rate)
-            - self.w_volatility_penalty * float(obs.volatility)
-            - self.w_liquidity_shortage_penalty * float(liquidity_shortage)
-            - self.w_intervention_cost_penalty * float(intervention_cost)
-            + self.w_welfare_confidence_reward * float(welfare_confidence)
+        liquidity = float(np.clip(1.0 - liquidity_shortage, 0.0, 1.0))
+        financing_function = (
+            float(obs.extras.get("financing_function", 1.0 - 0.50 * obs.volatility - 0.35 * obs.panic_level))
+            if obs.extras
+            else float(1.0 - 0.50 * obs.volatility - 0.35 * obs.panic_level)
         )
+        fairness_compliance = (
+            float(obs.extras.get("fairness_compliance", 1.0 - 0.35 * obs.panic_level - 0.45 * obs.crash_loss_rate))
+            if obs.extras
+            else float(1.0 - 0.35 * obs.panic_level - 0.45 * obs.crash_loss_rate)
+        )
+        weighted_components = {
+            "stability": self.w_macro_stability * float(obs.macro_stability),
+            "crash_risk_penalty": -self.w_crash_risk_penalty * float(obs.crash_loss_rate),
+            "volatility_penalty": -self.w_volatility_penalty * float(obs.volatility),
+            "liquidity_penalty": -self.w_liquidity_shortage_penalty * float(liquidity_shortage),
+            "financing_function_reward": self.w_financing_function_reward * float(np.clip(financing_function, 0.0, 1.0)),
+            "fairness_compliance_reward": self.w_fairness_compliance_reward * float(np.clip(fairness_compliance, 0.0, 1.0)),
+            "intervention_cost_penalty": -self.w_intervention_cost_penalty * float(intervention_cost),
+            "welfare_confidence_reward": self.w_welfare_confidence_reward * float(welfare_confidence),
+            "stability_improve_reward": 0.0,
+        }
         if prev_obs is not None:
-            reward += self.w_stability_improve * (float(obs.macro_stability) - float(prev_obs.macro_stability))
-        return float(reward)
+            weighted_components["stability_improve_reward"] = self.w_stability_improve * (
+                float(obs.macro_stability) - float(prev_obs.macro_stability)
+            )
+        reward = float(sum(weighted_components.values()))
+        return {
+            "reward": reward,
+            "raw_metrics": {
+                "macro_stability": float(obs.macro_stability),
+                "crash_risk": float(obs.crash_loss_rate),
+                "volatility": float(obs.volatility),
+                "panic_level": float(obs.panic_level),
+                "liquidity": liquidity,
+                "liquidity_shortage": float(liquidity_shortage),
+                "financing_function": float(np.clip(financing_function, 0.0, 1.0)),
+                "fairness_compliance": float(np.clip(fairness_compliance, 0.0, 1.0)),
+                "intervention_cost": float(intervention_cost),
+                "welfare_confidence": float(welfare_confidence),
+            },
+            "weighted_components": weighted_components,
+        }
+
+    def __call__(self, obs: EnvObservation, prev_obs: Optional[EnvObservation] = None) -> float:
+        return float(self.explain(obs, prev_obs=prev_obs)["reward"])
+
+
+def resolve_regulator_feature_flags(feature_flags: Optional[Mapping[str, Any]] = None) -> Dict[str, bool]:
+    merged = dict(DEFAULT_REGULATOR_FEATURE_FLAGS)
+    if feature_flags:
+        for key in merged:
+            if key in feature_flags:
+                merged[key] = bool(feature_flags[key])
+    return merged
+
+
+def _derive_policy_support_metrics(
+    *,
+    volatility: float,
+    crash_loss_rate: float,
+    panic_level: float,
+    stabilization_capital: float,
+    rumor_refute_strength: float,
+) -> Dict[str, float]:
+    financing_function = float(
+        np.clip(
+            1.0
+            - 0.42 * volatility
+            - 0.28 * panic_level
+            - 0.18 * crash_loss_rate
+            + 0.15 * max(0.0, stabilization_capital),
+            0.0,
+            1.0,
+        )
+    )
+    fairness_compliance = float(
+        np.clip(
+            1.0
+            - 0.30 * panic_level
+            - 0.30 * crash_loss_rate
+            + 0.22 * max(0.0, rumor_refute_strength)
+            + 0.08 * max(0.0, stabilization_capital),
+            0.0,
+            1.0,
+        )
+    )
+    return {
+        "financing_function": financing_function,
+        "fairness_compliance": fairness_compliance,
+    }
 
 
 # ==========================================================
@@ -294,6 +382,13 @@ class ToyRegulatoryMarketEnv(RegulatoryEnvironment):
             )
         )
         welfare_confidence = float(np.clip(1.0 - 0.55 * next_panic - 0.25 * next_vol + 0.20 * intervention_effect, 0.0, 1.0))
+        support_metrics = _derive_policy_support_metrics(
+            volatility=next_vol,
+            crash_loss_rate=next_crash,
+            panic_level=next_panic,
+            stabilization_capital=float(action.stabilization_capital),
+            rumor_refute_strength=float(action.rumor_refute_strength),
+        )
 
         self._obs = EnvObservation(
             step=self._step,
@@ -308,12 +403,14 @@ class ToyRegulatoryMarketEnv(RegulatoryEnvironment):
                 "liquidity_shortage": liquidity_shortage,
                 "intervention_cost": intervention_cost,
                 "welfare_confidence": welfare_confidence,
+                **support_metrics,
             },
         )
 
-        reward = self.reward_fn(self._obs, prev_obs=prev_obs)
+        reward_breakdown = self.reward_fn.explain(self._obs, prev_obs=prev_obs)
+        reward = float(reward_breakdown["reward"])
         done = bool(self._step >= self.episode_steps or next_crash >= 0.95)
-        info = {"distance": distance, "control_gain": control_gain}
+        info = {"distance": distance, "control_gain": control_gain, "reward_breakdown": reward_breakdown}
         return self._obs, reward, done, info
 
 
@@ -357,10 +454,11 @@ class CivitasMarketEnvAdapter(RegulatoryEnvironment):
         self._step += 1
 
         obs = self._build_observation(step=self._step)
-        reward = self.reward_fn(obs, prev_obs=self._last_obs)
+        reward_breakdown = self.reward_fn.explain(obs, prev_obs=self._last_obs)
+        reward = float(reward_breakdown["reward"])
         self._last_obs = obs
         done = bool(self._step >= self.episode_steps or obs.crash_loss_rate > 0.45)
-        return obs, reward, done, {"action": action.to_dict()}
+        return obs, reward, done, {"action": action.to_dict(), "reward_breakdown": reward_breakdown}
 
     def _apply_action(self, action: RegulatoryAction) -> None:
         """
@@ -464,6 +562,13 @@ class CivitasMarketEnvAdapter(RegulatoryEnvironment):
             )
         )
         welfare_confidence = float(np.clip(1.0 - 0.55 * panic_level - 0.25 * volatility + 0.20 * max(0.0, self._last_action.stabilization_capital), 0.0, 1.0))
+        support_metrics = _derive_policy_support_metrics(
+            volatility=volatility,
+            crash_loss_rate=crash_loss_rate,
+            panic_level=panic_level,
+            stabilization_capital=float(self._last_action.stabilization_capital),
+            rumor_refute_strength=float(self._last_action.rumor_refute_strength),
+        )
 
         return EnvObservation(
             step=step,
@@ -477,6 +582,7 @@ class CivitasMarketEnvAdapter(RegulatoryEnvironment):
                 "liquidity_shortage": liquidity_shortage,
                 "intervention_cost": intervention_cost,
                 "welfare_confidence": welfare_confidence,
+                **support_metrics,
             },
         )
 
@@ -518,10 +624,11 @@ class SimulationControllerEnvAdapter(RegulatoryEnvironment):
         self._step += 1
 
         obs = self._build_observation(step=self._step)
-        reward = self.reward_fn(obs, prev_obs=self._last_obs)
+        reward_breakdown = self.reward_fn.explain(obs, prev_obs=self._last_obs)
+        reward = float(reward_breakdown["reward"])
         self._last_obs = obs
         done = bool(self._step >= self.episode_steps or obs.crash_loss_rate > 0.45)
-        return obs, reward, done, {"action": action.to_dict()}
+        return obs, reward, done, {"action": action.to_dict(), "reward_breakdown": reward_breakdown}
 
     def _apply_action(self, action: RegulatoryAction) -> None:
         if self.controller is None:
@@ -624,6 +731,13 @@ class SimulationControllerEnvAdapter(RegulatoryEnvironment):
             )
         )
         welfare_confidence = float(np.clip(1.0 - 0.55 * panic_level - 0.25 * volatility + 0.20 * max(0.0, self._last_action.stabilization_capital), 0.0, 1.0))
+        support_metrics = _derive_policy_support_metrics(
+            volatility=volatility,
+            crash_loss_rate=crash_loss_rate,
+            panic_level=panic_level,
+            stabilization_capital=float(self._last_action.stabilization_capital),
+            rumor_refute_strength=float(self._last_action.rumor_refute_strength),
+        )
 
         return EnvObservation(
             step=step,
@@ -638,6 +752,7 @@ class SimulationControllerEnvAdapter(RegulatoryEnvironment):
                 "liquidity_shortage": liquidity_shortage,
                 "intervention_cost": intervention_cost,
                 "welfare_confidence": welfare_confidence,
+                **support_metrics,
             },
         )
 
@@ -925,6 +1040,38 @@ def _action_signature(action: RegulatoryAction) -> str:
     return hashlib.sha256(json.dumps(action.to_dict(), sort_keys=True).encode("utf-8")).hexdigest()[:12]
 
 
+def build_default_real_env_factory(
+    *,
+    max_steps_per_episode: int,
+    reward_fn: Optional[RewardFunction] = None,
+) -> Callable[[], RegulatoryEnvironment]:
+    """
+    Default real-environment entrypoint.
+
+    This keeps the interface stable while making the real simulation the preferred path.
+    If the controller cannot be constructed in the local runtime, the caller decides whether
+    to fall back to the toy environment via feature flags.
+    """
+
+    def _factory() -> RegulatoryEnvironment:
+        controller_factory = build_simulation_controller_factory(
+            deepseek_key="",
+            zhipu_key="",
+            mode="FAST",
+        )
+        return SimulationControllerEnvAdapter(
+            controller_factory=controller_factory,
+            episode_steps=int(max_steps_per_episode),
+            reward_fn=reward_fn,
+        )
+
+    return _factory
+
+
+def _toy_env_factory(*, max_steps_per_episode: int, reward_fn: Optional[RewardFunction] = None) -> Callable[[], RegulatoryEnvironment]:
+    return lambda: ToyRegulatoryMarketEnv(episode_steps=int(max_steps_per_episode), reward_fn=reward_fn)
+
+
 def _evaluate_action_bundle(
     *,
     env_factory: Callable[[], RegulatoryEnvironment],
@@ -936,13 +1083,16 @@ def _evaluate_action_bundle(
     obs = env.reset(seed=seed)
     total_reward = 0.0
     metrics_trace: List[Dict[str, float]] = []
+    reward_breakdowns: List[Dict[str, float]] = []
     done = False
     for _ in range(max_steps_per_episode):
-        obs, reward, done, _info = env.step(action)
+        obs, reward, done, info = env.step(action)
         total_reward += float(reward)
         liquidity_shortage = float(obs.extras.get("liquidity_shortage", 0.0)) if obs.extras else 0.0
         intervention_cost = float(obs.extras.get("intervention_cost", 0.0)) if obs.extras else 0.0
         welfare_confidence = float(obs.extras.get("welfare_confidence", 1.0 - obs.panic_level)) if obs.extras else float(1.0 - obs.panic_level)
+        financing_function = float(obs.extras.get("financing_function", 1.0 - 0.50 * obs.volatility - 0.35 * obs.panic_level)) if obs.extras else float(1.0 - 0.50 * obs.volatility - 0.35 * obs.panic_level)
+        fairness_compliance = float(obs.extras.get("fairness_compliance", 1.0 - 0.35 * obs.panic_level - 0.45 * obs.crash_loss_rate)) if obs.extras else float(1.0 - 0.35 * obs.panic_level - 0.45 * obs.crash_loss_rate)
         metrics_trace.append(
             {
                 "macro_stability": float(obs.macro_stability),
@@ -952,8 +1102,19 @@ def _evaluate_action_bundle(
                 "liquidity": float(np.clip(1.0 - liquidity_shortage, 0.0, 1.0)),
                 "intervention_cost": intervention_cost,
                 "welfare_confidence": welfare_confidence,
+                "financing_function": float(np.clip(financing_function, 0.0, 1.0)),
+                "fairness_compliance": float(np.clip(fairness_compliance, 0.0, 1.0)),
             }
         )
+        reward_data = info.get("reward_breakdown") if isinstance(info, dict) else None
+        if isinstance(reward_data, dict):
+            reward_breakdowns.append(
+                {
+                    key: float(value)
+                    for key, value in dict(reward_data.get("weighted_components", {})).items()
+                    if isinstance(value, (int, float))
+                }
+            )
         if done:
             break
     frame = np.array(
@@ -965,13 +1126,22 @@ def _evaluate_action_bundle(
                 row["liquidity"],
                 row["intervention_cost"],
                 row["welfare_confidence"],
+                row["financing_function"],
+                row["fairness_compliance"],
             ]
             for row in metrics_trace
         ],
         dtype=float,
     )
     if frame.size == 0:
-        frame = np.zeros((1, 6), dtype=float)
+        frame = np.zeros((1, 8), dtype=float)
+    reward_component_means: Dict[str, float] = {}
+    if reward_breakdowns:
+        keys = sorted({key for row in reward_breakdowns for key in row.keys()})
+        reward_component_means = {
+            key: float(np.mean([row.get(key, 0.0) for row in reward_breakdowns]))
+            for key in keys
+        }
     return {
         "action": action.to_dict(),
         "action_description": action.describe(),
@@ -984,6 +1154,9 @@ def _evaluate_action_bundle(
         "liquidity": float(np.mean(frame[:, 3])),
         "intervention_cost": float(np.mean(frame[:, 4])),
         "welfare_confidence": float(np.mean(frame[:, 5])),
+        "financing_function": float(np.mean(frame[:, 6])),
+        "fairness_compliance": float(np.mean(frame[:, 7])),
+        "reward_breakdown": reward_component_means,
         "steps": int(len(metrics_trace)),
         "terminated": bool(done),
     }
@@ -1015,15 +1188,98 @@ def _pareto_frontier(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return frontier
 
 
+def _recommend_policy_bundle(
+    *,
+    baseline_row: Mapping[str, Any],
+    candidates: List[Dict[str, Any]],
+    pareto: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    pool = pareto if pareto else candidates
+    if not pool:
+        return {
+            "recommended_action": {},
+            "action_signature": "",
+            "action_description": "No candidate available",
+            "scorecard": {},
+            "evidence_chain": [],
+            "tradeoff_summary": "No candidate available",
+            "side_effects": [],
+        }
+
+    def _score(row: Mapping[str, Any]) -> float:
+        return float(
+            0.28 * float(row.get("macro_stability", 0.0))
+            + 0.20 * float(row.get("liquidity", 0.0))
+            + 0.17 * float(row.get("financing_function", 0.0))
+            + 0.17 * float(row.get("fairness_compliance", 0.0))
+            + 0.10 * float(row.get("welfare_confidence", 0.0))
+            - 0.08 * float(row.get("intervention_cost", 0.0))
+        )
+
+    recommended = max(pool, key=_score)
+    scorecard = {
+        "macro_stability": float(recommended.get("macro_stability", 0.0)),
+        "liquidity": float(recommended.get("liquidity", 0.0)),
+        "financing_function": float(recommended.get("financing_function", 0.0)),
+        "fairness_compliance": float(recommended.get("fairness_compliance", 0.0)),
+        "welfare_confidence": float(recommended.get("welfare_confidence", 0.0)),
+        "intervention_cost": float(recommended.get("intervention_cost", 0.0)),
+        "composite_score": _score(recommended),
+    }
+    evidence_metrics = [
+        ("macro_stability", "Stability improved"),
+        ("liquidity", "Liquidity supply strengthened"),
+        ("financing_function", "Financing function recovered"),
+        ("fairness_compliance", "Fairness/compliance improved"),
+        ("intervention_cost", "Intervention cost changed"),
+    ]
+    evidence_chain: List[Dict[str, Any]] = []
+    for metric, interpretation in evidence_metrics:
+        baseline_value = float(baseline_row.get(metric, 0.0))
+        candidate_value = float(recommended.get(metric, 0.0))
+        evidence_chain.append(
+            {
+                "metric": metric,
+                "baseline": baseline_value,
+                "candidate": candidate_value,
+                "delta": float(candidate_value - baseline_value),
+                "interpretation": interpretation,
+            }
+        )
+    side_effects = [
+        item
+        for item in (
+            "Higher intervention cost" if float(recommended.get("intervention_cost", 0.0)) > float(baseline_row.get("intervention_cost", 0.0)) else "",
+            "Volatility remains elevated" if float(recommended.get("volatility", 0.0)) > 0.08 else "",
+            "Crash risk still non-trivial" if float(recommended.get("crash_risk", 0.0)) > 0.10 else "",
+        )
+        if item
+    ]
+    return {
+        "recommended_action": dict(recommended.get("action", {})),
+        "action_signature": str(recommended.get("action_signature", "")),
+        "action_description": str(recommended.get("action_description", "")),
+        "scorecard": scorecard,
+        "evidence_chain": evidence_chain,
+        "tradeoff_summary": (
+            f"Selected action balances stability={scorecard['macro_stability']:.3f}, "
+            f"liquidity={scorecard['liquidity']:.3f}, financing={scorecard['financing_function']:.3f}, "
+            f"fairness={scorecard['fairness_compliance']:.3f} against cost={scorecard['intervention_cost']:.3f}."
+        ),
+        "side_effects": side_effects,
+    }
+
+
 def run_regulatory_closed_loop(
     *,
     episodes: int = 300,
     max_steps_per_episode: int = 48,
     seed: int = 42,
     top_k: int = 5,
-    use_toy_env: bool = True,
+    use_toy_env: Optional[bool] = None,
     env: Optional[RegulatoryEnvironment] = None,
     env_factory: Optional[Callable[[], RegulatoryEnvironment]] = None,
+    feature_flags: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Run regulator optimization in a simulation loop and output:
@@ -1031,20 +1287,58 @@ def run_regulatory_closed_loop(
     - counterfactual A/B bundles
     - Pareto frontier (stability vs liquidity vs cost)
     """
-    if env_factory is None:
-        if env is not None:
-            env_factory = lambda: env
-        elif use_toy_env:
-            env_factory = lambda: ToyRegulatoryMarketEnv(episode_steps=max_steps_per_episode)
-        else:
-            raise ValueError("use_toy_env=False 时必须提供 env 或 env_factory。")
+    flags = resolve_regulator_feature_flags(feature_flags)
+    reward_fn = RewardFunction()
+    toy_factory = _toy_env_factory(max_steps_per_episode=int(max_steps_per_episode), reward_fn=reward_fn)
+    env_selection: Dict[str, Any] = {
+        "requested_use_toy_env": use_toy_env,
+        "feature_flags": flags,
+        "selected_path": "",
+        "fallback_used": False,
+    }
+    if env_factory is not None:
+        active_env_factory = env_factory
+        env_selection["selected_path"] = "custom_env_factory"
+    elif env is not None:
+        active_env_factory = lambda: env
+        env_selection["selected_path"] = "custom_env"
+    elif use_toy_env is True:
+        active_env_factory = toy_factory
+        env_selection["selected_path"] = "toy_explicit"
+    elif flags.get("regulator_real_env_v1", True):
+        active_env_factory = build_default_real_env_factory(
+            max_steps_per_episode=int(max_steps_per_episode),
+            reward_fn=reward_fn,
+        )
+        env_selection["selected_path"] = "real_env_factory"
+    elif flags.get("regulator_toy_fallback_v1", True):
+        active_env_factory = toy_factory
+        env_selection["selected_path"] = "toy_fallback"
+        env_selection["fallback_used"] = True
+        env_selection["fallback_reason"] = "real_env_feature_disabled"
+    else:
+        raise ValueError("No regulatory environment available under current feature flags.")
 
     agent = RegulatorAgent(action_space=RegulatorAgent.build_compact_action_space(), seed=int(seed))
-    summary = agent.train(
-        env=env_factory(),
-        episodes=int(episodes),
-        max_steps_per_episode=int(max_steps_per_episode),
-    )
+    try:
+        summary = agent.train(
+            env=active_env_factory(),
+            episodes=int(episodes),
+            max_steps_per_episode=int(max_steps_per_episode),
+        )
+    except Exception as exc:
+        if env_selection["selected_path"] == "real_env_factory" and flags.get("regulator_toy_fallback_v1", True):
+            active_env_factory = toy_factory
+            env_selection["selected_path"] = "toy_fallback"
+            env_selection["fallback_used"] = True
+            env_selection["fallback_reason"] = str(exc)
+            summary = agent.train(
+                env=active_env_factory(),
+                episodes=int(episodes),
+                max_steps_per_episode=int(max_steps_per_episode),
+            )
+        else:
+            raise
     summary_dict = training_summary_to_dict(summary)
 
     baseline = RegulatoryAction(0.0005, 0, 0, 0.0, 0.0, 0, False)
@@ -1057,7 +1351,7 @@ def run_regulatory_closed_loop(
         seen.add(sig)
         evaluated.append(
             _evaluate_action_bundle(
-                env_factory=env_factory,
+                env_factory=active_env_factory,
                 action=action,
                 max_steps_per_episode=int(max_steps_per_episode),
                 seed=int(seed + idx),
@@ -1074,16 +1368,24 @@ def run_regulatory_closed_loop(
                 "action_description": row["action_description"],
                 "macro_stability_delta": float(row["macro_stability"] - float(baseline_row.get("macro_stability", 0.0))),
                 "liquidity_delta": float(row["liquidity"] - float(baseline_row.get("liquidity", 0.0))),
+                "financing_function_delta": float(row["financing_function"] - float(baseline_row.get("financing_function", 0.0))),
+                "fairness_compliance_delta": float(row["fairness_compliance"] - float(baseline_row.get("fairness_compliance", 0.0))),
                 "cost_delta": float(row["intervention_cost"] - float(baseline_row.get("intervention_cost", 0.0))),
                 "reward_delta": float(row["avg_reward"] - float(baseline_row.get("avg_reward", 0.0))),
             }
         )
 
     pareto = _pareto_frontier(candidates if candidates else evaluated)
+    recommendation = _recommend_policy_bundle(
+        baseline_row=baseline_row,
+        candidates=candidates,
+        pareto=pareto,
+    )
     reproducibility = {
         "seed": int(seed),
         "episodes": int(episodes),
         "max_steps_per_episode": int(max_steps_per_episode),
+        "env_selection": env_selection,
         "config_hash": hashlib.sha256(
             json.dumps(
                 {
@@ -1091,6 +1393,8 @@ def run_regulatory_closed_loop(
                     "episodes": int(episodes),
                     "max_steps_per_episode": int(max_steps_per_episode),
                     "top_k": int(top_k),
+                    "feature_flags": flags,
+                    "env_selection": env_selection.get("selected_path", ""),
                     "action_space": [a.to_dict() for a in agent.action_space],
                 },
                 sort_keys=True,
@@ -1106,6 +1410,7 @@ def run_regulatory_closed_loop(
             "deltas": ab_rows,
         },
         "pareto_frontier": pareto,
+        "recommendation": recommendation,
         "reproducibility": reproducibility,
     }
 

@@ -20,9 +20,12 @@ def _stable_hash(payload: Mapping[str, Any]) -> str:
 
 class SocialNodeType(str, Enum):
     OFFICIAL_MEDIA = "official_media"
+    FINANCIAL_MEDIA = "financial_media"
     REGULATOR_VOICE = "regulator_voice"
     BROKER_RESEARCH = "broker_research"
+    SOCIAL_MEDIA = "social_media"
     KOL_SOCIAL = "kol_social"
+    RUMOR_KOL = "rumor_kol"
     RETAIL_DAY_TRADER = "retail_day_trader"
     RETAIL = "retail_day_trader"
     INSTITUTION = "institution"
@@ -50,6 +53,16 @@ DEFAULT_NODE_PROFILES: Dict[str, Dict[str, float]] = {
         "social_exposure": 0.54,
         "rumor_sensitivity": 0.10,
     },
+    SocialNodeType.FINANCIAL_MEDIA.value: {
+        "source_credibility": 0.84,
+        "propagation_delay": 1,
+        "decay_rate": 0.14,
+        "amplification": 1.16,
+        "contradiction_sensitivity": 0.80,
+        "news_exposure": 0.90,
+        "social_exposure": 0.68,
+        "rumor_sensitivity": 0.22,
+    },
     SocialNodeType.BROKER_RESEARCH.value: {
         "source_credibility": 0.72,
         "propagation_delay": 1,
@@ -60,6 +73,16 @@ DEFAULT_NODE_PROFILES: Dict[str, Dict[str, float]] = {
         "social_exposure": 0.72,
         "rumor_sensitivity": 0.34,
     },
+    SocialNodeType.SOCIAL_MEDIA.value: {
+        "source_credibility": 0.38,
+        "propagation_delay": 0,
+        "decay_rate": 0.22,
+        "amplification": 1.42,
+        "contradiction_sensitivity": 0.36,
+        "news_exposure": 0.50,
+        "social_exposure": 0.96,
+        "rumor_sensitivity": 0.82,
+    },
     SocialNodeType.KOL_SOCIAL.value: {
         "source_credibility": 0.42,
         "propagation_delay": 0,
@@ -69,6 +92,16 @@ DEFAULT_NODE_PROFILES: Dict[str, Dict[str, float]] = {
         "news_exposure": 0.56,
         "social_exposure": 0.94,
         "rumor_sensitivity": 0.78,
+    },
+    SocialNodeType.RUMOR_KOL.value: {
+        "source_credibility": 0.18,
+        "propagation_delay": 0,
+        "decay_rate": 0.28,
+        "amplification": 1.76,
+        "contradiction_sensitivity": 0.20,
+        "news_exposure": 0.42,
+        "social_exposure": 0.98,
+        "rumor_sensitivity": 0.96,
     },
     SocialNodeType.RETAIL_DAY_TRADER.value: {
         "source_credibility": 0.30,

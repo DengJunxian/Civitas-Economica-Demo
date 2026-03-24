@@ -1,0 +1,16 @@
+﻿objective,series,value
+path_fit,validation,0.8471483730065172
+volatility_fit,validation,0.6360212006201224
+turnover_fit,validation,0.9442865527289379
+microstructure_fit,validation,0.5229528535980148
+stylized_facts_fit,validation,0.6137955169431613
+path_fit,holdout,0.7373344093226304
+volatility_fit,holdout,0.6206306878126353
+turnover_fit,holdout,0.9568948800522001
+microstructure_fit,holdout,0.5315934065934066
+stylized_facts_fit,holdout,0.6096349163756711
+path_fit,weights,0.3
+volatility_fit,weights,0.2
+turnover_fit,weights,0.15
+microstructure_fit,weights,0.15
+stylized_facts_fit,weights,0.2

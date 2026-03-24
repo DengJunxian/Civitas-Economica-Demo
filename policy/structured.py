@@ -56,6 +56,7 @@ class TransmissionChannel:
     lag_days: int
     decay_half_life: float
     direction: str
+    channel_type: str = "generic"
     macro_delta: Dict[str, float] = field(default_factory=dict)
     note: str = ""
 
@@ -90,6 +91,11 @@ class PolicyEvent:
     intensity: float
     tick: int
     matched_tokens: List[str] = field(default_factory=list)
+    implementation_timing: str = "immediate"
+    target_scope: List[str] = field(default_factory=list)
+    expected_lag_days: int = 0
+    action_channels: List[str] = field(default_factory=list)
+    side_effects: List[str] = field(default_factory=list)
     timestamp: float = field(default_factory=time.time)
     source: str = "structured_parser"
 
@@ -108,11 +114,16 @@ class PolicyPackage:
     factor_effects: Dict[str, float]
     agent_class_effects: Dict[str, float]
     market_effects: Dict[str, float]
+    policy_schema: Dict[str, Any] = field(default_factory=dict)
+    transmission_graph: Dict[str, Any] = field(default_factory=dict)
+    explanation: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
     parser_version: str = "structured_policy_v1"
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        payload["top_layers"] = self.top_layers()
+        return payload
 
     def to_policy_shock_fields(self) -> Dict[str, float]:
         fields = {
@@ -249,6 +260,11 @@ class StructuredPolicyParser:
             intensity=base_intensity,
             tick=int(tick),
             matched_tokens=self._matched_tokens(text),
+            implementation_timing=self._implementation_timing(policy_type),
+            target_scope=self._target_scope(policy_type, text),
+            expected_lag_days=max((int(channel.lag_days) for channel in channels), default=0),
+            action_channels=[channel.name for channel in channels],
+            side_effects=self._side_effects(policy_type, direction),
             source="structured_parser" if not fallback_used else "legacy_fallback",
         )
 
@@ -286,6 +302,24 @@ class StructuredPolicyParser:
             "parser_version": self.version,
         }
 
+        policy_schema = self._build_policy_schema(event)
+        transmission_graph = self._build_transmission_graph(
+            event=event,
+            channels=channels,
+            sector_effects=sector_effects,
+            factor_effects=factor_effects,
+            agent_class_effects=agent_class_effects,
+            market_effects=market_effects,
+        )
+        explanation = self._build_explanation(
+            event=event,
+            transmission_graph=transmission_graph,
+            sector_effects=sector_effects,
+            factor_effects=factor_effects,
+            agent_class_effects=agent_class_effects,
+            market_effects=market_effects,
+        )
+
         return PolicyPackage(
             event=event,
             channels=channels,
@@ -294,9 +328,247 @@ class StructuredPolicyParser:
             factor_effects=factor_effects,
             agent_class_effects=agent_class_effects,
             market_effects=market_effects,
+            policy_schema=policy_schema,
+            transmission_graph=transmission_graph,
+            explanation=explanation,
             metadata=metadata,
             parser_version=self.version,
         )
+
+    def _implementation_timing(self, policy_type: str) -> str:
+        if policy_type in {"tax_cut", "tax_hike", "stabilization", "rumor_refutation"}:
+            return "announcement_day"
+        if policy_type in {"liquidity_easing", "rate_cut", "tightening"}:
+            return "t+1 rollout"
+        if policy_type == "fiscal_stimulus":
+            return "phased_rollout"
+        return "unspecified"
+
+    def _target_scope(self, policy_type: str, text: str) -> List[str]:
+        scopes: List[str] = []
+        if any(token in text.lower() for token in ["bank", "credit", "financing", "margin", "融资"]):
+            scopes.append("funding_conditions")
+        if any(token in text.lower() for token in ["property", "real estate", "地产"]):
+            scopes.append("property")
+        if any(token in text.lower() for token in ["equity", "stock", "market", "股市", "市场"]):
+            scopes.append("equity_market")
+        if policy_type in {"stabilization", "rumor_refutation"}:
+            scopes.append("expectations_management")
+        if policy_type in {"fiscal_stimulus"}:
+            scopes.append("real_economy")
+        if not scopes:
+            scopes.append("broad_market")
+        return list(dict.fromkeys(scopes))
+
+    def _side_effects(self, policy_type: str, direction: str) -> List[str]:
+        side_effect_map = {
+            "liquidity_easing": ["asset_valuation_repricing", "leverage_rebound"],
+            "rate_cut": ["duration_extension", "sector_rotation"],
+            "fiscal_stimulus": ["crowding_in", "execution_lag"],
+            "tax_cut": ["turnover_spike", "speculation_rebound"],
+            "tax_hike": ["liquidity_drop", "risk_aversion_jump"],
+            "stabilization": ["moral_hazard", "state_flow_dependence"],
+            "rumor_refutation": ["credibility_test", "short_squeeze"],
+            "tightening": ["funding_stress", "valuation_compression"],
+        }
+        effects = list(side_effect_map.get(policy_type, ["interpretation_uncertainty"]))
+        if direction == "tightening":
+            effects.append("margin_constraint")
+        return list(dict.fromkeys(effects))
+
+    def _build_policy_schema(self, event: PolicyEvent) -> Dict[str, Any]:
+        return {
+            "schema_version": "policy_schema_v1",
+            "policy_id": event.policy_id,
+            "policy_type": event.policy_type,
+            "policy_label": event.policy_label,
+            "direction": event.direction,
+            "intensity": float(event.intensity),
+            "implementation_timing": event.implementation_timing,
+            "target_scope": list(event.target_scope),
+            "expected_lag_days": int(event.expected_lag_days),
+            "action_channels": list(event.action_channels),
+            "side_effects": list(event.side_effects),
+            "source": event.source,
+            "tick": int(event.tick),
+        }
+
+    def _build_transmission_graph(
+        self,
+        *,
+        event: PolicyEvent,
+        channels: Sequence[TransmissionChannel],
+        sector_effects: Mapping[str, float],
+        factor_effects: Mapping[str, float],
+        agent_class_effects: Mapping[str, float],
+        market_effects: Mapping[str, float],
+    ) -> Dict[str, Any]:
+        nodes: List[Dict[str, Any]] = [
+            {
+                "id": f"policy:{event.policy_id}",
+                "layer": "policy",
+                "label": event.policy_label,
+                "type": event.policy_type,
+                "intensity": float(event.intensity),
+            }
+        ]
+        edges: List[Dict[str, Any]] = []
+        for channel in channels:
+            channel_id = f"channel:{channel.name}"
+            nodes.append(
+                {
+                    "id": channel_id,
+                    "layer": "channel",
+                    "label": channel.name,
+                    "impact": float(channel.impact),
+                    "lag_days": int(channel.lag_days),
+                    "channel_type": channel.channel_type,
+                }
+            )
+            edges.append(
+                {
+                    "source": f"policy:{event.policy_id}",
+                    "target": channel_id,
+                    "weight": float(channel.impact),
+                    "lag_days": int(channel.lag_days),
+                    "relation": "activates",
+                }
+            )
+
+        top_agents = sorted(agent_class_effects.items(), key=lambda kv: abs(kv[1]), reverse=True)[:3]
+        top_markets = sorted(market_effects.items(), key=lambda kv: abs(kv[1]), reverse=True)[:3]
+        behavior_templates = {
+            "retail": "risk_appetite_shift",
+            "institution": "allocation_rebalance",
+            "market_maker": "quote_width_adjustment",
+            "state_stabilization": "supportive_bid_bias",
+            "rumor_trader": "sentiment_chasing",
+            "etf_arbitrageur": "basket_hedging",
+            "passive_fund": "tracking_flow_rebalance",
+            "policy_capital": "stability_support",
+            "leveraged_capital": "margin_repricing",
+            "foreign_proxy": "cross_border_flow",
+            "quant": "spread_capture",
+        }
+        for agent_name, weight in top_agents:
+            agent_id = f"agent:{agent_name}"
+            behavior_id = f"behavior:{agent_name}"
+            order_flow_id = f"order_flow:{agent_name}"
+            nodes.extend(
+                [
+                    {"id": agent_id, "layer": "agent", "label": agent_name, "weight": float(weight)},
+                    {
+                        "id": behavior_id,
+                        "layer": "behavior_variable",
+                        "label": behavior_templates.get(agent_name, "position_adjustment"),
+                        "weight": float(weight),
+                    },
+                    {"id": order_flow_id, "layer": "order_flow", "label": "net_order_flow", "weight": float(weight)},
+                ]
+            )
+            for channel in channels[: min(3, len(channels))]:
+                edges.append(
+                    {
+                        "source": f"channel:{channel.name}",
+                        "target": agent_id,
+                        "weight": float(weight * channel.impact),
+                        "lag_days": int(channel.lag_days),
+                        "relation": "influences",
+                    }
+                )
+            edges.extend(
+                [
+                    {"source": agent_id, "target": behavior_id, "weight": float(weight), "lag_days": 0, "relation": "changes"},
+                    {"source": behavior_id, "target": order_flow_id, "weight": float(weight), "lag_days": 0, "relation": "generates"},
+                ]
+            )
+            for market_name, market_weight in top_markets:
+                market_id = f"market:{market_name}"
+                if not any(node["id"] == market_id for node in nodes):
+                    nodes.append(
+                        {"id": market_id, "layer": "market_result", "label": market_name, "weight": float(market_weight)}
+                    )
+                edges.append(
+                    {
+                        "source": order_flow_id,
+                        "target": market_id,
+                        "weight": float(weight * market_weight),
+                        "lag_days": 0,
+                        "relation": "moves",
+                    }
+                )
+
+        info_network = [
+            {"channel": channel.name, "speed": max(1, int(channel.lag_days)), "coverage": "broad"}
+            for channel in channels
+            if channel.name in {"authority_signal", "risk_appetite", "sector_preference", "compliance_intensity"}
+        ]
+        funding_network = [
+            {"channel": channel.name, "speed": max(1, int(channel.lag_days)), "constraint": "balance_sheet"}
+            for channel in channels
+            if channel.name in {"financing_cost", "liquidity_supply", "margin_leverage"}
+        ]
+        primary_path = []
+        if channels and top_agents and top_markets:
+            primary_path = [
+                event.policy_label,
+                channels[0].name,
+                top_agents[0][0],
+                behavior_templates.get(top_agents[0][0], "position_adjustment"),
+                "net_order_flow",
+                top_markets[0][0],
+            ]
+        return {
+            "schema_version": "transmission_graph_v1",
+            "nodes": nodes,
+            "edges": edges,
+            "network_layers": {
+                "information_network": info_network,
+                "credit_funding_network": funding_network,
+            },
+            "primary_path": primary_path,
+            "layer_summaries": {
+                "sector": sorted(sector_effects.items(), key=lambda kv: abs(kv[1]), reverse=True)[:3],
+                "factor": sorted(factor_effects.items(), key=lambda kv: abs(kv[1]), reverse=True)[:3],
+                "agent_class": top_agents,
+                "market": top_markets,
+            },
+        }
+
+    def _build_explanation(
+        self,
+        *,
+        event: PolicyEvent,
+        transmission_graph: Mapping[str, Any],
+        sector_effects: Mapping[str, float],
+        factor_effects: Mapping[str, float],
+        agent_class_effects: Mapping[str, float],
+        market_effects: Mapping[str, float],
+    ) -> Dict[str, Any]:
+        top_sector = sorted(sector_effects.items(), key=lambda kv: abs(kv[1]), reverse=True)[:2]
+        top_factor = sorted(factor_effects.items(), key=lambda kv: abs(kv[1]), reverse=True)[:2]
+        top_agent = sorted(agent_class_effects.items(), key=lambda kv: abs(kv[1]), reverse=True)[:2]
+        top_market = sorted(market_effects.items(), key=lambda kv: abs(kv[1]), reverse=True)[:2]
+        return {
+            "headline": f"{event.policy_label} mainly works through {', '.join(event.action_channels[:2]) or 'market expectations'}",
+            "primary_path": list(transmission_graph.get("primary_path", [])),
+            "affected_agents": [{"name": name, "score": float(score)} for name, score in top_agent],
+            "affected_sectors": [{"name": name, "score": float(score)} for name, score in top_sector],
+            "affected_factors": [{"name": name, "score": float(score)} for name, score in top_factor],
+            "market_results": [{"name": name, "score": float(score)} for name, score in top_market],
+            "expected_lag_days": int(event.expected_lag_days),
+            "side_effects": list(event.side_effects),
+            "why_this_happened": {
+                "policy": event.policy_label,
+                "channels": list(event.action_channels[:3]),
+                "agents": [name for name, _ in top_agent],
+                "lags": {
+                    "announcement": 0,
+                    "channel": min((int(edge.get("lag_days", 0)) for edge in transmission_graph.get("edges", []) if str(edge.get("source", "")).startswith("policy:")), default=0),
+                    "market": int(event.expected_lag_days),
+                },
+            },
+        }
 
     def _matched_tokens(self, text: str) -> List[str]:
         tokens: List[str] = []
@@ -332,49 +604,94 @@ class StructuredPolicyParser:
                 lag_days=int(lag),
                 decay_half_life=float(half_life),
                 direction="supportive" if impact * intensity * sign >= 0 else "restrictive",
+                channel_type=name,
                 macro_delta=scaled_delta,
                 note=note,
             )
 
+        def _with_legacy_aliases(base_channels: List[TransmissionChannel]) -> List[TransmissionChannel]:
+            """Append legacy channel aliases so old assertions/UI remain compatible."""
+            by_name = {c.name: c for c in base_channels}
+
+            def alias(alias_name: str, src_name: str, *, note: str) -> Optional[TransmissionChannel]:
+                src = by_name.get(src_name)
+                if src is None:
+                    return None
+                return TransmissionChannel(
+                    name=alias_name,
+                    impact=float(src.impact),
+                    lag_days=int(src.lag_days),
+                    decay_half_life=float(src.decay_half_life),
+                    direction=src.direction,
+                    channel_type="legacy_alias",
+                    macro_delta=dict(src.macro_delta),
+                    note=note,
+                )
+
+            aliases: List[TransmissionChannel] = []
+            for alias_spec in (
+                ("liquidity", "liquidity_supply", "Legacy alias for liquidity_supply"),
+                ("rate", "financing_cost", "Legacy alias for financing_cost"),
+                ("credit_spread", "financing_cost", "Legacy alias for financing_cost"),
+            ):
+                ch = alias(alias_spec[0], alias_spec[1], note=alias_spec[2])
+                if ch is not None:
+                    aliases.append(ch)
+
+            if policy_type in {"tax_cut", "tax_hike"}:
+                ch = alias("tax_frictions", "compliance_intensity", note="Legacy alias for tax friction channel")
+                if ch is not None:
+                    aliases.append(ch)
+            if policy_type in {"rumor_refutation", "stabilization"}:
+                for alias_spec in (
+                    ("rumor_suppression", "compliance_intensity", "Legacy alias for rumor suppression"),
+                    ("sentiment_confidence", "authority_signal", "Legacy alias for confidence signaling"),
+                ):
+                    ch = alias(alias_spec[0], alias_spec[1], note=alias_spec[2])
+                    if ch is not None:
+                        aliases.append(ch)
+            return [*base_channels, *aliases]
+
         if policy_type in {"liquidity_easing", "rate_cut", "stabilization", "rumor_refutation"}:
-            return [
-                channel("liquidity", 0.85, 0, 7.0, {"liquidity_injection": 0.08, "sentiment_delta": 0.05}, "Liquidity support"),
-                channel("rate", 0.70 if policy_type != "stabilization" else 0.35, 1, 10.0, {"policy_rate_delta": -0.0015, "credit_spread_delta": -0.0008}, "Lower discount rate"),
-                channel("credit_spread", 0.55, 2, 12.0, {"credit_spread_delta": -0.0020, "liquidity_injection": 0.02}, "Credit easing"),
-                channel("volatility_expectation", 0.50, 1, 6.0, {"sentiment_delta": 0.04, "rumor_shock": 0.02}, "Lower expected volatility"),
-                channel("sentiment_confidence", 0.60, 0, 5.0, {"sentiment_delta": 0.08}, "Confidence repair"),
-                channel("rumor_suppression", 0.40 if policy_type != "stabilization" else 0.75, 0, 4.0, {"rumor_shock": 0.12, "sentiment_delta": 0.06}, "Refutation / backstop"),
-            ]
+            return _with_legacy_aliases([
+                channel("liquidity_supply", 0.85, 0, 7.0, {"liquidity_injection": 0.08, "sentiment_delta": 0.05}, "Liquidity support"),
+                channel("financing_cost", 0.70 if policy_type != "stabilization" else 0.35, 1, 10.0, {"policy_rate_delta": -0.0015, "credit_spread_delta": -0.0008}, "Lower financing cost"),
+                channel("risk_appetite", 0.55, 1, 6.0, {"sentiment_delta": 0.05, "rumor_shock": 0.02}, "Risk appetite repair"),
+                channel("margin_leverage", 0.45, 2, 8.0, {"credit_spread_delta": -0.0015, "liquidity_injection": 0.02}, "Margin conditions ease"),
+                channel("authority_signal", 0.60 if policy_type != "stabilization" else 0.78, 0, 5.0, {"sentiment_delta": 0.08}, "Official confidence signal"),
+                channel("compliance_intensity", 0.38 if policy_type != "stabilization" else 0.55, 0, 4.0, {"rumor_shock": 0.12, "sentiment_delta": 0.04}, "Compliance / rumor suppression"),
+            ])
 
         if policy_type == "fiscal_stimulus":
-            return [
-                channel("fiscal_demand", 0.90, 2, 14.0, {"fiscal_stimulus_delta": 0.06, "sentiment_delta": 0.05}, "Direct demand support"),
-                channel("liquidity", 0.35, 1, 8.0, {"liquidity_injection": 0.03}, "Secondary liquidity effect"),
-                channel("sentiment_confidence", 0.55, 0, 6.0, {"sentiment_delta": 0.06}, "Confidence uplift"),
-                channel("credit_spread", 0.20, 2, 10.0, {"credit_spread_delta": -0.0006}, "Mild credit improvement"),
-            ]
+            return _with_legacy_aliases([
+                channel("sector_preference", 0.90, 2, 14.0, {"fiscal_stimulus_delta": 0.06, "sentiment_delta": 0.05}, "Sector demand support"),
+                channel("liquidity_supply", 0.35, 1, 8.0, {"liquidity_injection": 0.03}, "Secondary liquidity effect"),
+                channel("risk_appetite", 0.55, 0, 6.0, {"sentiment_delta": 0.06}, "Confidence uplift"),
+                channel("financing_cost", 0.20, 2, 10.0, {"credit_spread_delta": -0.0006}, "Mild credit improvement"),
+                channel("authority_signal", 0.28, 0, 7.0, {"sentiment_delta": 0.03}, "Policy commitment signal"),
+            ])
 
         if policy_type in {"tax_cut", "tax_hike"}:
-            return [
-                channel("tax_frictions", 0.90, 0, 5.0, {"stamp_tax_delta": -0.0005, "liquidity_injection": 0.03, "sentiment_delta": 0.03}, "Lower / higher trading friction"),
-                channel("liquidity", 0.30, 0, 6.0, {"liquidity_injection": 0.02}, "Turnover response"),
-                channel("sentiment_confidence", 0.35, 0, 5.0, {"sentiment_delta": 0.04}, "Interpretation effect"),
-                channel("volatility_expectation", 0.25, 1, 5.0, {"sentiment_delta": 0.02}, "Participation change"),
-            ]
+            return _with_legacy_aliases([
+                channel("compliance_intensity", 0.90, 0, 5.0, {"stamp_tax_delta": -0.0005, "liquidity_injection": 0.03, "sentiment_delta": 0.03}, "Trading friction repricing"),
+                channel("liquidity_supply", 0.30, 0, 6.0, {"liquidity_injection": 0.02}, "Turnover response"),
+                channel("risk_appetite", 0.35, 0, 5.0, {"sentiment_delta": 0.04}, "Interpretation effect"),
+                channel("sector_preference", 0.20, 1, 5.0, {"sentiment_delta": 0.02}, "Participation shift"),
+            ])
 
         if policy_type == "tightening":
-            return [
-                channel("rate", 0.80, 1, 10.0, {"policy_rate_delta": -0.0018, "credit_spread_delta": -0.0010}, "Higher discount rate"),
-                channel("liquidity", 0.65, 0, 8.0, {"liquidity_injection": 0.07, "sentiment_delta": 0.04}, "Liquidity withdrawal"),
-                channel("credit_spread", 0.55, 1, 12.0, {"credit_spread_delta": -0.0022}, "Funding stress"),
-                channel("volatility_expectation", 0.55, 1, 7.0, {"sentiment_delta": 0.05, "rumor_shock": 0.03}, "Risk repricing"),
-                channel("sentiment_confidence", 0.50, 0, 6.0, {"sentiment_delta": 0.07}, "Confidence decay"),
-                channel("rumor_suppression", 0.20, 1, 4.0, {"rumor_shock": 0.05}, "Less supportive communication"),
-            ]
+            return _with_legacy_aliases([
+                channel("financing_cost", 0.80, 1, 10.0, {"policy_rate_delta": -0.0018, "credit_spread_delta": -0.0010}, "Higher financing cost"),
+                channel("liquidity_supply", 0.65, 0, 8.0, {"liquidity_injection": 0.07, "sentiment_delta": 0.04}, "Liquidity withdrawal"),
+                channel("margin_leverage", 0.55, 1, 12.0, {"credit_spread_delta": -0.0022}, "Funding stress"),
+                channel("risk_appetite", 0.55, 1, 7.0, {"sentiment_delta": 0.05, "rumor_shock": 0.03}, "Risk repricing"),
+                channel("authority_signal", 0.50, 0, 6.0, {"sentiment_delta": 0.07}, "Tighter official stance"),
+                channel("compliance_intensity", 0.25, 1, 4.0, {"rumor_shock": 0.05}, "Compliance cooling"),
+            ])
 
-        return [
-            channel("sentiment_confidence", 0.0, 0, 5.0, {"sentiment_delta": 0.0}, "Neutral fallback"),
-        ]
+        return _with_legacy_aliases([
+            channel("authority_signal", 0.0, 0, 5.0, {"sentiment_delta": 0.0}, "Neutral fallback"),
+        ])
 
     def _build_layers(
         self,
@@ -388,35 +705,40 @@ class StructuredPolicyParser:
         channel_map = {channel.name: channel.impact for channel in channels}
 
         sector_weights = {
-            "financials": {"liquidity": 0.60, "rate": -0.45, "credit_spread": -0.50, "tax_frictions": -0.10, "sentiment_confidence": 0.20},
-            "growth": {"liquidity": 0.70, "rate": 0.55, "fiscal_demand": 0.30, "sentiment_confidence": 0.35, "volatility_expectation": 0.10},
-            "consumer": {"fiscal_demand": 0.65, "tax_frictions": 0.30, "sentiment_confidence": 0.25, "liquidity": 0.10},
-            "defensive": {"volatility_expectation": -0.35, "sentiment_confidence": 0.20, "rumor_suppression": 0.25},
-            "cyclical": {"liquidity": 0.40, "fiscal_demand": 0.55, "rate": 0.25, "credit_spread": -0.20},
-            "property": {"rate": 0.65, "liquidity": 0.35, "credit_spread": -0.30, "sentiment_confidence": 0.15},
-            "state_owned": {"stabilization": 0.60, "liquidity": 0.35, "rumor_suppression": 0.30, "sentiment_confidence": 0.25},
-            "speculative": {"tax_frictions": -0.75, "volatility_expectation": -0.55, "sentiment_confidence": 0.45, "liquidity": 0.20},
+            "financials": {"liquidity_supply": 0.55, "financing_cost": -0.55, "margin_leverage": -0.45, "authority_signal": 0.18},
+            "growth": {"liquidity_supply": 0.62, "financing_cost": 0.48, "sector_preference": 0.28, "risk_appetite": 0.35},
+            "consumer": {"sector_preference": 0.62, "risk_appetite": 0.24, "liquidity_supply": 0.12, "compliance_intensity": -0.08},
+            "defensive": {"risk_appetite": -0.28, "authority_signal": 0.22, "compliance_intensity": 0.16},
+            "cyclical": {"liquidity_supply": 0.35, "sector_preference": 0.56, "financing_cost": 0.22, "margin_leverage": -0.18},
+            "property": {"financing_cost": 0.62, "liquidity_supply": 0.28, "margin_leverage": -0.24, "authority_signal": 0.12},
+            "state_owned": {"authority_signal": 0.55, "liquidity_supply": 0.28, "risk_appetite": 0.18, "compliance_intensity": 0.14},
+            "speculative": {"compliance_intensity": -0.62, "risk_appetite": 0.45, "margin_leverage": -0.28, "liquidity_supply": 0.15},
         }
 
         factor_weights = {
-            "value": {"tax_frictions": 0.25, "rate": 0.20, "credit_spread": 0.20, "volatility_expectation": 0.10},
-            "growth": {"liquidity": 0.45, "rate": 0.35, "fiscal_demand": 0.30, "sentiment_confidence": 0.20},
-            "momentum": {"sentiment_confidence": 0.55, "liquidity": 0.25, "rumor_suppression": 0.20},
-            "quality": {"credit_spread": 0.40, "rumor_suppression": 0.20, "volatility_expectation": 0.20},
-            "low_vol": {"volatility_expectation": -0.70, "rumor_suppression": 0.20, "liquidity": 0.10},
-            "liquidity": {"liquidity": 0.85, "credit_spread": 0.20},
-            "size": {"liquidity": 0.20, "fiscal_demand": 0.15, "tax_frictions": -0.10},
-            "sentiment": {"sentiment_confidence": 0.80, "rumor_suppression": 0.45, "volatility_expectation": -0.25},
-            "turnover": {"tax_frictions": -0.65, "liquidity": 0.25, "sentiment_confidence": 0.20},
+            "value": {"compliance_intensity": 0.18, "financing_cost": 0.22, "margin_leverage": 0.16, "authority_signal": 0.08},
+            "growth": {"liquidity_supply": 0.42, "financing_cost": 0.35, "sector_preference": 0.28, "risk_appetite": 0.20},
+            "momentum": {"risk_appetite": 0.58, "liquidity_supply": 0.22, "authority_signal": 0.18},
+            "quality": {"financing_cost": 0.36, "authority_signal": 0.22, "compliance_intensity": 0.10},
+            "low_vol": {"risk_appetite": -0.62, "authority_signal": 0.18, "liquidity_supply": 0.10},
+            "liquidity": {"liquidity_supply": 0.88, "margin_leverage": 0.16},
+            "size": {"liquidity_supply": 0.18, "sector_preference": 0.18, "compliance_intensity": -0.08},
+            "sentiment": {"risk_appetite": 0.82, "authority_signal": 0.38, "compliance_intensity": -0.18},
+            "turnover": {"compliance_intensity": -0.58, "liquidity_supply": 0.24, "risk_appetite": 0.16},
         }
 
         agent_weights = {
-            "retail": {"sentiment_confidence": 0.65, "volatility_expectation": -0.45, "tax_frictions": 0.20, "rumor_suppression": 0.10},
-            "institution": {"liquidity": 0.35, "credit_spread": 0.35, "quality": 0.30, "low_vol": 0.20},
-            "market_maker": {"liquidity": 0.50, "volatility_expectation": -0.70, "tax_frictions": -0.20, "credit_spread": 0.25},
-            "state_stabilization": {"stabilization": 0.90, "liquidity": 0.50, "rumor_suppression": 0.70, "sentiment_confidence": 0.45},
-            "rumor_trader": {"rumor_suppression": -0.80, "volatility_expectation": 0.45, "sentiment_confidence": 0.30},
-            "etf_arbitrageur": {"liquidity": 0.55, "low_vol": 0.35, "rate": 0.20, "tax_frictions": -0.15},
+            "retail": {"risk_appetite": 0.65, "compliance_intensity": -0.22, "authority_signal": 0.18},
+            "institution": {"liquidity_supply": 0.30, "financing_cost": 0.32, "authority_signal": 0.22, "compliance_intensity": 0.18},
+            "market_maker": {"liquidity_supply": 0.52, "risk_appetite": -0.40, "margin_leverage": 0.18, "compliance_intensity": -0.12},
+            "state_stabilization": {"authority_signal": 0.86, "liquidity_supply": 0.46, "risk_appetite": 0.32, "compliance_intensity": 0.38},
+            "rumor_trader": {"authority_signal": -0.76, "risk_appetite": 0.42, "compliance_intensity": -0.22},
+            "etf_arbitrageur": {"liquidity_supply": 0.55, "financing_cost": 0.18, "compliance_intensity": -0.15},
+            "passive_fund": {"liquidity_supply": 0.36, "sector_preference": 0.20, "compliance_intensity": 0.28},
+            "policy_capital": {"authority_signal": 0.92, "liquidity_supply": 0.40, "compliance_intensity": 0.36},
+            "leveraged_capital": {"margin_leverage": -0.62, "financing_cost": -0.35, "risk_appetite": 0.25},
+            "foreign_proxy": {"financing_cost": 0.24, "risk_appetite": 0.26, "authority_signal": 0.22},
+            "quant": {"liquidity_supply": 0.30, "compliance_intensity": -0.12, "margin_leverage": 0.18},
         }
 
         sector_effects = {name: _layer_score(channel_map, weights) for name, weights in sector_weights.items()}
@@ -433,9 +755,9 @@ class StructuredPolicyParser:
         }.get(str(market_regime or "neutral").lower(), 0.0)
         market_effects = {
             "market_bias": _clip(sum(channel_map.values()) + regime_bias, -1.0, 1.0),
-            "liquidity_bias": _clip(channel_map.get("liquidity", 0.0), -1.0, 1.0),
-            "confidence_bias": _clip(channel_map.get("sentiment_confidence", 0.0) + channel_map.get("rumor_suppression", 0.0), -1.0, 1.0),
-            "volatility_bias": _clip(channel_map.get("volatility_expectation", 0.0), -1.0, 1.0),
+            "liquidity_bias": _clip(channel_map.get("liquidity_supply", 0.0), -1.0, 1.0),
+            "confidence_bias": _clip(channel_map.get("risk_appetite", 0.0) + channel_map.get("authority_signal", 0.0), -1.0, 1.0),
+            "volatility_bias": _clip(-channel_map.get("margin_leverage", 0.0) + channel_map.get("compliance_intensity", 0.0) * 0.25, -1.0, 1.0),
         }
         if policy_type == "stabilization":
             market_effects["market_bias"] = _clip(market_effects["market_bias"] + 0.12, -1.0, 1.0)

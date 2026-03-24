@@ -58,5 +58,11 @@
     "reasoning": "fallback",
     "model_used": "deterministic_stub",
     "timestamp": 1774276341.4220304
+  },
+  "34ddbc72876cc921e5187654072ae37f5b5d43e9eb66bfe07d9a716854606d40": {
+    "content": "{\"action\": \"BUY\", \"qty\": 120, \"confidence\": 0.875, \"error\": \"MODEL_UNAVAILABLE\", \"mode\": \"deterministic_stub\"}",
+    "reasoning": "fallback",
+    "model_used": "deterministic_stub",
+    "timestamp": 1774337726.4079983
   }
 }

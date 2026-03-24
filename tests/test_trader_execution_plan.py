@@ -104,3 +104,35 @@ async def test_execution_plan_hash_is_reproducible():
     assert isinstance(plan_b, ExecutionPlan)
     assert plan_a.config_hash == plan_b.config_hash
     assert plan_a.metadata["snapshot_info"]["last_price"] == 9.5
+
+
+@pytest.mark.asyncio
+async def test_intent_execution_split_feature_flag_separates_intent_from_execution():
+    agent = TraderAgent(
+        "split_agent",
+        cash_balance=80_000,
+        execution_plan_enabled=True,
+        psychology_profile={"feature_flags": {"trader_intent_execution_split_v1": True}},
+    )
+    agent.current_trading_intent = 0.85
+    agent.brain.think_async = AsyncMock(
+        return_value={
+            "decision": {
+                "action": "BUY",
+                "qty": 1200,
+                "price": 10.0,
+                "urgency": 0.9,
+                "order_type": "market",
+            },
+            "reasoning": "split",
+        }
+    )
+
+    plan = await agent.act(make_snapshot(), ["policy easing"])
+
+    assert isinstance(plan, ExecutionPlan)
+    assert plan.metadata["feature_flag_trader_intent_execution_split_v1"] is True
+    assert plan.metadata["intent_trace"]["desired_qty"] == 1200
+    assert plan.metadata["execution_trace"]["schema_version"] == "intent_execution_split_v1"
+    assert plan.metadata["snapshot_info"]["persona"]["constraints"]["schema_version"] == "persona_constraints_v1"
+    assert plan.target_qty <= 1200

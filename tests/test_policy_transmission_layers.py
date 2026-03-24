@@ -17,6 +17,10 @@ def test_policy_package_exposes_three_layer_transmission_outputs() -> None:
     assert package.factor_effects
     assert package.agent_class_effects
     assert package.market_effects
+    assert package.policy_schema["schema_version"] == "policy_schema_v1"
+    assert package.transmission_graph["schema_version"] == "transmission_graph_v1"
+    assert package.transmission_graph["network_layers"]["information_network"]
+    assert package.explanation["why_this_happened"]["channels"]
     assert package.metadata["config_hash"]
     assert package.metadata["snapshot_info"]["source"] == "unit-test"
 
@@ -38,6 +42,7 @@ def test_policy_package_exposes_three_layer_transmission_outputs() -> None:
     assert shock.liquidity_injection >= 0.0
     assert shock.metadata["policy_package"]["event"]["raw_text"] == text
     assert shock.metadata["reproducibility"]["config_hash"] == package.metadata["config_hash"]
+    assert shock.metadata["policy_package"]["transmission_graph"]["primary_path"]
 
 
 def test_policy_package_reproducibility_metadata_is_stable() -> None:
@@ -50,3 +55,4 @@ def test_policy_package_reproducibility_metadata_is_stable() -> None:
     assert first.metadata["config_hash"] == second.metadata["config_hash"]
     assert first.metadata["snapshot_info"]["window"] == "A"
     assert second.metadata["snapshot_info"]["window"] == "A"
+    assert first.policy_schema["action_channels"] == second.policy_schema["action_channels"]

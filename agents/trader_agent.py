@@ -66,6 +66,11 @@ class TraderAgent(BaseAgent):
         self.use_llm = use_llm
         self.execution_plan_enabled = bool(execution_plan_enabled)
         self.execution_seed = int(execution_seed if execution_seed is not None else 42)
+        self.feature_flags: Dict[str, bool] = {}
+        if isinstance(psychology_profile, dict):
+            raw_flags = psychology_profile.get("feature_flags", {})
+            if isinstance(raw_flags, dict):
+                self.feature_flags = {str(key): bool(value) for key, value in raw_flags.items()}
         self.behavior_layer_enabled = bool(
             os.environ.get("CIVITAS_LAYERED_MEMORY_V1", "").strip().lower() in {"1", "true", "yes", "on"}
             or (isinstance(psychology_profile, dict) and bool(psychology_profile.get("behavior_layer_enabled", False)))
@@ -193,8 +198,155 @@ class TraderAgent(BaseAgent):
             },
             "execution_plan_enabled": bool(self.execution_plan_enabled),
             "execution_seed": int(self.execution_seed),
+            "feature_flags": dict(self.feature_flags),
         }
         return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+    def _feature_flag_enabled(self, name: str, default: bool = False) -> bool:
+        if name in self.feature_flags:
+            return bool(self.feature_flags[name])
+        env_name = f"CIVITAS_{name.upper()}"
+        raw = os.environ.get(env_name)
+        if raw is None:
+            return bool(default)
+        return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+    def _intent_execution_split_enabled(self) -> bool:
+        return bool(
+            self.execution_plan_enabled
+            and self._feature_flag_enabled("trader_intent_execution_split_v1", False)
+        )
+
+    def _execution_constraints(self) -> Dict[str, Any]:
+        if hasattr(self.persona, "agent_schema"):
+            schema = self.persona.agent_schema()
+            constraints = schema.get("constraints", {})
+            if isinstance(constraints, dict):
+                return dict(constraints)
+        archetype = getattr(self.persona, "archetype", None)
+        if archetype is not None and hasattr(archetype, "constraint_schema"):
+            constraints = archetype.constraint_schema()
+            if isinstance(constraints, dict):
+                return dict(constraints)
+        return {}
+
+    def _derive_intent_trace(
+        self,
+        *,
+        decision: Dict[str, Any],
+        action: str,
+        reference_price: float,
+        target_qty: int,
+        target_notional: Optional[float],
+        urgency: float,
+    ) -> Dict[str, Any]:
+        desired_notional = float(target_notional) if target_notional is not None else 0.0
+        if desired_notional <= 0.0 and target_qty > 0 and reference_price > 0:
+            desired_notional = float(target_qty) * float(reference_price)
+        conviction = max(0.0, min(1.0, 0.30 + abs(float(self.current_trading_intent)) * 0.45 + urgency * 0.25))
+        return {
+            "action": action,
+            "desired_qty": int(max(0, target_qty)),
+            "desired_notional": float(max(0.0, desired_notional)),
+            "urgency": float(urgency),
+            "conviction": float(conviction),
+            "thesis": str(decision.get("thesis") or decision.get("reasoning") or decision.get("narrative") or ""),
+            "llm_fields": sorted(str(key) for key in decision.keys()),
+        }
+
+    def _split_execution_spec(
+        self,
+        *,
+        action: str,
+        decision: Dict[str, Any],
+        reference_price: float,
+        target_qty: int,
+        target_notional: Optional[float],
+        urgency: float,
+    ) -> Dict[str, Any]:
+        constraints = self._execution_constraints()
+        liquidity_pref = float(constraints.get("liquidity_preference", 0.5))
+        benchmark_pressure = float(constraints.get("benchmark_tracking_pressure", 0.0))
+        benchmark_tolerance = float(constraints.get("benchmark_deviation_tolerance", 0.2))
+        flow_pressure = float(constraints.get("flow_pressure", 0.0))
+        compliance_intensity = float(constraints.get("compliance_intensity", 0.5))
+        execution_preference = str(constraints.get("execution_preference", "balanced")).strip().lower()
+        order_horizon_bars = max(1, int(constraints.get("order_horizon_bars", 1)))
+        risk_budget = max(0.05, min(1.0, 0.55 * float(self.current_risk_appetite) + 0.45 * float(self.persona.base_risk_score())))
+
+        intent_trace = self._derive_intent_trace(
+            decision=decision,
+            action=action,
+            reference_price=reference_price,
+            target_qty=target_qty,
+            target_notional=target_notional,
+            urgency=urgency,
+        )
+
+        sizing_multiplier = 0.45 + 0.55 * risk_budget
+        sizing_multiplier *= 0.82 + 0.18 * benchmark_tolerance
+        sizing_multiplier *= 1.0 - min(0.35, benchmark_pressure * 0.20 + flow_pressure * 0.25)
+        if action == "BUY":
+            sizing_multiplier *= 1.0 - min(0.18, compliance_intensity * 0.10)
+        adjusted_qty = int(max(0, round(target_qty * max(0.12, sizing_multiplier))))
+        if adjusted_qty <= 0 and target_qty > 0:
+            adjusted_qty = max(1, min(target_qty, int(round(target_qty * 0.25))))
+
+        if adjusted_qty <= 0 and target_notional and target_notional > 0 and reference_price > 0:
+            adjusted_qty = int(target_notional / reference_price)
+
+        if execution_preference in {"passive_slicing", "patient"}:
+            order_type = OrderType.POST_ONLY if liquidity_pref >= 0.7 else OrderType.LIMIT
+        elif execution_preference in {"aggressive"} and urgency >= 0.72:
+            order_type = OrderType.MARKET if action == "BUY" else OrderType.IOC
+        elif execution_preference in {"opportunistic"} and urgency >= 0.65:
+            order_type = OrderType.IOC
+        else:
+            order_type = OrderType.LIMIT
+
+        slicing_rule = str(decision.get("slicing_rule") or "").strip().lower()
+        if not slicing_rule:
+            if adjusted_qty >= 800 or order_horizon_bars >= 3 or liquidity_pref >= 0.7:
+                slicing_rule = "vwap-like" if execution_preference in {"passive_slicing", "patient"} else "twap-like"
+            else:
+                slicing_rule = "single"
+
+        time_horizon = int(decision.get("time_horizon", order_horizon_bars if slicing_rule != "single" else 1))
+        time_horizon = max(1, time_horizon)
+        participation_rate = float(
+            decision.get(
+                "participation_rate",
+                max(0.05, min(0.45, 0.12 + urgency * 0.20 + (1.0 - liquidity_pref) * 0.08)),
+            )
+        )
+        max_slippage = float(decision.get("max_slippage", self._default_max_slippage(order_type, urgency)))
+        cancel_replace_policy = str(
+            decision.get("cancel_replace_policy") or self._default_cancel_replace_policy(order_type, slicing_rule)
+        ).strip().lower()
+
+        execution_trace = {
+            "schema_version": "intent_execution_split_v1",
+            "risk_budget": float(risk_budget),
+            "sizing_multiplier": float(max(0.12, sizing_multiplier)),
+            "liquidity_preference": float(liquidity_pref),
+            "benchmark_tracking_pressure": float(benchmark_pressure),
+            "benchmark_deviation_tolerance": float(benchmark_tolerance),
+            "flow_pressure": float(flow_pressure),
+            "compliance_intensity": float(compliance_intensity),
+            "execution_preference": execution_preference,
+        }
+        return {
+            "target_qty": int(max(0, adjusted_qty)),
+            "target_notional": target_notional,
+            "order_type": order_type,
+            "slicing_rule": slicing_rule,
+            "cancel_replace_policy": cancel_replace_policy,
+            "time_horizon": int(time_horizon),
+            "participation_rate": float(max(0.0, min(1.0, participation_rate))),
+            "max_slippage": float(max(0.0, max_slippage)),
+            "intent_trace": intent_trace,
+            "execution_trace": execution_trace,
+        }
 
     @staticmethod
     def _emotion_to_sentiment(emotion: str) -> float:
@@ -990,6 +1142,34 @@ class TraderAgent(BaseAgent):
             target_qty = 0
 
         legacy_mode = not self.execution_plan_enabled
+        split_mode = self._intent_execution_split_enabled() and not legacy_mode
+
+        urgency = float(decision.get("urgency", max(0.0, min(1.0, abs(self.current_trading_intent)))))
+        if not 0.0 <= urgency <= 1.0:
+            urgency = max(0.0, min(1.0, urgency))
+
+        intent_trace: Dict[str, Any] = {}
+        execution_trace: Dict[str, Any] = {}
+
+        if split_mode:
+            split_spec = self._split_execution_spec(
+                action=action,
+                decision=decision,
+                reference_price=reference_price,
+                target_qty=int(target_qty or 0),
+                target_notional=target_notional,
+                urgency=urgency,
+            )
+            target_qty = int(split_spec["target_qty"])
+            target_notional = split_spec["target_notional"]
+            order_type = split_spec["order_type"]
+            slicing_rule = str(split_spec["slicing_rule"])
+            cancel_replace_policy = str(split_spec["cancel_replace_policy"])
+            time_horizon = int(split_spec["time_horizon"])
+            participation_rate = float(split_spec["participation_rate"])
+            max_slippage = float(split_spec["max_slippage"])
+            intent_trace = dict(split_spec.get("intent_trace", {}))
+            execution_trace = dict(split_spec.get("execution_trace", {}))
 
         if action == "BUY" and reference_price > 0:
             if legacy_mode:
@@ -1003,16 +1183,14 @@ class TraderAgent(BaseAgent):
         if target_qty <= 0 and (target_notional is None or target_notional <= 0):
             return None
 
-        urgency = float(decision.get("urgency", max(0.0, min(1.0, abs(self.current_trading_intent)))))
-        if not 0.0 <= urgency <= 1.0:
-            urgency = max(0.0, min(1.0, urgency))
-
         if legacy_mode:
             order_type = OrderType.LIMIT
             slicing_rule = "single"
             cancel_replace_policy = "none"
             time_horizon = 1
-        else:
+            participation_rate = float(decision.get("participation_rate", 0.1 if slicing_rule == "single" else 0.2))
+            max_slippage = float(decision.get("max_slippage", 0.01))
+        elif not split_mode:
             order_type = OrderType.LIMIT
             if "order_type" in decision:
                 try:
@@ -1025,14 +1203,14 @@ class TraderAgent(BaseAgent):
             slicing_rule = str(decision.get("slicing_rule") or self._default_slicing_rule(action, target_qty, target_notional)).strip().lower()
             cancel_replace_policy = str(decision.get("cancel_replace_policy") or self._default_cancel_replace_policy(order_type, slicing_rule)).strip().lower()
             time_horizon = int(decision.get("time_horizon", 1 if slicing_rule == "single" else max(2, min(10, target_qty // 100 if target_qty >= 100 else 3))))
+            participation_rate = float(decision.get("participation_rate", 0.1 if slicing_rule == "single" else 0.2))
+            max_slippage = float(decision.get("max_slippage", self._default_max_slippage(order_type, urgency)))
         if time_horizon <= 0:
             time_horizon = 1
 
-        participation_rate = float(decision.get("participation_rate", 0.1 if slicing_rule == "single" else 0.2))
         if not 0.0 <= participation_rate <= 1.0:
             participation_rate = max(0.0, min(1.0, participation_rate))
 
-        max_slippage = float(decision.get("max_slippage", 0.01 if legacy_mode else self._default_max_slippage(order_type, urgency)))
         if max_slippage < 0:
             max_slippage = 0.0
 
@@ -1060,6 +1238,10 @@ class TraderAgent(BaseAgent):
             "persona": {
                 "risk_appetite": getattr(self.persona.risk_appetite, "value", str(self.persona.risk_appetite)),
                 "investment_horizon": getattr(self.persona.investment_horizon, "value", str(self.persona.investment_horizon)),
+                "archetype_key": getattr(self.persona, "archetype_key", ""),
+                "participant_type": getattr(getattr(self.persona, "archetype", None), "participant_type", "generic"),
+                "strategy_family": getattr(getattr(self.persona, "archetype", None), "strategy_family", "discretionary"),
+                "constraints": self._execution_constraints(),
             },
         }
 
@@ -1101,6 +1283,7 @@ class TraderAgent(BaseAgent):
             "cancel_replace_policy": plan.cancel_replace_policy,
             "time_horizon": plan.time_horizon,
             "snapshot_info": snapshot_info,
+            "feature_flags": dict(self.feature_flags),
         }
         plan.config_hash = hashlib.sha256(json.dumps(config_payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
         plan.metadata.update(
@@ -1108,7 +1291,10 @@ class TraderAgent(BaseAgent):
                 "config_hash": plan.config_hash,
                 "execution_seed": self.execution_seed,
                 "feature_flag_execution_plan": self.execution_plan_enabled,
+                "feature_flag_trader_intent_execution_split_v1": split_mode,
                 "snapshot_info": snapshot_info,
+                "intent_trace": intent_trace,
+                "execution_trace": execution_trace,
             }
         )
         return plan
@@ -1121,6 +1307,7 @@ class TraderAgent(BaseAgent):
         plan = self._build_execution_plan(reasoning_output)
         if plan is None:
             return None
+        legacy_mode = not self.execution_plan_enabled
 
         wind_report = self._wind_tunnel_predict()
         decision = dict(reasoning_output.get("decision", {}) or {})

@@ -21,5 +21,20 @@ def test_history_replay_selector_uses_agent_engine_when_enabled():
     assert reason == ""
 
 
+def test_history_replay_selector_keeps_factor_fallback_with_new_flags():
+    cfg = BacktestConfig(
+        feature_flags={
+            "agent_replay": False,
+            "history_replay_event_driven_v2": True,
+            "history_replay_rolling_calibration_v1": True,
+        }
+    )
+    engine, resolved_mode, reason = _select_replay_engine(cfg, "agent", cfg.feature_flags)
+
+    assert isinstance(engine, FactorBacktestEngine)
+    assert resolved_mode == "factor"
+    assert "falling back" in reason.lower()
+
+
 def test_historical_backtester_keeps_factor_compatibility():
     assert issubclass(HistoricalBacktester, FactorBacktestEngine)

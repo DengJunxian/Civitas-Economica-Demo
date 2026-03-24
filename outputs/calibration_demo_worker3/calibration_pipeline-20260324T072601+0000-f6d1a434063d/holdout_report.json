@@ -1,0 +1,12 @@
+{
+  "credibility_score": 0.6780254640302105,
+  "microstructure_fit": 0.5315934065934066,
+  "path_fit": 0.7373344093226304,
+  "return": -0.010147391542310702,
+  "rolling_windows_evaluated": 2,
+  "score": 0.6905266866312914,
+  "sharpe": -0.40673015406940405,
+  "stylized_facts_fit": 0.6096349163756711,
+  "turnover_fit": 0.9568948800522001,
+  "volatility_fit": 0.6206306878126353
+}

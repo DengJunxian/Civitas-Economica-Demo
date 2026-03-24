@@ -25,6 +25,9 @@ from core.performance import compute_backtest_credibility, compute_performance_m
 from core.types import Order, OrderSide, OrderType
 from core.event_store import EventStore
 
+FEATURE_FLAG_EVENT_DRIVEN_V2 = "history_replay_event_driven_v2"
+FEATURE_FLAG_ROLLING_CALIBRATION_V1 = "history_replay_rolling_calibration_v1"
+
 
 class AgentReplayEngine(FactorBacktestEngine):
     """Deterministic agent-based historical replay engine."""
@@ -192,6 +195,128 @@ class AgentReplayEngine(FactorBacktestEngine):
             shares -= float(trade.quantity)
         return cash, shares
 
+    def _rolling_calibration_state(self, frame: pd.DataFrame, idx: int) -> Dict[str, Any]:
+        enabled = bool(self.config.feature_flags.get(FEATURE_FLAG_ROLLING_CALIBRATION_V1, False))
+        history = frame.iloc[:idx].dropna(subset=["close"]).reset_index(drop=True)
+        if not enabled or len(history) < 8:
+            return {
+                "enabled": False,
+                "signal_scale": 1.0,
+                "train_size": 0,
+                "validation_size": 0,
+                "holdout_anchor": None,
+                "direction_fit": 0.0,
+                "volatility_scale": 1.0,
+            }
+
+        train_size = max(6, int(len(history) * 0.7))
+        train_size = min(train_size, len(history) - 2)
+        validation = history.iloc[train_size:].copy()
+        train = history.iloc[:train_size].copy()
+        if validation.empty or train.empty:
+            return {
+                "enabled": False,
+                "signal_scale": 1.0,
+                "train_size": int(len(train)),
+                "validation_size": int(len(validation)),
+                "holdout_anchor": None,
+                "direction_fit": 0.0,
+                "volatility_scale": 1.0,
+            }
+
+        train_ret = train["close"].pct_change().dropna()
+        validation_ret = validation["close"].pct_change().dropna()
+        train_trend = float(train["close"].iloc[-1] / max(float(train["close"].iloc[0]), 1e-12) - 1.0)
+        validation_trend = float(validation["close"].iloc[-1] / max(float(validation["close"].iloc[0]), 1e-12) - 1.0)
+        direction_fit = 1.0 if np.sign(train_trend) == np.sign(validation_trend) else 0.35
+        train_vol = float(train_ret.std()) if not train_ret.empty else 0.0
+        validation_vol = float(validation_ret.std()) if not validation_ret.empty else train_vol
+        volatility_scale = float(np.clip(validation_vol / max(train_vol, 1e-12), 0.75, 1.35))
+        signal_scale = float(np.clip(0.65 + 0.25 * direction_fit + 0.25 * volatility_scale, 0.55, 1.25))
+        holdout_anchor = None
+        if idx < len(frame):
+            holdout_anchor = str(frame.iloc[idx].get("date", ""))
+
+        return {
+            "enabled": True,
+            "signal_scale": signal_scale,
+            "train_size": int(len(train)),
+            "validation_size": int(len(validation)),
+            "holdout_anchor": holdout_anchor,
+            "direction_fit": direction_fit,
+            "volatility_scale": volatility_scale,
+            "train_window": {
+                "start": str(train.iloc[0].get("date", "")),
+                "end": str(train.iloc[-1].get("date", "")),
+            },
+            "validation_window": {
+                "start": str(validation.iloc[0].get("date", "")),
+                "end": str(validation.iloc[-1].get("date", "")),
+            },
+        }
+
+    def _build_event_schedule(
+        self,
+        day_date: str,
+        row: pd.Series,
+        signal_info: Dict[str, float],
+        rolling_state: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        open_p = float(row.get("open", row.get("close", 0.0)))
+        high_p = float(row.get("high", open_p))
+        low_p = float(row.get("low", open_p))
+        close_p = float(row.get("close", open_p))
+        signal = float(signal_info.get("signal", 0.0))
+        urgency = float(signal_info.get("urgency", 0.0))
+        policy_bias = float(np.nan_to_num(row.get("policy_shock_factor", self.config.policy_shock), nan=self.config.policy_shock))
+        sentiment = float(np.nan_to_num(row.get("sentiment_factor", 0.0), nan=0.0))
+        regime_scale = float(rolling_state.get("signal_scale", 1.0)) if rolling_state.get("enabled") else 1.0
+        impulse_anchor = high_p if signal + policy_bias + sentiment >= 0 else low_p
+        liquidity_anchor = float(np.mean([open_p, high_p, low_p, close_p]))
+        close_anchor = float(np.mean([close_p, impulse_anchor]))
+        raw_schedule = [
+            {
+                "event": "opening_auction",
+                "timestamp": f"{day_date}T09:25:00",
+                "anchor_price": open_p,
+                "weight": 0.20 + 0.05 * urgency,
+                "urgency_multiplier": 1.10,
+                "prefer_market": urgency >= 0.75,
+                "crossing_buffer": 0.0040,
+            },
+            {
+                "event": "policy_impulse",
+                "timestamp": f"{day_date}T10:05:00",
+                "anchor_price": impulse_anchor,
+                "weight": 0.24 + 0.06 * abs(policy_bias) + 0.05 * abs(signal),
+                "urgency_multiplier": 1.15 + 0.10 * abs(policy_bias),
+                "prefer_market": abs(policy_bias) >= 0.15,
+                "crossing_buffer": 0.0045,
+            },
+            {
+                "event": "midday_liquidity",
+                "timestamp": f"{day_date}T13:15:00",
+                "anchor_price": liquidity_anchor,
+                "weight": 0.30 + 0.04 * regime_scale,
+                "urgency_multiplier": 0.90,
+                "prefer_market": False,
+                "crossing_buffer": 0.0035,
+            },
+            {
+                "event": "closing_rebalance",
+                "timestamp": f"{day_date}T14:55:00",
+                "anchor_price": close_anchor,
+                "weight": 0.26 + 0.05 * urgency,
+                "urgency_multiplier": 1.05,
+                "prefer_market": urgency >= 0.60,
+                "crossing_buffer": 0.0050,
+            },
+        ]
+        total_weight = sum(max(float(item["weight"]), 0.01) for item in raw_schedule)
+        for item in raw_schedule:
+            item["weight"] = float(max(float(item["weight"]), 0.01) / max(total_weight, 1e-12))
+        return raw_schedule
+
     def run_backtest(
         self,
         population: Any = None,
@@ -251,6 +376,9 @@ class AgentReplayEngine(FactorBacktestEngine):
         total_volume = 0.0
         simulated_bars: List[Dict[str, Any]] = []
         trade_tape: List[Dict[str, Any]] = []
+        calibration_windows: List[Dict[str, Any]] = []
+        event_count_total = 0
+        replay_variant = "event_driven_v2" if self.config.feature_flags.get(FEATURE_FLAG_EVENT_DRIVEN_V2, False) else "legacy_v1"
 
         total_days = len(valid_frame)
         agent_id = f"agent-replay-{self.config.random_seed}"
@@ -275,6 +403,12 @@ class AgentReplayEngine(FactorBacktestEngine):
             participation_rate = float(signal_info["participation_rate"])
             slicing_rule = str(signal_info["slicing_rule"])
             time_horizon = int(signal_info["time_horizon"])
+            calibration_state = self._rolling_calibration_state(frame, idx)
+            if calibration_state["enabled"]:
+                signal = float(np.clip(signal * calibration_state["signal_scale"], -self.config.max_position, self.config.max_position))
+                signal = float(np.nan_to_num(signal, nan=0.0, posinf=self.config.max_position, neginf=-self.config.max_position))
+                signal_info["signal"] = signal
+                calibration_windows.append(calibration_state)
 
             portfolio_value = cash + shares * prev_close
             current_weight = (shares * prev_close / portfolio_value) if portfolio_value > 1e-12 else 0.0
@@ -325,21 +459,38 @@ class AgentReplayEngine(FactorBacktestEngine):
                 continue
 
             order_book = OrderBook(symbol=self.config.symbol, prev_close=prev_close)
-            slices = max(1, min(6, int(np.ceil(abs(target_qty) / max(participation_rate * max(day_volume, 1.0), 100.0)))))
+            event_schedule = self._build_event_schedule(day_date, row, signal_info, calibration_state) if replay_variant == "event_driven_v2" else []
+            slices = len(event_schedule) if event_schedule else max(
+                1,
+                min(6, int(np.ceil(abs(target_qty) / max(participation_rate * max(day_volume, 1.0), 100.0)))),
+            )
             path = self._build_intraday_path(row)
             remaining_qty = float(target_qty)
             day_trades = []
             day_turnover_value = 0.0
 
             for slice_idx in range(slices):
-                slice_price = float(path[min(slice_idx, len(path) - 1)])
+                event_info = event_schedule[slice_idx] if slice_idx < len(event_schedule) else None
+                slice_price = float(event_info["anchor_price"]) if event_info else float(path[min(slice_idx, len(path) - 1)])
                 self._seed_liquidity(order_book, slice_price, day_volume / max(len(path), 1))
-                child_qty = remaining_qty / max(slices - slice_idx, 1)
+                if event_info:
+                    remaining_weight = sum(float(item["weight"]) for item in event_schedule[slice_idx:]) or 1.0
+                    child_qty = remaining_qty * float(event_info["weight"]) / remaining_weight
+                    child_urgency = float(np.clip(urgency * float(event_info["urgency_multiplier"]), 0.0, 1.0))
+                    crossing_buffer = max(self.config.slippage_bps / 10000.0 + float(event_info["crossing_buffer"]), 0.003)
+                    event_name = str(event_info["event"])
+                    event_timestamp = str(event_info["timestamp"])
+                else:
+                    child_qty = remaining_qty / max(slices - slice_idx, 1)
+                    child_urgency = urgency
+                    crossing_buffer = max(self.config.slippage_bps / 10000.0 + 0.002, 0.003)
+                    event_name = "slice"
+                    event_timestamp = f"{day_date}T{9 + min(slice_idx, 5):02d}:30:00"
+                child_qty = float(np.nan_to_num(child_qty, nan=0.0, posinf=0.0, neginf=0.0))
                 child_side = OrderSide.BUY if child_qty > 0 else OrderSide.SELL
                 child_qty_abs = max(1, int(round(abs(child_qty))))
-                order_type = OrderType.MARKET if urgency >= 0.7 else OrderType.LIMIT
+                order_type = OrderType.MARKET if child_urgency >= 0.7 or bool(event_info and event_info.get("prefer_market")) else OrderType.LIMIT
                 lower_limit, upper_limit = order_book.get_limit_prices()
-                crossing_buffer = max(self.config.slippage_bps / 10000.0 + 0.002, 0.003)
                 if child_side == OrderSide.BUY:
                     child_price = upper_limit if order_type == OrderType.MARKET else min(upper_limit, round(slice_price * (1.0 + crossing_buffer), 2))
                 else:
@@ -354,6 +505,7 @@ class AgentReplayEngine(FactorBacktestEngine):
                     quantity=child_qty_abs,
                 )
                 trades = order_book.add_order(order)
+                event_count_total += 1
 
                 filled_qty = sum(int(trade.quantity) for trade in trades)
                 remaining_qty -= filled_qty if child_side == OrderSide.BUY else -filled_qty
@@ -371,7 +523,9 @@ class AgentReplayEngine(FactorBacktestEngine):
                     trade_tape.append(
                         {
                             "date": day_date,
+                            "timestamp": event_timestamp,
                             "slice": slice_idx,
+                            "event": event_name,
                             "price": float(trade.price),
                             "quantity": int(trade.quantity),
                             "side": self._trade_side(agent_id, trade),
@@ -383,16 +537,19 @@ class AgentReplayEngine(FactorBacktestEngine):
                     trade_log.append(
                         {
                             "date": day_date,
+                            "timestamp": event_timestamp,
                             "slice": slice_idx,
+                            "event": event_name,
                             "side": self._trade_side(agent_id, trade),
                             "qty": int(trade.quantity),
                             "price": float(trade.price),
                             "notional": float(trade.notional),
                             "order_type": order_type.value,
-                            "urgency": urgency,
+                            "urgency": child_urgency,
                             "participation_rate": participation_rate,
                             "slicing_rule": slicing_rule,
                             "time_horizon": time_horizon,
+                            "calibration_signal_scale": float(calibration_state.get("signal_scale", 1.0)),
                         }
                     )
 
@@ -414,12 +571,12 @@ class AgentReplayEngine(FactorBacktestEngine):
                     "date": day_date,
                     "open": bar_open,
                     "high": bar_high,
-                    "low": bar_low,
-                    "close": bar_close,
-                    "volume": trade_qty,
-                    "source": "trade_tape",
-                }
-            )
+                        "low": bar_low,
+                        "close": bar_close,
+                        "volume": trade_qty,
+                        "source": "event_trade_tape" if replay_variant == "event_driven_v2" else "trade_tape",
+                    }
+                )
 
             prev_close = bar_close
             value = cash + shares * bar_close
@@ -520,6 +677,20 @@ class AgentReplayEngine(FactorBacktestEngine):
         vol_proxy = (vol_proxy / (vol_proxy.rolling(20).mean() + 1e-12)).fillna(0.0)
         result.turnover_correlation = _safe_corr(np.asarray(turnover_series, dtype=float), vol_proxy.iloc[: len(turnover_series)].values)
         result.factor_snapshot = FactorResearchEngine.factor_diagnostics(self.factor_data)
+        calibration_summary = {
+            "enabled": bool(self.config.feature_flags.get(FEATURE_FLAG_ROLLING_CALIBRATION_V1, False)),
+            "window_count": len(calibration_windows),
+            "latest_signal_scale": float(calibration_windows[-1]["signal_scale"]) if calibration_windows else 1.0,
+            "latest_holdout_anchor": calibration_windows[-1]["holdout_anchor"] if calibration_windows else None,
+        }
+        if calibration_windows:
+            calibration_summary["avg_signal_scale"] = float(
+                np.mean([float(item["signal_scale"]) for item in calibration_windows])
+            )
+            calibration_summary["latest_window"] = {
+                "train": calibration_windows[-1]["train_window"],
+                "validation": calibration_windows[-1]["validation_window"],
+            }
         result.metadata = {
             "symbol": self.config.symbol,
             "benchmark_symbol": self.config.benchmark_symbol,
@@ -528,6 +699,14 @@ class AgentReplayEngine(FactorBacktestEngine):
             "trade_tape_rows": len(trade_tape),
             "simulated_bars": len(simulated_bars),
             "mode": "agent",
+            "replay_variant": replay_variant,
+            "rolling_calibration": calibration_summary,
+            "event_schedule": {
+                "mode": replay_variant,
+                "events_per_day": 4 if replay_variant == "event_driven_v2" else None,
+                "total_events": event_count_total,
+            },
+            "reference_bars": valid_frame[["date", "open", "high", "low", "close", "volume"]].to_dict("records"),
             "window": {
                 "start": dates[0] if dates else None,
                 "end": dates[-1] if dates else None,
@@ -550,6 +729,8 @@ class AgentReplayEngine(FactorBacktestEngine):
                 mode="agent",
                 extra={
                     "simulated_price_source": "trade_tape_close",
+                    "replay_variant": replay_variant,
+                    "rolling_calibration_enabled": bool(self.config.feature_flags.get(FEATURE_FLAG_ROLLING_CALIBRATION_V1, False)),
                     "trade_tape_sha256": hashlib.sha256(
                         json.dumps(trade_tape, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
                     ).hexdigest(),

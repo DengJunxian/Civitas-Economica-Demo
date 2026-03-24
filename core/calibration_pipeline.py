@@ -16,20 +16,28 @@ from core.backtester import BacktestConfig, BacktestResult, FactorBacktestEngine
 from core.behavioral_finance import StylizedFactsEvaluator
 from core.experiment_manifest import ExperimentManifest, write_experiment_manifest
 
+DEFAULT_OBJECTIVE_WEIGHTS: Dict[str, float] = {
+    "path_fit": 0.30,
+    "volatility_fit": 0.20,
+    "turnover_fit": 0.15,
+    "microstructure_fit": 0.15,
+    "stylized_facts_fit": 0.20,
+}
+
+OBJECTIVE_WEIGHT_ALIASES: Dict[str, str] = {
+    "vol_fit": "volatility_fit",
+    "micro_fit": "microstructure_fit",
+    "microstructure": "microstructure_fit",
+    "stylized_fit": "stylized_facts_fit",
+}
+
 
 @dataclass
 class CalibrationSpec:
     """Search specification for automatic parameter calibration."""
 
     parameter_space: Dict[str, Any]
-    objective_weights: Dict[str, float] = field(
-        default_factory=lambda: {
-            "path_fit": 0.35,
-            "volatility_fit": 0.20,
-            "turnover_fit": 0.15,
-            "stylized_facts_fit": 0.30,
-        }
-    )
+    objective_weights: Dict[str, float] = field(default_factory=lambda: dict(DEFAULT_OBJECTIVE_WEIGHTS))
     method: str = "bayesian"
     bayes_init: int = 24
     bayes_iterations: int = 80
@@ -52,10 +60,15 @@ class CalibrationSpec:
     output_dir: str = "outputs/calibration"
 
     def normalized_weights(self) -> Dict[str, float]:
-        base = dict(self.objective_weights)
+        base = dict(DEFAULT_OBJECTIVE_WEIGHTS)
+        for raw_key, raw_value in dict(self.objective_weights or {}).items():
+            key = OBJECTIVE_WEIGHT_ALIASES.get(str(raw_key), str(raw_key))
+            if key not in base:
+                continue
+            base[key] = float(raw_value)
         total = float(sum(max(0.0, float(v)) for v in base.values()))
         if total <= 1e-12:
-            return {"path_fit": 0.25, "volatility_fit": 0.25, "turnover_fit": 0.25, "stylized_facts_fit": 0.25}
+            return dict(DEFAULT_OBJECTIVE_WEIGHTS)
         return {k: float(max(0.0, float(v)) / total) for k, v in base.items()}
 
 
@@ -104,12 +117,16 @@ class CalibrationPipeline:
             self.benchmark_data = bm
         return self.historical_data.copy(), self.benchmark_data.copy()
 
-    def _split_frame(self, frame: pd.DataFrame, benchmark: pd.DataFrame) -> Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]:
-        if frame.empty:
-            return {"train": (pd.DataFrame(), pd.DataFrame()), "validation": (pd.DataFrame(), pd.DataFrame()), "holdout": (pd.DataFrame(), pd.DataFrame())}
+    def _empty_split(self) -> Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]:
+        return {
+            "train": (pd.DataFrame(), pd.DataFrame()),
+            "validation": (pd.DataFrame(), pd.DataFrame()),
+            "holdout": (pd.DataFrame(), pd.DataFrame()),
+        }
 
-        ordered = frame.sort_values("date").reset_index(drop=True)
-        total = len(ordered)
+    def _build_split_counts(self, total: int) -> Tuple[int, int, int]:
+        if total <= 0:
+            return 0, 0, 0
         train_n = max(1, int(total * float(self.spec.split_train)))
         val_n = max(1, int(total * float(self.spec.split_validation)))
         holdout_n = max(1, total - train_n - val_n)
@@ -120,22 +137,82 @@ class CalibrationPipeline:
             val_n = max(1, total - train_n - holdout_n)
         if train_n + val_n + holdout_n > total:
             train_n = max(1, total - val_n - holdout_n)
+        return train_n, val_n, holdout_n
 
-        train_df = ordered.iloc[:train_n].reset_index(drop=True)
-        val_df = ordered.iloc[train_n : train_n + val_n].reset_index(drop=True)
-        hold_df = ordered.iloc[train_n + val_n : train_n + val_n + holdout_n].reset_index(drop=True)
+    @staticmethod
+    def _slice_benchmark(benchmark: pd.DataFrame, left: pd.DataFrame) -> pd.DataFrame:
+        if benchmark.empty or left.empty:
+            return pd.DataFrame()
+        dates = set(left["date"].astype(str).tolist())
+        return benchmark[benchmark["date"].astype(str).isin(dates)].reset_index(drop=True)
 
-        def _slice_benchmark(left: pd.DataFrame) -> pd.DataFrame:
-            if benchmark.empty or left.empty:
-                return pd.DataFrame()
-            dates = set(left["date"].astype(str).tolist())
-            return benchmark[benchmark["date"].astype(str).isin(dates)].reset_index(drop=True)
-
+    def _assemble_split(
+        self,
+        benchmark: pd.DataFrame,
+        *,
+        train_df: pd.DataFrame,
+        val_df: pd.DataFrame,
+        hold_df: pd.DataFrame,
+    ) -> Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]:
         return {
-            "train": (train_df, _slice_benchmark(train_df)),
-            "validation": (val_df, _slice_benchmark(val_df)),
-            "holdout": (hold_df, _slice_benchmark(hold_df)),
+            "train": (train_df.reset_index(drop=True), self._slice_benchmark(benchmark, train_df)),
+            "validation": (val_df.reset_index(drop=True), self._slice_benchmark(benchmark, val_df)),
+            "holdout": (hold_df.reset_index(drop=True), self._slice_benchmark(benchmark, hold_df)),
         }
+
+    def _split_frame(self, frame: pd.DataFrame, benchmark: pd.DataFrame) -> Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]:
+        if frame.empty:
+            return self._empty_split()
+
+        ordered = frame.sort_values("date").reset_index(drop=True)
+        train_n, val_n, holdout_n = self._build_split_counts(len(ordered))
+        train_df = ordered.iloc[:train_n]
+        val_df = ordered.iloc[train_n : train_n + val_n]
+        hold_df = ordered.iloc[train_n + val_n : train_n + val_n + holdout_n]
+        return self._assemble_split(
+            benchmark,
+            train_df=train_df,
+            val_df=val_df,
+            hold_df=hold_df,
+        )
+
+    def _build_splits(self, frame: pd.DataFrame, benchmark: pd.DataFrame) -> List[Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]]:
+        primary = self._split_frame(frame, benchmark)
+        if frame.empty or not bool(self.spec.rolling_window):
+            return [primary]
+
+        ordered = frame.sort_values("date").reset_index(drop=True)
+        train_n, val_n, holdout_n = self._build_split_counts(len(ordered))
+        if min(train_n, val_n, holdout_n) <= 0:
+            return [primary]
+
+        windows: List[Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]] = []
+        step = max(1, holdout_n)
+        shift = 0
+        while True:
+            hold_end = len(ordered) - shift
+            hold_start = hold_end - holdout_n
+            val_end = hold_start
+            val_start = val_end - val_n
+            train_end = val_start
+            if hold_start < 0 or val_start < 0 or train_end <= 0:
+                break
+            train_df = ordered.iloc[:train_end]
+            val_df = ordered.iloc[val_start:val_end]
+            hold_df = ordered.iloc[hold_start:hold_end]
+            if train_df.empty or val_df.empty or hold_df.empty:
+                break
+            windows.append(
+                self._assemble_split(
+                    benchmark,
+                    train_df=train_df,
+                    val_df=val_df,
+                    hold_df=hold_df,
+                )
+            )
+            shift += step
+
+        return list(reversed(windows)) or [primary]
 
     def _clone_config(self, params: Mapping[str, Any]) -> BacktestConfig:
         payload = asdict(self.base_config)
@@ -160,7 +237,7 @@ class CalibrationPipeline:
         vol_ratio = float(series.std() / max(series.mean(), 1e-12))
         return float(np.clip(0.08 + 0.15 * vol_ratio, 0.05, 0.40))
 
-    def _stylized_score(self, result: BacktestResult, frame: pd.DataFrame) -> float:
+    def _authenticity_scores(self, result: BacktestResult, frame: pd.DataFrame) -> Dict[str, float]:
         evaluator = StylizedFactsEvaluator(
             feature_flag=True,
             seed=int(self.spec.random_seed),
@@ -188,53 +265,111 @@ class CalibrationPipeline:
         )
         micro = float((report.microstructure_fit or {}).get("score", 0.0))
         behavior = float((report.behavioral_fit or {}).get("score", 0.0))
-        path = float((report.path_fit or {}).get("score", 0.0))
-        return float(np.clip(np.mean([path, micro, behavior]), 0.0, 1.0))
+        return {
+            "microstructure_fit": float(np.clip(micro, 0.0, 1.0)),
+            "stylized_facts_fit": float(np.clip(behavior, 0.0, 1.0)),
+            "credibility_score": float(np.clip(report.credibility_score, 0.0, 1.0)),
+        }
 
-    def _evaluate_params(
+    def _score_result(
         self,
-        params: Mapping[str, Any],
-        split: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
-    ) -> Dict[str, Any]:
-        cfg = self._clone_config(params)
-        train_df, train_bm = split["train"]
-        val_df, val_bm = split["validation"]
-        hold_df, hold_bm = split["holdout"]
-
-        train_result = self._run_backtest(cfg, train_df, train_bm)
-        val_result = self._run_backtest(cfg, val_df, val_bm) if not val_df.empty else train_result
-
-        path_fit = float(np.clip((val_result.price_correlation + 1.0) / 2.0, 0.0, 1.0))
-        volatility_fit = float(np.clip(val_result.volatility_correlation, 0.0, 1.0))
-        turnover_target = self._turnover_target_proxy(train_df)
-        turnover_fit = float(np.clip(1.0 - abs(val_result.agent_turnover_rate - turnover_target), 0.0, 1.0))
-        stylized_fit = self._stylized_score(val_result, val_df if not val_df.empty else train_df)
-
-        weights = self.spec.normalized_weights()
+        result: BacktestResult,
+        frame: pd.DataFrame,
+        *,
+        turnover_target: float,
+        weights: Mapping[str, float],
+    ) -> Dict[str, float]:
+        path_fit = float(np.clip((result.price_correlation + 1.0) / 2.0, 0.0, 1.0))
+        volatility_fit = float(np.clip(result.volatility_correlation, 0.0, 1.0))
+        turnover_fit = float(np.clip(1.0 - abs(result.agent_turnover_rate - turnover_target), 0.0, 1.0))
+        authenticity = self._authenticity_scores(result, frame)
+        microstructure_fit = float(authenticity["microstructure_fit"])
+        stylized_fit = float(authenticity["stylized_facts_fit"])
         score = (
             weights["path_fit"] * path_fit
             + weights["volatility_fit"] * volatility_fit
             + weights["turnover_fit"] * turnover_fit
+            + weights["microstructure_fit"] * microstructure_fit
             + weights["stylized_facts_fit"] * stylized_fit
         )
-
-        holdout_result = self._run_backtest(cfg, hold_df, hold_bm) if not hold_df.empty else val_result
-        holdout_score = float(
-            weights["path_fit"] * np.clip((holdout_result.price_correlation + 1.0) / 2.0, 0.0, 1.0)
-            + weights["volatility_fit"] * np.clip(holdout_result.volatility_correlation, 0.0, 1.0)
-            + weights["turnover_fit"] * np.clip(1.0 - abs(holdout_result.agent_turnover_rate - turnover_target), 0.0, 1.0)
-            + weights["stylized_facts_fit"] * self._stylized_score(holdout_result, hold_df if not hold_df.empty else train_df)
-        )
         return {
-            "params": dict(params),
             "score": float(score),
             "path_fit": path_fit,
             "volatility_fit": volatility_fit,
             "turnover_fit": turnover_fit,
+            "microstructure_fit": microstructure_fit,
             "stylized_facts_fit": stylized_fit,
-            "holdout_score": holdout_score,
-            "holdout_return": float(holdout_result.total_return),
-            "holdout_sharpe": float(holdout_result.sharpe_ratio),
+            "credibility_score": float(authenticity["credibility_score"]),
+        }
+
+    def _evaluate_params(
+        self,
+        params: Mapping[str, Any],
+        splits: Sequence[Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]],
+    ) -> Dict[str, Any]:
+        cfg = self._clone_config(params)
+        weights = self.spec.normalized_weights()
+        rows: List[Dict[str, float]] = []
+        for split in list(splits):
+            train_df, train_bm = split["train"]
+            val_df, val_bm = split["validation"]
+            hold_df, hold_bm = split["holdout"]
+
+            train_result = self._run_backtest(cfg, train_df, train_bm)
+            val_result = self._run_backtest(cfg, val_df, val_bm) if not val_df.empty else train_result
+            turnover_target = self._turnover_target_proxy(train_df)
+            val_scores = self._score_result(
+                val_result,
+                val_df if not val_df.empty else train_df,
+                turnover_target=turnover_target,
+                weights=weights,
+            )
+
+            holdout_result = self._run_backtest(cfg, hold_df, hold_bm) if not hold_df.empty else val_result
+            hold_scores = self._score_result(
+                holdout_result,
+                hold_df if not hold_df.empty else train_df,
+                turnover_target=turnover_target,
+                weights=weights,
+            )
+            rows.append(
+                {
+                    **val_scores,
+                    "holdout_score": float(hold_scores["score"]),
+                    "holdout_return": float(holdout_result.total_return),
+                    "holdout_sharpe": float(holdout_result.sharpe_ratio),
+                    "holdout_path_fit": float(hold_scores["path_fit"]),
+                    "holdout_volatility_fit": float(hold_scores["volatility_fit"]),
+                    "holdout_turnover_fit": float(hold_scores["turnover_fit"]),
+                    "holdout_microstructure_fit": float(hold_scores["microstructure_fit"]),
+                    "holdout_stylized_facts_fit": float(hold_scores["stylized_facts_fit"]),
+                    "holdout_credibility_score": float(hold_scores["credibility_score"]),
+                }
+            )
+
+        def _avg(field: str) -> float:
+            values = [float(row.get(field, 0.0)) for row in rows]
+            return float(np.mean(values)) if values else 0.0
+
+        return {
+            "params": dict(params),
+            "score": _avg("score"),
+            "path_fit": _avg("path_fit"),
+            "volatility_fit": _avg("volatility_fit"),
+            "turnover_fit": _avg("turnover_fit"),
+            "microstructure_fit": _avg("microstructure_fit"),
+            "stylized_facts_fit": _avg("stylized_facts_fit"),
+            "credibility_score": _avg("credibility_score"),
+            "holdout_score": _avg("holdout_score"),
+            "holdout_return": _avg("holdout_return"),
+            "holdout_sharpe": _avg("holdout_sharpe"),
+            "holdout_path_fit": _avg("holdout_path_fit"),
+            "holdout_volatility_fit": _avg("holdout_volatility_fit"),
+            "holdout_turnover_fit": _avg("holdout_turnover_fit"),
+            "holdout_microstructure_fit": _avg("holdout_microstructure_fit"),
+            "holdout_stylized_facts_fit": _avg("holdout_stylized_facts_fit"),
+            "holdout_credibility_score": _avg("holdout_credibility_score"),
+            "rolling_windows_evaluated": len(rows),
         }
 
     def _sample_value(self, space: Any) -> Any:
@@ -470,7 +605,7 @@ class CalibrationPipeline:
         best_idx = int(np.argmax(ei))
         return self._decode_vector(candidates[best_idx])
 
-    def _bayesian_like_search(self, split: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]) -> List[Dict[str, Any]]:
+    def _bayesian_like_search(self, splits: Sequence[Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]]) -> List[Dict[str, Any]]:
         records: List[Dict[str, Any]] = []
         best_score = -1e18
         best_params: Dict[str, Any] = {}
@@ -478,7 +613,7 @@ class CalibrationPipeline:
 
         for _ in range(max(1, int(self.spec.bayes_init))):
             params = self._sample_params()
-            evaluated = self._evaluate_params(params, split)
+            evaluated = self._evaluate_params(params, splits)
             records.append(evaluated)
             if evaluated["score"] > best_score:
                 best_score = float(evaluated["score"])
@@ -492,7 +627,7 @@ class CalibrationPipeline:
                 break
             exploration = self.rng.random() < 0.25 or not best_params
             params = self._sample_params() if exploration else self._mutate_params(best_params, scale=0.12)
-            evaluated = self._evaluate_params(params, split)
+            evaluated = self._evaluate_params(params, splits)
             records.append(evaluated)
             if evaluated["score"] > best_score:
                 best_score = float(evaluated["score"])
@@ -502,7 +637,7 @@ class CalibrationPipeline:
                 no_improve += 1
         return records
 
-    def _bayesian_search(self, split: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]) -> List[Dict[str, Any]]:
+    def _bayesian_search(self, splits: Sequence[Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]]) -> List[Dict[str, Any]]:
         records: List[Dict[str, Any]] = []
         best_score = -1e18
         best_params: Dict[str, Any] = {}
@@ -519,7 +654,7 @@ class CalibrationPipeline:
             if sig in seen:
                 continue
             seen.add(sig)
-            evaluated = self._evaluate_params(params, split)
+            evaluated = self._evaluate_params(params, splits)
             records.append(evaluated)
             if evaluated["score"] > best_score:
                 best_score = float(evaluated["score"])
@@ -546,7 +681,7 @@ class CalibrationPipeline:
                 continue
             seen.add(sig)
 
-            evaluated = self._evaluate_params(params, split)
+            evaluated = self._evaluate_params(params, splits)
             records.append(evaluated)
             if evaluated["score"] > best_score:
                 best_score = float(evaluated["score"])
@@ -556,7 +691,7 @@ class CalibrationPipeline:
                 no_improve += 1
         return records
 
-    def _evolutionary_search(self, split: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]) -> List[Dict[str, Any]]:
+    def _evolutionary_search(self, splits: Sequence[Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]]) -> List[Dict[str, Any]]:
         records: List[Dict[str, Any]] = []
         pop_size = max(4, int(self.spec.evo_population))
         elite_n = max(1, min(pop_size, int(self.spec.evo_elite)))
@@ -566,7 +701,7 @@ class CalibrationPipeline:
         for _restart in range(restarts):
             population = [self._sample_params() for _ in range(pop_size)]
             for _gen in range(max(1, int(self.spec.evo_generations))):
-                scored = [self._evaluate_params(params, split) for params in population]
+                scored = [self._evaluate_params(params, splits) for params in population]
                 records.extend(scored)
                 scored_sorted = sorted(scored, key=lambda x: float(x["score"]), reverse=True)
                 elites = [dict(item["params"]) for item in scored_sorted[:elite_n]]
@@ -579,7 +714,7 @@ class CalibrationPipeline:
                 sigma = max(0.02, sigma * 0.98)
         return records
 
-    def _build_sensitivity(self, best_params: Mapping[str, Any], split: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]) -> List[Dict[str, Any]]:
+    def _build_sensitivity(self, best_params: Mapping[str, Any], splits: Sequence[Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]]) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []
         for name, space in self.spec.parameter_space.items():
             base_value = best_params.get(name)
@@ -601,7 +736,7 @@ class CalibrationPipeline:
             for value in candidates:
                 params = dict(best_params)
                 params[name] = value
-                evaluated = self._evaluate_params(params, split)
+                evaluated = self._evaluate_params(params, splits)
                 rows.append(
                     {
                         "parameter": name,
@@ -612,19 +747,134 @@ class CalibrationPipeline:
                 )
         return rows
 
+    def _artifact_root(self, manifest: ExperimentManifest) -> Path:
+        legacy_layout = bool((self.spec.feature_flags or {}).get("calibration_legacy_artifact_layout", False))
+        run_scoped_layout = bool((self.spec.feature_flags or {}).get("calibration_run_scoped_artifacts_v1", not legacy_layout))
+        root = Path(self.spec.output_dir)
+        return root if legacy_layout or not run_scoped_layout else root / manifest.run_id
+
+    @staticmethod
+    def _build_chart_payload(
+        result: CalibrationResult,
+        weights: Mapping[str, float],
+        sensitivity: Sequence[Mapping[str, Any]],
+    ) -> Dict[str, Any]:
+        best_record = result.records[0] if result.records else {}
+        objective_breakdown = [
+            {
+                "objective": "path_fit",
+                "validation_score": float(best_record.get("path_fit", 0.0)),
+                "holdout_score": float(result.holdout_report.get("path_fit", 0.0)),
+                "weight": float(weights["path_fit"]),
+            },
+            {
+                "objective": "volatility_fit",
+                "validation_score": float(best_record.get("volatility_fit", 0.0)),
+                "holdout_score": float(result.holdout_report.get("volatility_fit", 0.0)),
+                "weight": float(weights["volatility_fit"]),
+            },
+            {
+                "objective": "turnover_fit",
+                "validation_score": float(best_record.get("turnover_fit", 0.0)),
+                "holdout_score": float(result.holdout_report.get("turnover_fit", 0.0)),
+                "weight": float(weights["turnover_fit"]),
+            },
+            {
+                "objective": "microstructure_fit",
+                "validation_score": float(best_record.get("microstructure_fit", 0.0)),
+                "holdout_score": float(result.holdout_report.get("microstructure_fit", 0.0)),
+                "weight": float(weights["microstructure_fit"]),
+            },
+            {
+                "objective": "stylized_facts_fit",
+                "validation_score": float(best_record.get("stylized_facts_fit", 0.0)),
+                "holdout_score": float(result.holdout_report.get("stylized_facts_fit", 0.0)),
+                "weight": float(weights["stylized_facts_fit"]),
+            },
+        ]
+        sensitivity_df = pd.DataFrame(list(sensitivity))
+        if sensitivity_df.empty:
+            sensitivity_rows: List[Dict[str, Any]] = []
+        else:
+            sensitivity_rows = (
+                sensitivity_df.assign(score_delta=(sensitivity_df["score"] - float(result.best_score)).abs())
+                .groupby("parameter", as_index=False)["score_delta"]
+                .mean()
+                .sort_values("score_delta", ascending=False)
+                .to_dict(orient="records")
+            )
+        return {
+            "objective_breakdown": objective_breakdown,
+            "radar": {
+                "kind": "radar",
+                "categories": [row["objective"] for row in objective_breakdown],
+                "series": [
+                    {"label": "validation", "values": [row["validation_score"] for row in objective_breakdown]},
+                    {"label": "holdout", "values": [row["holdout_score"] for row in objective_breakdown]},
+                    {"label": "weights", "values": [row["weight"] for row in objective_breakdown]},
+                ],
+            },
+            "bar": {
+                "kind": "bar",
+                "metric": "mean_abs_score_delta",
+                "series": sensitivity_rows,
+            },
+        }
+
     def _write_outputs(
         self,
         *,
         result: CalibrationResult,
-        split: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
+        splits: Sequence[Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]],
+        frame: pd.DataFrame,
     ) -> CalibrationResult:
-        root = Path(self.spec.output_dir)
+        primary_split = list(splits)[0] if list(splits) else self._empty_split()
+        data_slice = {
+            "rows": int(len(frame)),
+            "date_start": str(frame["date"].iloc[0]) if not frame.empty and "date" in frame.columns else "",
+            "date_end": str(frame["date"].iloc[-1]) if not frame.empty and "date" in frame.columns else "",
+            "split_ratios": {
+                "train": float(self.spec.split_train),
+                "validation": float(self.spec.split_validation),
+                "holdout": float(self.spec.split_holdout),
+            },
+            "rolling_window": bool(self.spec.rolling_window),
+            "window_count": int(len(list(splits)) or 1),
+        }
+        manifest = ExperimentManifest.build(
+            module="calibration_pipeline",
+            seed=int(self.spec.random_seed),
+            dataset_snapshot_id=str(self.spec.dataset_snapshot_id),
+            model_version=str(getattr(self.base_config, "strategy_name", "") or "unknown"),
+            data_slice=data_slice,
+            feature_flags=self.spec.feature_flags,
+            config={
+                "base_config": asdict(self.base_config),
+                "spec": asdict(self.spec),
+            },
+            notes={
+                "split_sizes": {
+                    "train": int(len(primary_split["train"][0])),
+                    "validation": int(len(primary_split["validation"][0])),
+                    "holdout": int(len(primary_split["holdout"][0])),
+                },
+                "rolling_window_enabled": bool(self.spec.rolling_window),
+                "window_count": int(len(list(splits)) or 1),
+            },
+        )
+        root = self._artifact_root(manifest)
         root.mkdir(parents=True, exist_ok=True)
 
         best_path = root / "best_config.json"
         sensitivity_path = root / "sensitivity.csv"
         holdout_path = root / "holdout_report.json"
         manifest_path = root / "calibration_manifest.json"
+        objective_path = root / "objective_breakdown.csv"
+        objective_json_path = root / "objective_breakdown.json"
+        radar_json_path = root / "radar_chart.json"
+        radar_csv_path = root / "radar_chart.csv"
+        bar_json_path = root / "bar_chart.json"
+        bar_csv_path = root / "bar_chart.csv"
 
         best_payload = {
             "best_config": result.best_config,
@@ -632,40 +882,61 @@ class CalibrationPipeline:
             "method": result.method,
             "seed": int(self.spec.random_seed),
             "dataset_snapshot_id": str(self.spec.dataset_snapshot_id),
+            "run_id": manifest.run_id,
         }
         best_path.write_text(json.dumps(best_payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
         pd.DataFrame(result.sensitivity).to_csv(sensitivity_path, index=False, encoding="utf-8-sig")
         holdout_path.write_text(json.dumps(result.holdout_report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
 
-        manifest = ExperimentManifest.build(
-            module="calibration_pipeline",
-            seed=int(self.spec.random_seed),
-            dataset_snapshot_id=str(self.spec.dataset_snapshot_id),
-            feature_flags=self.spec.feature_flags,
-            config={
-                "base_config": asdict(self.base_config),
-                "spec": asdict(self.spec),
-            },
-            artifacts={
-                "best_config": str(best_path),
-                "sensitivity": str(sensitivity_path),
-                "holdout_report": str(holdout_path),
-            },
-            notes={
-                "split_sizes": {
-                    "train": int(len(split["train"][0])),
-                    "validation": int(len(split["validation"][0])),
-                    "holdout": int(len(split["holdout"][0])),
-                }
-            },
-        )
-        write_experiment_manifest(manifest, root)
-        manifest_path.write_text(json.dumps(manifest.to_dict(), ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        chart_payload = self._build_chart_payload(result, self.spec.normalized_weights(), result.sensitivity)
+        objective_df = pd.DataFrame(chart_payload["objective_breakdown"])
+        objective_df.to_csv(objective_path, index=False, encoding="utf-8-sig")
+        objective_json_path.write_text(json.dumps(chart_payload["objective_breakdown"], ensure_ascii=False, indent=2), encoding="utf-8")
+        radar_json_path.write_text(json.dumps(chart_payload["radar"], ensure_ascii=False, indent=2), encoding="utf-8")
+        pd.DataFrame(
+            [
+                {"objective": row["objective"], "series": "validation", "value": row["validation_score"]}
+                for row in chart_payload["objective_breakdown"]
+            ]
+            + [
+                {"objective": row["objective"], "series": "holdout", "value": row["holdout_score"]}
+                for row in chart_payload["objective_breakdown"]
+            ]
+            + [
+                {"objective": row["objective"], "series": "weights", "value": row["weight"]}
+                for row in chart_payload["objective_breakdown"]
+            ]
+        ).to_csv(radar_csv_path, index=False, encoding="utf-8-sig")
+        bar_json_path.write_text(json.dumps(chart_payload["bar"], ensure_ascii=False, indent=2), encoding="utf-8")
+        pd.DataFrame(chart_payload["bar"]["series"]).to_csv(bar_csv_path, index=False, encoding="utf-8-sig")
 
-        result.artifacts = {
+        manifest.artifacts = {
+            "artifact_root": str(root),
             "best_config": str(best_path),
             "sensitivity": str(sensitivity_path),
             "holdout_report": str(holdout_path),
+            "objective_breakdown": str(objective_path),
+            "objective_breakdown_json": str(objective_json_path),
+            "radar_chart_json": str(radar_json_path),
+            "radar_chart_csv": str(radar_csv_path),
+            "bar_chart_json": str(bar_json_path),
+            "bar_chart_csv": str(bar_csv_path),
+        }
+        experiment_manifest_path = write_experiment_manifest(manifest, root)
+        manifest_path.write_text(json.dumps(manifest.to_dict(), ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+        result.artifacts = {
+            "artifact_root": str(root),
+            "best_config": str(best_path),
+            "sensitivity": str(sensitivity_path),
+            "holdout_report": str(holdout_path),
+            "objective_breakdown": str(objective_path),
+            "objective_breakdown_json": str(objective_json_path),
+            "radar_chart_json": str(radar_json_path),
+            "radar_chart_csv": str(radar_csv_path),
+            "bar_chart_json": str(bar_json_path),
+            "bar_chart_csv": str(bar_csv_path),
+            "experiment_manifest": str(experiment_manifest_path),
             "calibration_manifest": str(manifest_path),
         }
         result.manifest = manifest.to_dict()
@@ -673,44 +944,47 @@ class CalibrationPipeline:
 
     def run(self) -> CalibrationResult:
         frame, benchmark = self._prepare_frames()
-        split = self._split_frame(frame, benchmark)
-        if split["train"][0].empty:
+        splits = self._build_splits(frame, benchmark)
+        if splits[0]["train"][0].empty:
             empty = CalibrationResult(best_config={}, best_score=0.0, method=self.spec.method)
-            return self._write_outputs(result=empty, split=split)
+            return self._write_outputs(result=empty, splits=splits, frame=frame)
 
         method = str(self.spec.method or "bayesian").strip().lower()
         if method in {"evo", "evolution", "cma-es", "cmaes"}:
-            records = self._evolutionary_search(split)
+            records = self._evolutionary_search(splits)
             method_name = "evolutionary"
         elif method in {"bayesian_like", "bayes_like"}:
-            records = self._bayesian_like_search(split)
+            records = self._bayesian_like_search(splits)
             method_name = "bayesian_like"
         else:
             use_gp_bo = bool((self.spec.feature_flags or {}).get("calibration_gp_bo_v1", True))
             if use_gp_bo:
-                records = self._bayesian_search(split)
+                records = self._bayesian_search(splits)
                 method_name = "bayesian_gp"
             else:
-                records = self._bayesian_like_search(split)
+                records = self._bayesian_like_search(splits)
                 method_name = "bayesian_like"
 
         if not records:
             empty = CalibrationResult(best_config={}, best_score=0.0, method=method_name)
-            return self._write_outputs(result=empty, split=split)
+            return self._write_outputs(result=empty, splits=splits, frame=frame)
 
         records_sorted = sorted(records, key=lambda x: float(x["score"]), reverse=True)
         best = records_sorted[0]
         best_config = dict(best["params"])
-        sensitivity = self._build_sensitivity(best_config, split)
+        sensitivity = self._build_sensitivity(best_config, splits)
 
         holdout_report = {
             "score": float(best.get("holdout_score", 0.0)),
             "return": float(best.get("holdout_return", 0.0)),
             "sharpe": float(best.get("holdout_sharpe", 0.0)),
-            "path_fit": float(best.get("path_fit", 0.0)),
-            "volatility_fit": float(best.get("volatility_fit", 0.0)),
-            "turnover_fit": float(best.get("turnover_fit", 0.0)),
-            "stylized_facts_fit": float(best.get("stylized_facts_fit", 0.0)),
+            "path_fit": float(best.get("holdout_path_fit", 0.0)),
+            "volatility_fit": float(best.get("holdout_volatility_fit", 0.0)),
+            "turnover_fit": float(best.get("holdout_turnover_fit", 0.0)),
+            "microstructure_fit": float(best.get("holdout_microstructure_fit", 0.0)),
+            "stylized_facts_fit": float(best.get("holdout_stylized_facts_fit", 0.0)),
+            "credibility_score": float(best.get("holdout_credibility_score", 0.0)),
+            "rolling_windows_evaluated": int(best.get("rolling_windows_evaluated", 1)),
         }
 
         result = CalibrationResult(
@@ -721,7 +995,7 @@ class CalibrationPipeline:
             sensitivity=sensitivity,
             holdout_report=holdout_report,
         )
-        return self._write_outputs(result=result, split=split)
+        return self._write_outputs(result=result, splits=splits, frame=frame)
 
 
 __all__ = ["CalibrationPipeline", "CalibrationResult", "CalibrationSpec"]

@@ -57,6 +57,9 @@ def test_layered_memory_reacts_to_consecutive_losses():
     assert second_card["attention_fatigue"] >= first_card["attention_fatigue"]
     assert second_card["config_hash"] == first_card["config_hash"]
     assert second_card["seed"] == 7
+    assert second_card["memory_layers"]["short_term"]
+    assert "long_term" in second_card["memory_layers"]
+    assert second_card["metadata"]["behavior_version"] == "layered_memory_v2"
 
 
 def test_institution_constraints_are_stable_and_traceable():
@@ -91,4 +94,5 @@ def test_institution_constraints_are_stable_and_traceable():
     assert constraints["institution_type"] == "market_maker"
     assert constraints["inventory_limit"] <= 0.05
     assert result["behavior_card"]["current_narrative"]
-    assert result["behavior_card"]["metadata"]["behavior_version"] == "layered_memory_v1"
+    assert result["behavior_card"]["memory_layers"]["long_term"]["institution_type"] == "market_maker"
+    assert result["behavior_card"]["metadata"]["behavior_version"] == "layered_memory_v2"

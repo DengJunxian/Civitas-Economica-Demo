@@ -44,6 +44,9 @@ class ExperimentManifest:
     seed: int
     dataset_snapshot_id: str
     module: str
+    code_version: str = ""
+    model_version: str = ""
+    data_slice: Dict[str, Any] = field(default_factory=dict)
     feature_flags: Dict[str, bool] = field(default_factory=dict)
     config: Dict[str, Any] = field(default_factory=dict)
     artifacts: Dict[str, Any] = field(default_factory=dict)
@@ -65,6 +68,8 @@ class ExperimentManifest:
         config: Optional[Mapping[str, Any]] = None,
         feature_flags: Optional[Mapping[str, Any]] = None,
         artifacts: Optional[Mapping[str, Any]] = None,
+        model_version: str = "",
+        data_slice: Optional[Mapping[str, Any]] = None,
         parent_run_id: str = "",
         notes: Optional[Mapping[str, Any]] = None,
         git_commit: Optional[str] = None,
@@ -75,8 +80,10 @@ class ExperimentManifest:
         clean_config = dict(config or {})
         clean_flags = {str(k): bool(v) for k, v in dict(feature_flags or {}).items()}
         clean_artifacts = dict(artifacts or {})
+        clean_data_slice = dict(data_slice or {})
         clean_notes = dict(notes or {})
         manifest_timestamp = str(timestamp or _utc_now_iso())
+        resolved_git_commit = str(git_commit or _safe_git_commit())
         manifest_config_hash = str(
             config_hash
             or _stable_hash(
@@ -84,6 +91,8 @@ class ExperimentManifest:
                     "module": module,
                     "seed": int(seed),
                     "dataset_snapshot_id": str(dataset_snapshot_id or ""),
+                    "model_version": str(model_version or ""),
+                    "data_slice": clean_data_slice,
                     "config": clean_config,
                     "feature_flags": clean_flags,
                 }
@@ -96,11 +105,14 @@ class ExperimentManifest:
         return ExperimentManifest(
             run_id=manifest_run_id,
             timestamp=manifest_timestamp,
-            git_commit=str(git_commit or _safe_git_commit()),
+            git_commit=resolved_git_commit,
             config_hash=manifest_config_hash,
             seed=int(seed),
             dataset_snapshot_id=str(dataset_snapshot_id or ""),
             module=str(module),
+            code_version=resolved_git_commit,
+            model_version=str(model_version or ""),
+            data_slice=clean_data_slice,
             feature_flags=clean_flags,
             config=clean_config,
             artifacts=clean_artifacts,
@@ -131,6 +143,8 @@ def attach_manifest_to_metadata(
     feature_flags: Optional[Mapping[str, Any]] = None,
     config: Optional[Mapping[str, Any]] = None,
     artifacts: Optional[Mapping[str, Any]] = None,
+    model_version: str = "",
+    data_slice: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     meta = dict(metadata or {})
     manifest = ExperimentManifest.build(
@@ -140,11 +154,15 @@ def attach_manifest_to_metadata(
         feature_flags=feature_flags,
         config=config,
         artifacts=artifacts,
+        model_version=model_version,
+        data_slice=data_slice,
     )
     meta["experiment_manifest"] = manifest.to_dict()
     meta["experiment_manifest_id"] = manifest.run_id
     meta["experiment_config_hash"] = manifest.config_hash
+    meta["code_version"] = manifest.code_version
+    meta["model_version"] = manifest.model_version
+    meta["data_slice"] = manifest.data_slice
     meta["seed"] = int(seed)
     meta["dataset_snapshot_id"] = str(dataset_snapshot_id)
     return meta
-

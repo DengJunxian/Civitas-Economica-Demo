@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
@@ -6,6 +6,11 @@ from ui.reporting import export_defense_bundle
 
 
 def test_export_defense_bundle(tmp_path):
+    compliance_manifest = Path(tmp_path) / "ai_tool_usage_manifest.json"
+    compliance_route = Path(tmp_path) / "technical_route_template.md"
+    compliance_manifest.write_text("{}", encoding="utf-8")
+    compliance_route.write_text("# route", encoding="utf-8")
+
     bundle = export_defense_bundle(
         root_dir=Path(tmp_path),
         bundle_name="contest_bundle",
@@ -23,7 +28,14 @@ def test_export_defense_bundle(tmp_path):
         architecture_graph={"nodes": [], "edges": []},
         causal_chain_graph={"nodes": [], "edges": []},
         defense_outline_markdown="# 答辩提纲\n\ncontent",
-        feature_flags={"stylized_facts_v2": True},
+        feature_flags={"stylized_facts_v2": True, "competition_mode_v1": True},
+        compliance_artifacts={
+            "manifest": {"ok": True},
+            "files": {
+                "ai_tool_usage_manifest": compliance_manifest,
+                "technical_route_template": compliance_route,
+            },
+        },
     )
     assert bundle["bundle_root"].exists()
     assert bundle["manifest_path"].exists()
@@ -31,3 +43,5 @@ def test_export_defense_bundle(tmp_path):
     assert Path(files["design_chapter_draft"]).exists()
     assert Path(files["realism_json"]).exists()
     assert Path(files["policy_ab_report"]).exists()
+    assert Path(files["ai_tool_usage_manifest"]).exists()
+    assert Path(files["technical_route_template"]).exists()

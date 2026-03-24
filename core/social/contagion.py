@@ -29,6 +29,14 @@ def _profile_for(node_type: str | SocialNodeType) -> Dict[str, float]:
     return dict(DEFAULT_NODE_PROFILES.get(key, DEFAULT_NODE_PROFILES[SocialNodeType.RETAIL_DAY_TRADER.value]))
 
 
+def _reliability_band(credibility: float) -> str:
+    if credibility >= 0.8:
+        return "high"
+    if credibility >= 0.45:
+        return "medium"
+    return "low"
+
+
 @dataclass(slots=True)
 class SocialMessage:
     """Structured social message used by the enriched propagation engine."""
@@ -44,6 +52,11 @@ class SocialMessage:
     scheduled_tick: int = 0
     decay: float = 0.1
     amplification: float = 1.0
+    audience_tags: List[str] = field(default_factory=list)
+    coverage_ratio: float = 1.0
+    source_reliability_band: str = "medium"
+    diffusion_velocity: float = 1.0
+    rebuttal_of: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -70,6 +83,11 @@ class PropagationTrace:
     signal: float
     belief_delta: float
     refuted: bool = False
+    audience_tags: List[str] = field(default_factory=list)
+    coverage_ratio: float = 1.0
+    source_reliability_band: str = "medium"
+    diffusion_velocity: float = 1.0
+    rebuttal_of: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -145,6 +163,7 @@ class SocialContagionEngine:
         if isinstance(message, SocialMessage):
             payload = message
         else:
+            credibility = float(message.get("credibility", 0.5))
             payload = SocialMessage(
                 topic=str(message.get("topic", "market")),
                 source_id=str(message.get("source_id", "synthetic_source")),
@@ -152,11 +171,16 @@ class SocialContagionEngine:
                 kind=str(message.get("kind", "rumor")),
                 polarity=float(message.get("polarity", 0.0)),
                 strength=float(message.get("strength", 1.0)),
-                credibility=float(message.get("credibility", 0.5)),
+                credibility=credibility,
                 created_tick=int(message.get("created_tick", self.current_tick)),
                 scheduled_tick=int(message.get("scheduled_tick", self.current_tick)),
                 decay=float(message.get("decay", 0.1)),
                 amplification=float(message.get("amplification", 1.0)),
+                audience_tags=[str(item) for item in message.get("audience_tags", [])],
+                coverage_ratio=float(message.get("coverage_ratio", 1.0)),
+                source_reliability_band=str(message.get("source_reliability_band", _reliability_band(credibility))),
+                diffusion_velocity=float(message.get("diffusion_velocity", 1.0)),
+                rebuttal_of=str(message.get("rebuttal_of", "")),
                 metadata=dict(message.get("metadata", {})),
             )
         self.event_queue.append(payload)
@@ -178,6 +202,10 @@ class SocialContagionEngine:
             scheduled_tick=self.current_tick,
             decay=0.24,
             amplification=1.55,
+            audience_tags=[SocialNodeType.SOCIAL_MEDIA.value, SocialNodeType.KOL_SOCIAL.value, SocialNodeType.RETAIL_DAY_TRADER.value],
+            coverage_ratio=0.95,
+            source_reliability_band="low",
+            diffusion_velocity=1.4,
             metadata={"rumor_shock": float(rumor_shock)},
         )
 
@@ -195,6 +223,10 @@ class SocialContagionEngine:
             scheduled_tick=self.current_tick,
             decay=0.12,
             amplification=1.10,
+            audience_tags=[SocialNodeType.OFFICIAL_MEDIA.value, SocialNodeType.FINANCIAL_MEDIA.value, SocialNodeType.INSTITUTION.value],
+            coverage_ratio=0.75,
+            source_reliability_band="high",
+            diffusion_velocity=0.9,
             metadata={"macro_anchor": True},
         )
 
@@ -291,6 +323,11 @@ class SocialContagionEngine:
                         scheduled_tick=int(message.get("scheduled_tick", self.current_tick)),
                         decay=float(message.get("decay", 0.1)),
                         amplification=float(message.get("amplification", 1.0)),
+                        audience_tags=[str(item) for item in message.get("audience_tags", [])],
+                        coverage_ratio=float(message.get("coverage_ratio", 1.0)),
+                        source_reliability_band=str(message.get("source_reliability_band", _reliability_band(float(message.get("credibility", 0.5))))),
+                        diffusion_velocity=float(message.get("diffusion_velocity", 1.0)),
+                        rebuttal_of=str(message.get("rebuttal_of", "")),
                         metadata=dict(message.get("metadata", {})),
                     )
                 )
@@ -320,6 +357,8 @@ class SocialContagionEngine:
         base_strength = max(0.0, float(message.strength))
         for target_id in target_ids:
             target = graph.ensure_node(target_id)
+            if message.audience_tags and target.node_type not in set(message.audience_tags):
+                continue
             edge_profile = graph.get_edge_profile(message.source_id, target_id) if message.source_id in graph.nodes else None
             edge_info = self._edge_weight(graph, message.source_id, target_id) if message.source_id in graph.nodes else {
                 "trust_edge": 0.5,
@@ -355,14 +394,16 @@ class SocialContagionEngine:
                 * edge_info["amplification_edge"]
                 * message.amplification,
             )
+            amplification *= max(0.05, float(message.coverage_ratio))
             delay_factor = 1.0 / max(1.0, 1.0 + delay)
+            velocity_factor = 1.0 / max(0.5, float(message.diffusion_velocity))
             contradiction = 1.0 - target.contradiction_sensitivity * edge_info["contradiction_edge"]
             contradiction = _clip(contradiction, 0.15, 1.15)
             macro_bias = 1.0 + 0.15 * (macro_state.sentiment_index - 0.5)
-            signal = polarity * base_strength * credibility * amplification * decay * delay_factor * contradiction * macro_bias
+            signal = polarity * base_strength * credibility * amplification * decay * delay_factor * velocity_factor * contradiction * macro_bias
             belief_delta = signal * (0.55 + 0.45 * target.social_exposure)
             if message.kind == "refutation":
-                belief_delta = abs(belief_delta)
+                belief_delta = abs(belief_delta) * (1.0 + 0.4 * max(0.0, target.rumor_sensitivity))
                 signal = abs(signal)
             else:
                 belief_delta = float(belief_delta)
@@ -384,6 +425,10 @@ class SocialContagionEngine:
                     "belief_delta": belief_delta,
                     "received_tick": received_tick,
                     "source_credibility": credibility,
+                    "audience_tags": list(message.audience_tags),
+                    "coverage_ratio": float(message.coverage_ratio),
+                    "source_reliability_band": message.source_reliability_band,
+                    "rebuttal_of": message.rebuttal_of,
                 }
             )
             target.observation_state = {
@@ -394,6 +439,9 @@ class SocialContagionEngine:
                 "refutation_pressure": abs(signal) if message.kind == "refutation" else 0.0,
                 "source_credibility": credibility,
                 "received_tick": received_tick,
+                "audience_tags": list(message.audience_tags),
+                "coverage_ratio": float(message.coverage_ratio),
+                "rebuttal_of": message.rebuttal_of,
             }
             traces.append(
                 PropagationTrace(
@@ -413,6 +461,11 @@ class SocialContagionEngine:
                     signal=signal,
                     belief_delta=belief_delta,
                     refuted=message.kind == "refutation",
+                    audience_tags=list(message.audience_tags),
+                    coverage_ratio=float(message.coverage_ratio),
+                    source_reliability_band=message.source_reliability_band,
+                    diffusion_velocity=float(message.diffusion_velocity),
+                    rebuttal_of=message.rebuttal_of,
                     metadata=dict(message.metadata),
                 )
             )
@@ -481,6 +534,7 @@ class SocialContagionEngine:
                 "total_influence": float(total),
                 "mean_influence": float(total / max(1, source_counts[source_id])),
                 "spread_count": int(source_counts[source_id]),
+                "source_type": next((trace.source_type for trace in traces if trace.source_id == source_id), ""),
             }
             for source_id, total in sorted(source_totals.items(), key=lambda item: item[1], reverse=True)
         ]
@@ -528,6 +582,7 @@ class SocialContagionEngine:
                     "tick": int(self.current_tick),
                     "node_type_distribution": graph.node_type_counts(),
                     "macro_sentiment_index": float(macro_state.sentiment_index),
+                    "source_layers": sorted({trace.source_type for trace in traces}),
                 },
             },
         )
@@ -612,6 +667,17 @@ def build_social_propagation_report(
         "rumor_suppression": dict(snapshot.rumor_suppression),
         "observation_packets": dict(snapshot.observation_packets),
         "source_rankings": list(snapshot.source_rankings),
+        "heatmap_rows": [
+            {
+                "source_id": trace.get("source_id", ""),
+                "source_type": trace.get("source_type", ""),
+                "target_id": trace.get("target_id", ""),
+                "target_type": trace.get("target_type", ""),
+                "signal": float(trace.get("signal", 0.0)),
+                "rebuttal_of": trace.get("rebuttal_of", ""),
+            }
+            for trace in list(snapshot.propagation_chain)
+        ],
         "snapshot": payload,
         "metadata": dict(metadata or {}),
     }

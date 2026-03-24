@@ -1,0 +1,32 @@
+[
+  {
+    "objective": "path_fit",
+    "validation_score": 0.8471483730065172,
+    "holdout_score": 0.7373344093226304,
+    "weight": 0.3
+  },
+  {
+    "objective": "volatility_fit",
+    "validation_score": 0.6360212006201224,
+    "holdout_score": 0.6206306878126353,
+    "weight": 0.2
+  },
+  {
+    "objective": "turnover_fit",
+    "validation_score": 0.9442865527289379,
+    "holdout_score": 0.9568948800522001,
+    "weight": 0.15
+  },
+  {
+    "objective": "microstructure_fit",
+    "validation_score": 0.5229528535980148,
+    "holdout_score": 0.5315934065934066,
+    "weight": 0.15
+  },
+  {
+    "objective": "stylized_facts_fit",
+    "validation_score": 0.6137955169431613,
+    "holdout_score": 0.6096349163756711,
+    "weight": 0.2
+  }
+]

@@ -1,11 +1,23 @@
 #pragma once
 #include <functional>
-#include <iostream>
 #include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+struct RuleConfig {
+  double commission_rate = 0.00025;
+  double stamp_duty_rate = 0.0005;
+  double min_price_tick = 0.01;
+  int min_trade_unit = 1;
+  int board_lot = 100;
+  bool enforce_min_trade_unit = false;
+  bool enforce_board_lot = false;
+  bool allow_odd_lots = true;
+  bool strict_queue_timestamps = false;
+  std::string timestamp_precision = "microsecond";
+};
 
 struct Order {
   std::string order_id;
@@ -15,8 +27,7 @@ struct Order {
   std::string side;
   std::string order_type;
   double price;
-  double quantity; // Requested quantity (int in python usually, but double for
-                   // safety)
+  double quantity;
   std::string status;
   double filled_qty;
 
@@ -40,45 +51,39 @@ struct Trade {
 
 class LimitOrderBook {
 public:
-  LimitOrderBook(std::string symbol);
+  explicit LimitOrderBook(std::string symbol, RuleConfig rule_config = RuleConfig());
   ~LimitOrderBook() = default;
 
-  // Core Actions
   std::vector<Trade> add_order(Order &order);
   bool cancel_order(std::string order_id);
 
-  // Data Access
   double get_best_bid();
   double get_best_ask();
-  std::map<std::string, std::vector<std::pair<double, double>>>
-  get_depth(int levels);
+  std::map<std::string, std::vector<std::pair<double, double>>> get_depth(int levels);
 
-  // Helpers
   void clear();
+  void set_rule_config(const RuleConfig &rule_config);
+  RuleConfig get_rule_config() const;
 
 private:
   std::string symbol;
+  RuleConfig rule_config;
 
-  // Helper types for order storage
-  // Use shared_ptr to allow Orders to be in both map and id lookup, and updated
-  // in place
   using OrderPtr = std::shared_ptr<Order>;
 
-  // Bids: Descending price
   std::map<double, std::vector<OrderPtr>, std::greater<double>> bids;
-  // Asks: Ascending price
   std::map<double, std::vector<OrderPtr>, std::less<double>> asks;
-
-  // Lookup
   std::unordered_map<std::string, OrderPtr> order_lookup;
 
-  // Matching logic
   std::vector<Trade> match_order(OrderPtr order);
   std::vector<Trade> match_against_asks(OrderPtr buy_order);
   std::vector<Trade> match_against_bids(OrderPtr sell_order);
-  Trade execute_trade(OrderPtr buy_order, OrderPtr sell_order, OrderPtr taker,
-                      OrderPtr maker);
+  Trade execute_trade(OrderPtr buy_order, OrderPtr sell_order, OrderPtr taker, OrderPtr maker);
 
   void add_to_book(OrderPtr order);
   void remove_order(OrderPtr order);
+  double normalize_price(double price) const;
+  double normalize_quantity(double quantity) const;
+  double normalize_timestamp(double timestamp) const;
+  bool should_rest(const OrderPtr &order) const;
 };

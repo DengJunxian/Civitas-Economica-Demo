@@ -9,20 +9,29 @@ def test_archetype_registry_covers_expected_roles():
     expected = {
         "retail_day_trader",
         "retail_swing",
+        "retail_momentum_chaser",
+        "retail_mean_reverter",
         "mutual_fund",
         "pension_fund",
         "insurer",
+        "passive_index_fund",
         "prop_desk",
         "market_maker",
         "state_stabilization_fund",
+        "policy_capital",
+        "leveraged_flow",
+        "foreign_proxy_flow",
         "rumor_trader",
         "etf_arbitrageur",
+        "quant_arbitrage",
     }
     assert expected.issubset(keys)
     archetype = get_archetype("mutual_fund")
     assert archetype.mandate
     assert archetype.benchmark
     assert archetype.turnover_target > 0
+    assert archetype.constraint_schema()["schema_version"] == "persona_constraints_v1"
+    assert archetype.memory_schema()["mid_term_narrative_weight"] > 0
 
 
 def test_persona_exposes_archetype_and_mutable_state_layers():
@@ -41,6 +50,13 @@ def test_persona_exposes_archetype_and_mutable_state_layers():
     assert legacy.archetype is not None
     assert legacy.risk_appetite == RiskAppetite.GAMBLER
     assert legacy.to_dict()["archetype"]["key"]
+
+    momentum = Persona.from_archetype("retail_momentum_chaser", name="Momentum_001")
+    schema = momentum.agent_schema()
+    assert schema["schema_version"] == "trader_agent_schema_v1"
+    assert schema["participant_type"] == "retail"
+    assert schema["constraints"]["execution_preference"] == "aggressive"
+    assert schema["memory_profile"]["short_term_focus"] >= 0.0
 
 
 def test_composition_driven_generation_uses_weights(tmp_path: Path):

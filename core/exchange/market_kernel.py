@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
 from config import GLOBAL_CONFIG
 from core.exchange.bar_builder import TradeTapeBarBuilder, TradeTapeEntry
+from core.exchange.market_rules import resolve_market_rule_schema
 from core.types import ExecutionPlan, Order, OrderSide, OrderStatus, OrderType, Trade
 
 if TYPE_CHECKING:
@@ -60,6 +61,7 @@ class MarketKernelConfig:
     continuous_start: str = "09:30"
     continuous_end: str = "15:00"
     feature_flags: Dict[str, bool] = field(default_factory=dict)
+    market_rules: Optional[Dict[str, Any]] = None
 
 
 def _parse_clock_time(value: str, fallback: dt_time) -> dt_time:
@@ -98,6 +100,12 @@ class MarketKernel:
         self.config = config or MarketKernelConfig()
         self.rng = random.Random(int(self.config.seed))
         self.feature_flags = dict(self.config.feature_flags or {})
+        self.market_rules = resolve_market_rule_schema(
+            symbol=symbol,
+            prev_close=prev_close,
+            overrides=self._build_market_rule_overrides(),
+            feature_flags=self.feature_flags,
+        )
 
         if matching_engine is not None:
             self.engine = matching_engine
@@ -126,6 +134,7 @@ class MarketKernel:
                 "board_lot": self.config.board_lot,
                 "allow_odd_lots": self.config.allow_odd_lots,
                 "enforce_board_lot": self.config.enforce_board_lot,
+                "market_rules": self.market_rules.to_dict(),
             }
         )
         self.bar_builder = TradeTapeBarBuilder(
@@ -146,7 +155,48 @@ class MarketKernel:
             return int(self.clock.ticks)
         return int(self._sequence)
 
+    def _build_market_rule_overrides(self) -> Dict[str, Any]:
+        overrides = dict(self.config.market_rules or {})
+        overrides.setdefault("board_lot", self.config.board_lot)
+        overrides.setdefault("allow_odd_lots", self.config.allow_odd_lots)
+        overrides.setdefault("enforce_board_lot", self.config.enforce_board_lot)
+        overrides.setdefault("commission_rate", self.config.commission_rate)
+        overrides.setdefault("stamp_duty_rate", self.config.stamp_duty_rate)
+        overrides.setdefault("call_auction_start", self.config.call_auction_start)
+        overrides.setdefault("call_auction_end", self.config.call_auction_end)
+        overrides.setdefault("midday_break_start", self.config.midday_break_start)
+        overrides.setdefault("midday_break_end", self.config.midday_break_end)
+        overrides.setdefault("continuous_start", self.config.continuous_start)
+        overrides.setdefault("continuous_end", self.config.continuous_end)
+        return overrides
+
+    def _session_phase_from_schema(self, timestamp: float) -> str:
+        session = self.market_rules.find_session(timestamp)
+        if session is None:
+            return "closed"
+        return str(session.phase)
+
+    def _next_active_ts_from_schema(self, timestamp: float) -> float:
+        dt = datetime.fromtimestamp(float(timestamp))
+        current = dt.time()
+        sessions = list(self.market_rules.sessions)
+        for session in sessions:
+            if session.accepts_orders and current < session.start_time:
+                return float(datetime.combine(dt.date(), session.start_time).timestamp())
+            if session.contains(timestamp):
+                for later in sessions:
+                    if later.accepts_orders and later.start_time >= session.end_time:
+                        return float(datetime.combine(dt.date(), later.start_time).timestamp())
+                break
+        next_day = dt.date() + timedelta(days=1)
+        for session in sessions:
+            if session.accepts_orders:
+                return float(datetime.combine(next_day, session.start_time).timestamp())
+        return float(timestamp)
+
     def _session_phase(self, timestamp: float) -> str:
+        if self.feature_flags.get("session_rules_v1", False):
+            return self._session_phase_from_schema(timestamp)
         dt = datetime.fromtimestamp(float(timestamp))
         session_time = dt.time()
         call_start = _parse_clock_time(self.config.call_auction_start, dt_time(9, 15))
@@ -165,6 +215,8 @@ class MarketKernel:
         return "closed"
 
     def _next_active_ts(self, timestamp: float) -> float:
+        if self.feature_flags.get("session_rules_v1", False):
+            return self._next_active_ts_from_schema(timestamp)
         dt = datetime.fromtimestamp(float(timestamp))
         session_time = dt.time()
         break_start = _parse_clock_time(self.config.midday_break_start, dt_time(11, 30))
@@ -190,9 +242,11 @@ class MarketKernel:
     def _normalize_order(self, order: Any) -> Any:
         if isinstance(order, ExecutionPlan):
             qty = order.resolved_qty(self.engine.last_price)
-            if self.config.enforce_board_lot and not self.config.allow_odd_lots and qty < self.config.board_lot:
+            if self.market_rules.enforce_board_lot and not self.market_rules.allow_odd_lots and qty < self.market_rules.board_lot:
                 return None
-            if self.config.enforce_board_lot and qty >= self.config.board_lot:
+            if self.market_rules.is_feature_enabled("market_rules_v1"):
+                qty = self.market_rules.normalize_quantity(qty)
+            elif self.config.enforce_board_lot and qty >= self.config.board_lot:
                 qty = max(self.config.board_lot, (qty // self.config.board_lot) * self.config.board_lot)
             if qty > 0:
                 order.target_qty = qty
@@ -201,11 +255,19 @@ class MarketKernel:
         if not isinstance(order, Order):
             return None
 
-        if self.config.enforce_board_lot and not self.config.allow_odd_lots and order.quantity < self.config.board_lot:
+        if self.market_rules.enforce_board_lot and not self.market_rules.allow_odd_lots and order.quantity < self.market_rules.board_lot:
             order.status = OrderStatus.REJECTED
             order.reason = "board lot constraint"
             return None
-        if self.config.enforce_board_lot and order.quantity >= self.config.board_lot:
+        if self.market_rules.is_feature_enabled("market_rules_v1"):
+            normalized_qty = self.market_rules.normalize_quantity(order.quantity)
+            if normalized_qty <= 0:
+                order.status = OrderStatus.REJECTED
+                order.reason = "market rule quantity constraint"
+                return None
+            order.quantity = normalized_qty
+            order.timestamp = self.market_rules.normalize_timestamp(order.timestamp)
+        elif self.config.enforce_board_lot and order.quantity >= self.config.board_lot:
             order.quantity = max(self.config.board_lot, (int(order.quantity) // self.config.board_lot) * self.config.board_lot)
         return order
 

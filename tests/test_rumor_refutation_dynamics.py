@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from core.macro.state import MacroState
 from core.social import SocialContagionEngine, SocialGraphState, SocialMessage, SocialNodeType
@@ -28,6 +28,7 @@ def test_rumor_refutation_reduces_remaining_rumor_heat() -> None:
                 credibility=0.10,
                 created_tick=1,
                 scheduled_tick=1,
+                audience_tags=[SocialNodeType.RETAIL_DAY_TRADER.value],
             )
         ],
     )
@@ -48,6 +49,9 @@ def test_rumor_refutation_reduces_remaining_rumor_heat() -> None:
                 credibility=0.99,
                 created_tick=2,
                 scheduled_tick=2,
+                audience_tags=[SocialNodeType.RETAIL_DAY_TRADER.value],
+                rebuttal_of="panic_rumor",
+                source_reliability_band="high",
             )
         ],
     )

@@ -7,6 +7,19 @@ namespace py = pybind11;
 PYBIND11_MODULE(_civitas_lob, m) {
   m.doc() = "Civitas C++ Limit Order Book using pybind11";
 
+  py::class_<RuleConfig>(m, "RuleConfig")
+      .def(py::init<>())
+      .def_readwrite("commission_rate", &RuleConfig::commission_rate)
+      .def_readwrite("stamp_duty_rate", &RuleConfig::stamp_duty_rate)
+      .def_readwrite("min_price_tick", &RuleConfig::min_price_tick)
+      .def_readwrite("min_trade_unit", &RuleConfig::min_trade_unit)
+      .def_readwrite("board_lot", &RuleConfig::board_lot)
+      .def_readwrite("enforce_min_trade_unit", &RuleConfig::enforce_min_trade_unit)
+      .def_readwrite("enforce_board_lot", &RuleConfig::enforce_board_lot)
+      .def_readwrite("allow_odd_lots", &RuleConfig::allow_odd_lots)
+      .def_readwrite("strict_queue_timestamps", &RuleConfig::strict_queue_timestamps)
+      .def_readwrite("timestamp_precision", &RuleConfig::timestamp_precision);
+
   py::class_<Order>(m, "Order")
       .def(py::init<>())
       .def_readwrite("order_id", &Order::order_id)
@@ -37,41 +50,42 @@ PYBIND11_MODULE(_civitas_lob, m) {
       .def_readwrite("seller_tax", &Trade::seller_tax);
 
   py::class_<LimitOrderBook>(m, "LimitOrderBook")
-      .def(py::init<std::string>())
+      .def(py::init<std::string, RuleConfig>(), py::arg("symbol"), py::arg("rule_config") = RuleConfig())
       .def("add_order", &LimitOrderBook::add_order)
       .def("cancel_order", &LimitOrderBook::cancel_order)
       .def("get_best_bid", &LimitOrderBook::get_best_bid)
       .def("get_best_ask", &LimitOrderBook::get_best_ask)
       .def("get_depth", &LimitOrderBook::get_depth)
       .def("clear", &LimitOrderBook::clear)
+      .def("set_rule_config", &LimitOrderBook::set_rule_config)
+      .def("get_rule_config", &LimitOrderBook::get_rule_config)
       .def("add_order_exploded",
            [](LimitOrderBook &self, std::string order_id, std::string agent_id,
               double timestamp, std::string symbol, std::string side,
               std::string order_type, double price, double quantity) {
-             Order o;
-             o.order_id = order_id;
-             o.agent_id = agent_id;
-             o.timestamp = timestamp;
-             o.symbol = symbol;
-             o.side = side;
-             o.order_type = order_type;
-             o.price = price;
-             o.quantity = quantity;
-             o.filled_qty = 0;
-             o.status = "pending";
+             Order order;
+             order.order_id = order_id;
+             order.agent_id = agent_id;
+             order.timestamp = timestamp;
+             order.symbol = symbol;
+             order.side = side;
+             order.order_type = order_type;
+             order.price = price;
+             order.quantity = quantity;
+             order.filled_qty = 0;
+             order.status = "pending";
 
-             // Call core
-             std::vector<Trade> trades = self.add_order(o);
+             std::vector<Trade> trades = self.add_order(order);
 
-             // Return tuple of (filled_qty, status, trade_list_of_tuples)
              py::list py_trades;
-             for (auto &t : trades) {
+             for (auto &trade : trades) {
                py_trades.append(py::make_tuple(
-                   t.trade_id, t.price, t.quantity, t.maker_id, t.taker_id,
-                   t.maker_agent_id, t.taker_agent_id, t.timestamp, t.buyer_fee,
-                   t.seller_fee, t.seller_tax));
+                   trade.trade_id, trade.price, trade.quantity, trade.maker_id,
+                   trade.taker_id, trade.maker_agent_id, trade.taker_agent_id,
+                   trade.timestamp, trade.buyer_fee, trade.seller_fee,
+                   trade.seller_tax));
              }
 
-             return py::make_tuple(o.filled_qty, o.status, py_trades);
+             return py::make_tuple(order.filled_qty, order.status, py_trades);
            });
 }

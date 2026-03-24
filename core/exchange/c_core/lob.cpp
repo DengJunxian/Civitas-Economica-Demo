@@ -5,8 +5,6 @@
 #include <random>
 #include <sstream>
 
-// Helper for generating UUIDs (simple version or rely on Python passing them)
-// In this design, Python passes IDs. We generate Trade IDs.
 std::string generate_uuid() {
   static std::random_device rd;
   static std::mt19937 gen(rd());
@@ -33,51 +31,91 @@ std::string generate_uuid() {
   return ss.str();
 }
 
-double current_time() {
-  return std::time(
-      nullptr); // Simple timestamp, improve if microsecond precision needed
+double current_time() { return static_cast<double>(std::time(nullptr)); }
+
+LimitOrderBook::LimitOrderBook(std::string symbol, RuleConfig rule_config)
+    : symbol(std::move(symbol)), rule_config(rule_config) {}
+
+void LimitOrderBook::set_rule_config(const RuleConfig &new_rule_config) {
+  rule_config = new_rule_config;
 }
 
-LimitOrderBook::LimitOrderBook(std::string symbol) : symbol(symbol) {}
+RuleConfig LimitOrderBook::get_rule_config() const { return rule_config; }
+
+double LimitOrderBook::normalize_price(double price) const {
+  if (rule_config.min_price_tick <= 0.0)
+    return price;
+  double steps = std::round(price / rule_config.min_price_tick);
+  double quantized = steps * rule_config.min_price_tick;
+  return std::round(quantized * 1000000.0) / 1000000.0;
+}
+
+double LimitOrderBook::normalize_quantity(double quantity) const {
+  double normalized = std::max(0.0, std::floor(quantity));
+  int trade_unit = std::max(1, rule_config.min_trade_unit);
+  if (rule_config.enforce_min_trade_unit) {
+    normalized = std::floor(normalized / trade_unit) * trade_unit;
+  }
+  if (rule_config.enforce_board_lot && normalized >= rule_config.board_lot) {
+    normalized = std::floor(normalized / rule_config.board_lot) * rule_config.board_lot;
+  }
+  return normalized;
+}
+
+double LimitOrderBook::normalize_timestamp(double timestamp) const {
+  if (rule_config.timestamp_precision == "second") {
+    return std::round(timestamp);
+  }
+  if (rule_config.timestamp_precision == "millisecond") {
+    return std::round(timestamp * 1000.0) / 1000.0;
+  }
+  if (rule_config.timestamp_precision == "microsecond") {
+    return std::round(timestamp * 1000000.0) / 1000000.0;
+  }
+  return timestamp;
+}
+
+bool LimitOrderBook::should_rest(const OrderPtr &order) const {
+  return order->order_type == "limit" || order->order_type == "post-only";
+}
 
 std::vector<Trade> LimitOrderBook::add_order(Order &order_ref) {
-  // We create a shared pointer to manage the order internally
-  // BUT we must ensure the Python object reflects changes.
-  // pybind11 handles reference passing for modifications if done correctly.
-  // Here we copy the data into a managed object for the book
-
-  // Actually, if we want to modify the passed object, we should work with it.
-  // But `order_ref` is a reference to the C++ struct constructed from Python.
-  // To persist it in our C++ structures, we copy it to a heap object managed by
-  // shared_ptr. We will update order_ref members before returning so Python
-  // sees updates? No, pybind11 structs are usually value types unless wrapped
-  // specially. BETTER: The C++ `add_order` takes `Order&`. We update it.
-  // Internally we store `OrderPtr`.
-
-  // Create internal managed order
   auto order = std::make_shared<Order>(order_ref);
-
   std::vector<Trade> trades;
 
-  // Check symbol (basic validation)
   if (order->symbol != this->symbol) {
     order->status = "rejected";
-    order_ref.status = "rejected"; // Sync back
+    order_ref.status = "rejected";
     return trades;
   }
 
-  // Checking limits is skipped here for performance/simplicity or added later.
-  // Assuming pre-validated or limits handled by strategy.
+  order->timestamp = normalize_timestamp(order->timestamp);
+  order->price = normalize_price(order->price);
+  order->quantity = normalize_quantity(order->quantity);
+  if (order->quantity <= 0.0) {
+    order->status = "rejected";
+    order_ref.status = "rejected";
+    return trades;
+  }
 
   trades = match_order(order);
 
-  if (!order->is_filled() && order->status != "cancelled") {
-    add_to_book(order);
+  if (!order->is_filled()) {
+    if (should_rest(order) && order->status != "cancelled" && order->status != "rejected") {
+      add_to_book(order);
+      order->status = (order->filled_qty > 0.0) ? "partial" : "pending";
+    } else if (order->filled_qty > 0.0) {
+      order->status = "partial";
+    } else if (order->status != "rejected") {
+      order->status = "cancelled";
+    }
   }
 
-  // Sync state back to the input reference so Python sees it
   order_ref.filled_qty = order->filled_qty;
   order_ref.status = order->status;
+  order_ref.price = order->price;
+  order_ref.quantity = order->quantity;
+  order_ref.timestamp = order->timestamp;
 
   return trades;
 }
@@ -85,9 +123,8 @@ std::vector<Trade> LimitOrderBook::add_order(Order &order_ref) {
 std::vector<Trade> LimitOrderBook::match_order(OrderPtr incoming) {
   if (incoming->side == "buy") {
     return match_against_asks(incoming);
-  } else {
-    return match_against_bids(incoming);
   }
+  return match_against_bids(incoming);
 }
 
 std::vector<Trade> LimitOrderBook::match_against_asks(OrderPtr buy_order) {
@@ -95,28 +132,25 @@ std::vector<Trade> LimitOrderBook::match_against_asks(OrderPtr buy_order) {
   std::vector<OrderPtr> to_remove;
 
   for (auto &[price, order_list] : asks) {
-    if (buy_order->remaining_qty() <= 0)
+    if (buy_order->remaining_qty() <= 0.0)
       break;
     if (buy_order->price < price)
-      break; // Buy price < Ask price -> No match
+      break;
 
     for (auto &ask_order : order_list) {
-      if (buy_order->remaining_qty() <= 0)
+      if (buy_order->remaining_qty() <= 0.0)
         break;
-
       Trade trade = execute_trade(buy_order, ask_order, buy_order, ask_order);
       trades.push_back(trade);
-
       if (ask_order->is_filled()) {
         to_remove.push_back(ask_order);
       }
     }
   }
 
-  for (auto &o : to_remove) {
-    remove_order(o);
+  for (auto &order : to_remove) {
+    remove_order(order);
   }
-
   return trades;
 }
 
@@ -125,69 +159,64 @@ std::vector<Trade> LimitOrderBook::match_against_bids(OrderPtr sell_order) {
   std::vector<OrderPtr> to_remove;
 
   for (auto &[price, order_list] : bids) {
-    if (sell_order->remaining_qty() <= 0)
+    if (sell_order->remaining_qty() <= 0.0)
       break;
     if (sell_order->price > price)
-      break; // Sell price > Bid price -> No match
+      break;
 
     for (auto &bid_order : order_list) {
-      if (sell_order->remaining_qty() <= 0)
+      if (sell_order->remaining_qty() <= 0.0)
         break;
-
       Trade trade = execute_trade(bid_order, sell_order, sell_order, bid_order);
       trades.push_back(trade);
-
       if (bid_order->is_filled()) {
         to_remove.push_back(bid_order);
       }
     }
   }
 
-  for (auto &o : to_remove) {
-    remove_order(o);
+  for (auto &order : to_remove) {
+    remove_order(order);
   }
-
   return trades;
 }
 
 Trade LimitOrderBook::execute_trade(OrderPtr buy_order, OrderPtr sell_order,
                                     OrderPtr taker, OrderPtr maker) {
-  double exec_qty =
-      std::min(buy_order->remaining_qty(), sell_order->remaining_qty());
+  double exec_qty = std::min(buy_order->remaining_qty(), sell_order->remaining_qty());
   double exec_price = maker->price;
 
   buy_order->filled_qty += exec_qty;
   sell_order->filled_qty += exec_qty;
 
-  auto update_status = [](OrderPtr o) {
-    if (o->is_filled())
-      o->status = "filled";
-    else if (o->filled_qty > 0)
-      o->status = "partial";
+  auto update_status = [](OrderPtr order) {
+    if (order->is_filled())
+      order->status = "filled";
+    else if (order->filled_qty > 0.0)
+      order->status = "partial";
   };
   update_status(buy_order);
   update_status(sell_order);
 
-  // hardcoded flags/rates for now, ideally passed via config or constructor
-  double comm_rate = 0.0003;
-  double stamp_rate = 0.001;
-
   double notional = exec_price * exec_qty;
+  double trade_timestamp = rule_config.strict_queue_timestamps
+                               ? std::max(normalize_timestamp(buy_order->timestamp),
+                                          normalize_timestamp(sell_order->timestamp))
+                               : current_time();
 
-  Trade t;
-  t.trade_id = generate_uuid();
-  t.price = exec_price;
-  t.quantity = exec_qty;
-  t.maker_id = maker->order_id;
-  t.taker_id = taker->order_id;
-  t.maker_agent_id = maker->agent_id;
-  t.taker_agent_id = taker->agent_id;
-  t.timestamp = current_time();
-  t.buyer_fee = notional * comm_rate;
-  t.seller_fee = notional * comm_rate;
-  t.seller_tax = notional * stamp_rate;
-
-  return t;
+  Trade trade;
+  trade.trade_id = generate_uuid();
+  trade.price = exec_price;
+  trade.quantity = exec_qty;
+  trade.maker_id = maker->order_id;
+  trade.taker_id = taker->order_id;
+  trade.maker_agent_id = maker->agent_id;
+  trade.taker_agent_id = taker->agent_id;
+  trade.timestamp = trade_timestamp;
+  trade.buyer_fee = notional * rule_config.commission_rate;
+  trade.seller_fee = notional * rule_config.commission_rate;
+  trade.seller_tax = notional * rule_config.stamp_duty_rate;
+  return trade;
 }
 
 void LimitOrderBook::add_to_book(OrderPtr order) {
@@ -200,7 +229,6 @@ void LimitOrderBook::add_to_book(OrderPtr order) {
 }
 
 void LimitOrderBook::remove_order(OrderPtr order) {
-  // Remove from map
   if (order->side == "buy") {
     auto it = bids.find(order->price);
     if (it != bids.end()) {
@@ -247,17 +275,16 @@ double LimitOrderBook::get_best_ask() {
   return asks.begin()->first;
 }
 
-std::map<std::string, std::vector<std::pair<double, double>>>
-LimitOrderBook::get_depth(int levels) {
+std::map<std::string, std::vector<std::pair<double, double>>> LimitOrderBook::get_depth(int levels) {
   std::map<std::string, std::vector<std::pair<double, double>>> result;
 
   int count = 0;
   for (auto &[price, orders] : bids) {
     if (count++ >= levels)
       break;
-    double total_qty = 0;
-    for (auto &o : orders)
-      total_qty += o->remaining_qty();
+    double total_qty = 0.0;
+    for (auto &order : orders)
+      total_qty += order->remaining_qty();
     result["bids"].push_back({price, total_qty});
   }
 
@@ -265,9 +292,9 @@ LimitOrderBook::get_depth(int levels) {
   for (auto &[price, orders] : asks) {
     if (count++ >= levels)
       break;
-    double total_qty = 0;
-    for (auto &o : orders)
-      total_qty += o->remaining_qty();
+    double total_qty = 0.0;
+    for (auto &order : orders)
+      total_qty += order->remaining_qty();
     result["asks"].push_back({price, total_qty});
   }
 

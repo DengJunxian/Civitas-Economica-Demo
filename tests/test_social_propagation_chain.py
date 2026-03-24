@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -43,6 +43,8 @@ def test_social_propagation_chain_emits_node_observations_and_report(tmp_path: P
                 credibility=0.98,
                 created_tick=1,
                 scheduled_tick=1,
+                audience_tags=[SocialNodeType.RETAIL_DAY_TRADER.value, SocialNodeType.INSTITUTION.value],
+                coverage_ratio=0.8,
             ),
             SocialMessage(
                 topic="rumor_selloff",
@@ -54,6 +56,7 @@ def test_social_propagation_chain_emits_node_observations_and_report(tmp_path: P
                 credibility=0.12,
                 created_tick=1,
                 scheduled_tick=1,
+                audience_tags=[SocialNodeType.KOL_SOCIAL.value, SocialNodeType.RETAIL_DAY_TRADER.value],
             ),
         ],
     )
@@ -69,3 +72,5 @@ def test_social_propagation_chain_emits_node_observations_and_report(tmp_path: P
     payload = json.loads(report_path.read_text(encoding="utf-8"))
     assert payload["node_type_distribution"]["retail_day_trader"] >= 1
     assert payload["propagation_chain"][0]["topic"] in {"policy_cut", "rumor_selloff"}
+    assert payload["heatmap_rows"]
+    assert "source_layers" in payload["snapshot_info"]

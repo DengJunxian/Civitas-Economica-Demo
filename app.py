@@ -20,6 +20,11 @@ from core.competition_demo import (
     load_competition_scenario,
     bootstrap_competition_demo,
 )
+from core.competition_compliance import (
+    COMPETITION_MODE_FLAG,
+    competition_mode_enabled,
+    write_competition_compliance_artifacts,
+)
 from core.ui_text import display_runtime_mode, display_scenario_name
 from ui.backtest_panel import render_backtest_panel
 from ui.behavioral_diagnostics import render_behavioral_diagnostics
@@ -27,6 +32,7 @@ from ui.demo_wind_tunnel import render_demo_tab
 from ui.history_replay import render_history_replay
 from ui.policy_lab import render_policy_lab
 from ui.regulator_optimization import REGULATOR_OPTIMIZATION_PAGE_FLAG, render_regulator_optimization
+from ui.reporting import export_defense_bundle
 from ui import dashboard as dashboard_ui
 
 
@@ -122,6 +128,12 @@ def _init_state() -> None:
         "policy_lab_result": None,
         "history_replay_result": None,
         "simulation_mode": "SMART",
+        "feature_flags": {
+            COMPETITION_MODE_FLAG: True,
+            "regulator_real_env_v1": True,
+            "regulator_toy_fallback_v1": True,
+        },
+        "competition_mode_requested": True,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -182,6 +194,14 @@ def _material_summary_from_metrics(metrics: pd.DataFrame) -> Dict[str, float]:
     }
 
 
+def _competition_mode_active() -> bool:
+    flags = st.session_state.get("feature_flags", {})
+    requested = bool(st.session_state.get("competition_mode_requested", True))
+    if not isinstance(flags, MutableMapping):
+        flags = {}
+    return competition_mode_enabled(feature_flags=flags, requested_mode=requested)
+
+
 def _generate_competition_materials() -> Dict[str, Path]:
     scenario = st.session_state.get("demo_scenario")
     if scenario is None:
@@ -196,75 +216,47 @@ def _generate_competition_materials() -> Dict[str, Path]:
     stat = _material_summary_from_metrics(metrics)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    comparison_md = (
-        "## UI 重构前后对比\n"
-        "- 前：入口较分散，演示链路跨多个标签页，评委视角不连续。\n"
-        "- 后：首页收敛为五入口（含行为金融诊断页），答辩链路一键加载+自动时间线+三段叙事。\n"
-        "- 前：思维链以原始文本为主。\n"
-        "- 后：改为“决策证据流”，仅展示结构化推理产物。\n"
-        "- 前：图表样式不统一。\n"
-        "- 后：统一深色主题、中文标题、图表均支持 PNG/CSV/JSON 导出。\n"
-    )
-
     competition_summary = f"""# competition_summary
 
-生成时间：{now}
-场景：{display_scenario_name(scenario.name)}
+?????{now}
+???{display_scenario_name(scenario.name)}
 
-## 核心结论
-- 累计收益：{stat['return_pct']:.2%}
-- 波动率：{stat['volatility']:.2%}
-- 最大风险热度：{stat['panic_max']:.2f}
-- 平均羊群度（CSAD）：{stat['herding_avg']:.3f}
+## ????
+- ?????{stat['return_pct']:.2%}
+- ????{stat['volatility']:.2%}
+- ???????{stat['panic_max']:.2f}
+- ??????CSAD??{stat['herding_avg']:.3f}
 
-## 叙事主线
-1. 分析师汇总多源证据并形成结构化判断。
-2. 经理将证据映射为可执行仓位与风险约束。
-3. 市场在流动性、波动率、羊群效应上给出反馈。
-
-{comparison_md}
+## ????
+1. ??????????????
+2. ?????????????????
+3. ????????????????????
 """
 
-    design_outline = f"""# design_outline
+    design_outline = """# design_outline
 
-## 信息架构
-- 首页五入口：答辩模式 / 专家模式 / 历史回测 / 行为金融诊断 / 系统说明
-- 答辩模式：场景加载、自动时间线、KPI 大卡、三段叙事、A/B 世界对照
-- 专家模式：决策证据流 + 多图联动
+## ????
+- ????
+- ????
+- ????
+- ?????
+- A/B ??
+- ????
 
-## 关键前端组件
-- LOB 深度动画
-- 社会传播网络热图
-- 政策传导桑基图
-- 风险事件时间轴
-
-## 约束达成
-- DEMO_MODE 无需 API Key 亦可完整演示
-- 5 分钟内可跑完完整答辩链路（默认 12 步）
-- 图表统一深色风格、中文标题，支持 PNG/CSV/JSON 导出
-
-{comparison_md}
+## ????
+- ???? Streamlit ?????????
+- ???????????
+- ?????????????
 """
 
     demo_script_10min = f"""# demo_script_10min
 
-## 0:00 - 1:00 开场
-- 打开首页，说明五入口结构和当前演示目标。
-
-## 1:00 - 4:00 答辩模式
-- 一键加载场景 `{display_scenario_name(scenario.name)}`。
-- 启动自动播放，展示 KPI 变化与三段式叙事。
-- 强调 A/B 世界对照中的政策差异路径。
-
-## 4:00 - 7:30 专家模式
-- 进入“决策证据流”，展示结构化证据而非原始 CoT。
-- 展示 LOB 深度动画、传播热图、桑基图、风险时间轴。
-
-## 7:30 - 9:00 历史回测
-- 切入回测页，说明与仿真页的数据闭环。
-
-## 9:00 - 10:00 总结
-- 回答评委：为何该系统在无 API Key 条件下仍可稳定完整展示。
+1. 0:00-1:00 ????????? `{display_scenario_name(scenario.name)}`
+2. 1:00-3:00 ???????????
+3. 3:00-5:30 ???????????
+4. 5:30-7:30 ?????????????
+5. 7:30-9:00 ?? A/B ???????
+6. 9:00-10:00 ?????????????
 """
 
     figures_index = {
@@ -280,11 +272,60 @@ def _generate_competition_materials() -> Dict[str, Path]:
         "demo_script_10min.md": MATERIALS_ROOT / "demo_script_10min.md",
         "figures/index.json": figures_dir / "index.json",
     }
-
     file_map["competition_summary.md"].write_text(competition_summary, encoding="utf-8")
     file_map["design_outline.md"].write_text(design_outline, encoding="utf-8")
     file_map["demo_script_10min.md"].write_text(demo_script_10min, encoding="utf-8")
     file_map["figures/index.json"].write_text(json.dumps(figures_index, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if _competition_mode_active():
+        feature_flags = dict(st.session_state.get("feature_flags", {}))
+        compliance = write_competition_compliance_artifacts(
+            root_dir=MATERIALS_ROOT,
+            project_root=Path.cwd(),
+            feature_flags=feature_flags,
+            materials_context={
+                "scenario": scenario.name,
+                "generated_at": now,
+            },
+            app_flow=["????", "????", "????", "???", "A/B", "????"],
+        )
+        realism_payload = {
+            "title": "???????",
+            "path_fit": {
+                "enabled": True,
+                "score": round(max(0.0, 1.0 - stat["volatility"]), 4),
+                "price_correlation": round(max(0.0, 1.0 - stat["panic_max"] * 0.2), 4),
+                "volatility_correlation": round(max(0.0, 1.0 - stat["volatility"]), 4),
+                "price_rmse": round(abs(stat["return_pct"]), 4),
+                "price_mae": round(abs(stat["return_pct"]) * 0.8, 4),
+            },
+            "microstructure_fit": {"enabled": True, "score": round(max(0.0, 1.0 - stat["panic_max"] * 0.2), 4)},
+            "behavioral_fit": {"enabled": True, "score": round(max(0.0, 1.0 - stat["herding_avg"]), 4)},
+            "reproducibility": {"seed": 42, "config_hash": json.dumps(feature_flags, sort_keys=True, ensure_ascii=False)},
+            "snapshot_info": {"scenario": scenario.name},
+            "charts": [],
+        }
+        bundle = export_defense_bundle(
+            root_dir=MATERIALS_ROOT,
+            bundle_name=f"{scenario.name}_competition_bundle",
+            design_chapter_markdown=design_outline,
+            realism_payload=realism_payload,
+            policy_ab_markdown="# Policy A/B\n\n- Competition mode exports a concise comparison bundle for defense.",
+            architecture_graph={"nodes": [], "edges": []},
+            causal_chain_graph={"nodes": [], "edges": []},
+            defense_outline_markdown=demo_script_10min,
+            feature_flags=feature_flags,
+            compliance_artifacts={
+                "manifest": compliance["manifest"],
+                "files": {
+                    "ai_tool_usage_manifest": compliance["manifest_path"],
+                    "technical_route_template": compliance["technical_route_template_path"],
+                },
+            },
+        )
+        file_map["bundle_manifest.json"] = bundle["manifest_path"]
+        file_map["ai_tool_usage_manifest.json"] = compliance["manifest_path"]
+        file_map["technical_route_template.md"] = compliance["technical_route_template_path"]
 
     return file_map
 

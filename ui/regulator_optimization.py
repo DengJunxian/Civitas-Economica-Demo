@@ -1,7 +1,8 @@
-"""Dedicated regulator optimization page with A/B and Pareto visualization."""
+﻿"""Dedicated regulator optimization page with A/B and Pareto visualization."""
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List
 
 import pandas as pd
@@ -23,18 +24,35 @@ def _safe_rows(items: Any) -> List[Dict[str, Any]]:
 
 def _build_regulator_result_frames(result: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
     counterfactual = result.get("counterfactual_ab", {}) if isinstance(result, dict) else {}
+    recommendation = result.get("recommendation", {}) if isinstance(result, dict) else {}
     baseline = counterfactual.get("baseline", {}) if isinstance(counterfactual, dict) else {}
     candidates = _safe_rows(counterfactual.get("candidates"))
     deltas = _safe_rows(counterfactual.get("deltas"))
     pareto = _safe_rows(result.get("pareto_frontier"))
+    evidence = _safe_rows(recommendation.get("evidence_chain"))
 
     baseline_df = pd.DataFrame([baseline]) if isinstance(baseline, dict) and baseline else pd.DataFrame()
     candidates_df = pd.DataFrame(candidates)
     deltas_df = pd.DataFrame(deltas)
     pareto_df = pd.DataFrame(pareto)
+    recommendation_df = (
+        pd.DataFrame([recommendation.get("scorecard", {})])
+        if isinstance(recommendation, dict) and recommendation.get("scorecard")
+        else pd.DataFrame()
+    )
+    evidence_df = pd.DataFrame(evidence)
 
-    for frame in (baseline_df, candidates_df, deltas_df, pareto_df):
-        for col in ("macro_stability", "liquidity", "intervention_cost", "avg_reward"):
+    for frame in (baseline_df, candidates_df, deltas_df, pareto_df, recommendation_df, evidence_df):
+        for col in (
+            "macro_stability",
+            "liquidity",
+            "intervention_cost",
+            "avg_reward",
+            "financing_function",
+            "fairness_compliance",
+            "composite_score",
+            "delta",
+        ):
             if col in frame.columns:
                 frame[col] = pd.to_numeric(frame[col], errors="coerce").fillna(0.0)
 
@@ -43,12 +61,14 @@ def _build_regulator_result_frames(result: Dict[str, Any]) -> Dict[str, pd.DataF
         "candidates": candidates_df,
         "deltas": deltas_df,
         "pareto": pareto_df,
+        "recommendation": recommendation_df,
+        "evidence": evidence_df,
     }
 
 
 def render_regulator_optimization() -> None:
     st.markdown("## 监管优化")
-    st.caption("独立监管优化页面：输出 A/B 反事实与 Pareto 前沿（稳市场-流动性-成本）。")
+    st.caption("独立监管优化页：默认优先真实环境，输出 A/B、Pareto、推荐方案与证据链。")
 
     with st.form("regulator_optimization_form", clear_on_submit=False):
         left, right = st.columns(2)
@@ -58,8 +78,8 @@ def render_regulator_optimization() -> None:
             top_k = st.slider("候选动作 Top-K", min_value=1, max_value=5, value=3, step=1)
         with right:
             seed = int(st.number_input("随机种子", min_value=0, max_value=2_147_483_647, value=42, step=1))
-            use_toy_env = st.toggle("Use toy env (fallback)", value=True)
-            st.caption("默认先用 toy env 可复现运行；真实环境可后续接入 env_factory。")
+            use_toy_env = st.toggle("Use toy env directly", value=False)
+            st.caption("默认优先 real_env_factory；真实环境初始化失败时，自动回退 toy env。")
         submitted = st.form_submit_button("运行监管优化", use_container_width=True, type="primary")
 
     if submitted:
@@ -75,16 +95,17 @@ def render_regulator_optimization() -> None:
 
     result = st.session_state.get(_REGULATOR_RESULT_STATE_KEY)
     if not isinstance(result, dict):
-        st.info("先运行一次优化以查看 A/B 与 Pareto 可视化。")
+        st.info("先运行一次优化以查看 A/B、Pareto 和推荐证据链。")
         return
 
     summary = result.get("training_summary", {}) if isinstance(result, dict) else {}
     reproducibility = result.get("reproducibility", {}) if isinstance(result, dict) else {}
+    recommendation = result.get("recommendation", {}) if isinstance(result, dict) else {}
     frames = _build_regulator_result_frames(result)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("平均 episode reward", f"{float(summary.get('avg_episode_reward', 0.0)):.4f}")
-    c2.metric("最佳动作得分", f"{float(summary.get('best_action_score', 0.0)):.4f}")
+    c2.metric("最优动作得分", f"{float(summary.get('best_action_score', 0.0)):.4f}")
     c3.metric("Pareto 点数", str(len(frames["pareto"])))
     c4.metric("Q 状态数", str(int(summary.get("q_states", 0))))
 
@@ -95,6 +116,13 @@ def render_regulator_optimization() -> None:
         f"episodes={reproducibility.get('episodes', 0)} | "
         f"max_steps={reproducibility.get('max_steps_per_episode', 0)}"
     )
+    env_selection = reproducibility.get("env_selection", {}) if isinstance(reproducibility, dict) else {}
+    if isinstance(env_selection, dict) and env_selection:
+        st.caption(
+            "environment: "
+            f"path={env_selection.get('selected_path', '')} | "
+            f"fallback={env_selection.get('fallback_used', False)}"
+        )
 
     st.markdown("### Counterfactual A/B")
     left, right = st.columns(2)
@@ -128,9 +156,43 @@ def render_regulator_optimization() -> None:
         st.plotly_chart(fig, use_container_width=True)
         st.dataframe(pareto_df, use_container_width=True, hide_index=True)
 
+    st.markdown("### Recommendation And Evidence")
+    left, right = st.columns(2)
+    with left:
+        st.json(
+            {
+                "action_description": recommendation.get("action_description", ""),
+                "tradeoff_summary": recommendation.get("tradeoff_summary", ""),
+                "side_effects": recommendation.get("side_effects", []),
+            }
+        )
+        if not frames["recommendation"].empty:
+            st.dataframe(frames["recommendation"], use_container_width=True, hide_index=True)
+    with right:
+        if not frames["evidence"].empty:
+            st.dataframe(frames["evidence"], use_container_width=True, hide_index=True)
+        else:
+            st.info("No recommendation evidence available.")
+
     if not frames["candidates"].empty:
         st.markdown("### Candidate Bundles")
         st.dataframe(frames["candidates"], use_container_width=True, hide_index=True)
+
+    export_cols = st.columns(2)
+    export_cols[0].download_button(
+        "Download regulator result JSON",
+        data=json.dumps(result, ensure_ascii=False, indent=2),
+        file_name="regulator_optimization_result.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+    export_cols[1].download_button(
+        "Download Pareto CSV",
+        data=frames["pareto"].to_csv(index=False).encode("utf-8"),
+        file_name="regulator_pareto.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
 
 
 __all__ = ["REGULATOR_OPTIMIZATION_PAGE_FLAG", "_build_regulator_result_frames", "render_regulator_optimization"]

@@ -236,33 +236,33 @@ def _compute_policy_summary(metrics: pd.DataFrame) -> Dict[str, float]:
 
 def _build_chart(frame: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=frame["time"], y=frame["close"], mode="lines+markers", name="Index close"))
-    fig.add_trace(go.Bar(x=frame["time"], y=frame["volume"], name="Volume", opacity=0.25, yaxis="y2"))
+    fig.add_trace(go.Scatter(x=frame["time"], y=frame["close"], mode="lines+markers", name="指数收盘"))
+    fig.add_trace(go.Bar(x=frame["time"], y=frame["volume"], name="成交量", opacity=0.25, yaxis="y2"))
     fig.update_layout(
         margin=dict(l=10, r=10, t=10, b=10),
-        xaxis_title="Date",
-        yaxis_title="Close",
-        yaxis2=dict(title="Volume", overlaying="y", side="right", showgrid=False),
+        xaxis_title="日期",
+        yaxis_title="收盘价",
+        yaxis2=dict(title="成交量", overlaying="y", side="right", showgrid=False),
         legend=dict(orientation="h", y=1.02),
     )
     return fig
 
 
 def render_policy_lab() -> None:
-    st.subheader("Policy Lab")
+    st.subheader("政策实验台")
 
     templates = _load_policy_templates()
     template_map = {str(item.get("title", f"template-{idx}")): item for idx, item in enumerate(templates)}
-    selected_title = st.selectbox("Template", options=list(template_map.keys()), index=0)
+    selected_title = st.selectbox("模板", options=list(template_map.keys()), index=0)
     selected = template_map[selected_title]
 
-    policy_text = st.text_area("Policy text", value=str(selected.get("policy_text", "")), height=110)
-    intensity = st.slider("Policy intensity", min_value=0.2, max_value=2.0, value=float(selected.get("recommended_intensity", 1.0)), step=0.1)
-    duration_days = st.slider("Duration (days)", min_value=10, max_value=180, value=int(selected.get("recommended_duration", 30)), step=5)
-    rumor_noise = st.checkbox("Inject rumor noise", value=bool(selected.get("default_rumor_noise", False)))
+    policy_text = st.text_area("政策文本", value=str(selected.get("policy_text", "")), height=110)
+    intensity = st.slider("政策强度", min_value=0.2, max_value=2.0, value=float(selected.get("recommended_intensity", 1.0)), step=0.1)
+    duration_days = st.slider("持续天数", min_value=10, max_value=180, value=int(selected.get("recommended_duration", 30)), step=5)
+    rumor_noise = st.checkbox("注入传言噪声", value=bool(selected.get("default_rumor_noise", False)))
 
-    if st.button("Run policy scenario", type="primary"):
-        with st.spinner("Running policy simulation..."):
+    if st.button("运行政策场景", type="primary"):
+        with st.spinner("正在运行政策仿真..."):
             frame = _generate_policy_metrics(
                 policy_text=policy_text,
                 intensity=float(intensity),
@@ -282,7 +282,7 @@ def render_policy_lab() -> None:
             st.session_state.policy_lab_result["policy_package"] = package_dict
 
             report_payload = {
-                "title": f"Policy Lab - {selected_title}",
+                "title": f"政策实验台 - {selected_title}",
                 "summary": summary,
                 "policy_text": policy_text,
                 "metrics": frame.to_dict(orient="records"),
@@ -291,7 +291,7 @@ def render_policy_lab() -> None:
                 "transmission_graph": package_dict.get("transmission_graph", {}),
                 "why_this_happened": package_dict.get("explanation", {}),
             }
-            report_meta = official_report_meta(module_name="policy_lab", title=f"Policy Lab - {selected_title}")
+            report_meta = official_report_meta(module_name="policy_lab", title=f"政策实验台 - {selected_title}")
             bundle = write_report_artifacts(
                 report_payload,
                 meta=report_meta,
@@ -311,17 +311,17 @@ def render_policy_lab() -> None:
 
     result = st.session_state.get("policy_lab_result")
     if not result:
-        st.info("Run a scenario to generate policy transmission outputs and report artifacts.")
+        st.info("运行一个场景后，这里会生成政策传导结果和报告材料。")
         return
 
     frame = result["frame"]
     summary = result["summary"]
 
     cols = st.columns(4)
-    cols[0].metric("Return", f"{summary['return_pct'] * 100:.2f}%")
-    cols[1].metric("Avg panic", f"{summary['avg_panic']:.3f}")
-    cols[2].metric("Max drawdown", f"{summary['max_drawdown'] * 100:.2f}%")
-    cols[3].metric("Volatility", f"{summary['volatility']:.4f}")
+    cols[0].metric("收益率", f"{summary['return_pct'] * 100:.2f}%")
+    cols[1].metric("平均恐慌度", f"{summary['avg_panic']:.3f}")
+    cols[2].metric("最大回撤", f"{summary['max_drawdown'] * 100:.2f}%")
+    cols[3].metric("波动率", f"{summary['volatility']:.4f}")
 
     st.plotly_chart(_build_chart(frame), use_container_width=True)
     dashboard_ui.render_market_snapshot(frame.rename(columns={"close": "price"}) if "price" not in frame.columns else frame)
@@ -329,7 +329,7 @@ def render_policy_lab() -> None:
     package_dict = result.get("policy_package") or {}
     explanation = package_dict.get("explanation", {})
     if package_dict:
-        st.markdown("#### Why This Happened")
+        st.markdown("#### 成因解读")
         st.json(
             {
                 "policy_schema": package_dict.get("policy_schema", {}),
@@ -341,4 +341,4 @@ def render_policy_lab() -> None:
 
     bundle = st.session_state.get("policy_lab_bundle")
     if bundle:
-        st.caption(f"Report exported: {bundle.get('json_path')}")
+        st.caption(f"报告已导出：{bundle.get('json_path')}")

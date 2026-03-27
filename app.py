@@ -47,7 +47,7 @@ st.set_page_config(
 ENTRY_POINTS = [
     "政策试验台",
     "历史因子回测",
-    "历史Agent回放",
+    "历史智能体回放",
     "真实性报告",
     "政策A/B推演",
     "监管优化",
@@ -56,11 +56,12 @@ ENTRY_POINTS = [
 ENTRY_ALIASES = {
     "历史政策回放": "历史因子回测",
     "高级分析": "真实性报告",
+    "历史Agent回放": "历史智能体回放",
 }
 ENTRY_DESCRIPTIONS = {
     "政策试验台": "输入新政策，观察市场、风险与情绪如何联动变化。",
     "历史因子回测": "保留传统因子/组合回测能力，用于基准对照。",
-    "历史Agent回放": "在历史窗口重放 agent 决策与撮合成交，并输出 simulated OHLCV。",
+    "历史智能体回放": "在历史窗口重放智能体决策与撮合成交，并输出模拟 K 线量价数据。",
     "真实性报告": "查看路径拟合、微观结构拟合、行为模式拟合及可解释差异。",
     "政策A/B推演": "同一政策在不同干预方案下做对照实验，支持答辩展示。",
     "监管优化": "面向监管目标做动作搜索，输出稳市场-流动性-成本权衡。",
@@ -69,7 +70,7 @@ ENTRY_DESCRIPTIONS = {
 ENTRY_PURPOSE = {
     "政策试验台": "输入政策并运行多智能体仿真",
     "历史因子回测": "因子与组合回测对照",
-    "历史Agent回放": "真实成交驱动的历史重放",
+    "历史智能体回放": "真实成交驱动的历史重放",
     "真实性报告": "解释哪里像真、哪里不像真",
     "政策A/B推演": "政策组合对照与机制解释",
     "监管优化": "监管动作优化与权衡分析",
@@ -150,8 +151,8 @@ def _render_top_entry_selector() -> None:
             <h1 style="font-size: 2.4rem; font-weight: 700; color: #e2e8f0; margin-bottom: 0.5rem; letter-spacing: 2px; text-shadow: 0 0 20px rgba(24,144,255,0.4);">
                 数治观澜 <span style="font-size: 1.4rem; font-weight: 400; color: #8aa0c2; text-shadow: none;">—— 基于大模型多智能体的金融政策风动推演沙箱</span>
             </h1>
-            <div style="font-size: 15px; color: #4da6ff; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 600;">
-                Civitas Policy Sandbox 
+            <div style="font-size: 15px; color: #4da6ff; letter-spacing: 1.5px; font-weight: 600;">
+                Civitas 政策沙箱
             </div>
         </div>
         """,
@@ -287,7 +288,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
                 "scenario": scenario.name,
                 "generated_at": now,
             },
-            app_flow=["政策试验台", "历史因子回测", "历史Agent回放", "真实性报告", "政策A/B推演", "监管优化"],
+            app_flow=["政策试验台", "历史因子回测", "历史智能体回放", "真实性报告", "政策A/B推演", "监管优化"],
         )
         realism_payload = {
             "title": "真实性评估摘要",
@@ -392,7 +393,7 @@ def _render_sidebar_global() -> None:
 
 
 def _render_ai_decision_tab() -> None:
-    st.markdown("### AI 决策解读")
+    st.markdown("### 智能决策解读")
     st.caption("这里保留专家级视角，用于追问时查看结构化证据，而非普通用户默认入口。")
     _ensure_demo_loaded()
     scenario = st.session_state.demo_scenario
@@ -444,7 +445,7 @@ def _render_advanced_analysis() -> None:
     st.session_state.runtime_mode = DEMO_MODE
     st.markdown("## 高级分析")
     st.caption("这里保留专家追问、答辩演示、行为金融诊断和研究参数面板。")
-    tab1, tab2, tab3, tab4 = st.tabs(["AI 决策解读", "市场行为分析", "答辩演示", "研究参数"])
+    tab1, tab2, tab3, tab4 = st.tabs(["智能决策解读", "市场行为分析", "答辩演示", "研究参数"])
 
     with tab1:
         _render_ai_decision_tab()
@@ -493,7 +494,7 @@ def _render_system_guide() -> None:
         #### 2.3 🔬 高级分析 (Advanced Analysis)
         - **用途：** 面向风控专家与架构师，提供最详细的模型执行逻辑追踪、行为金融学深度诊断，并支持对底层 Agent 控制参数的大规模调优。
         - **核心子面板包含：**
-          - **AI 决策解读**：专家界面不展示枯燥的原始 JSON 日志，而是直观展示底层 Agent（如分析师、策略经理）组成的“决策证据链”。
+          - **智能决策解读**：专家界面不展示枯燥的原始 JSON 日志，而是直观展示底层智能体（如分析师、策略经理）组成的“决策证据链”。
           - **市场行为分析**：包含订单簿 (LOB) 逐笔交易深度动画、社会网络中传播的情绪热图以及政策传导桑基图。
           - **研究参数与调试**：包含更硬核的控制参数（例如：机构交易员容忍度、噪音分子比例等），可用来对宏观市场施加压力测试或故障注入。
         
@@ -523,7 +524,7 @@ def main() -> None:
         st.session_state.runtime_mode = LIVE_MODE
         st.session_state["history_replay_entry_mode"] = "factor"
         render_history_replay()
-    elif entry == "历史Agent回放":
+    elif entry == "历史智能体回放":
         st.session_state.runtime_mode = LIVE_MODE
         st.session_state["history_replay_entry_mode"] = "agent"
         render_history_replay()

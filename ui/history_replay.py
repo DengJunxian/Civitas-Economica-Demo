@@ -294,12 +294,16 @@ def _build_replay_metrics(result: BacktestResult) -> Dict[str, float]:
 
 def _build_bias_explanation(metrics: Dict[str, float], policy_name: str) -> str:
     if metrics["trend_alignment"] >= 0.65 and metrics["drawdown_gap"] <= 0.05:
-        return f"{policy_name}: path shape is close to the historical series."
+        return f"{policy_name}：路径形态与历史序列较为接近。"
     if metrics["trend_alignment"] < 0.5:
-        return f"{policy_name}: direction alignment is weak, so the replay is likely over/under-reacting."
+        return f"{policy_name}：方向一致性偏弱，回放结果可能存在过度或不足反应。"
     if metrics["response_gap"] > 8:
-        return f"{policy_name}: response timing is lagging the historical move."
-    return f"{policy_name}: usable for policy mechanism comparison, but not a day-by-day clone."
+        return f"{policy_name}：响应时点明显滞后于历史走势。"
+    return f"{policy_name}：适合用于政策机制对比，但并非逐日精确复刻。"
+
+
+def _engine_mode_label(mode: str) -> str:
+    return "智能体模式" if mode == "agent" else "因子模式"
 
 
 def _compute_result_summary(result: BacktestResult) -> Dict[str, float]:
@@ -318,7 +322,7 @@ def _select_replay_engine(config: BacktestConfig, engine_mode: str, feature_flag
     if engine_mode == "agent" and agent_enabled:
         return AgentReplayEngine(config), "agent", ""
     if engine_mode == "agent" and not agent_enabled:
-        return FactorBacktestEngine(config), "factor", "Agent replay is disabled by the feature flag; falling back to factor mode."
+        return FactorBacktestEngine(config), "factor", "智能体回放功能开关未开启，已自动回退为因子模式。"
     return FactorBacktestEngine(config), "factor", ""
 
 
@@ -343,17 +347,17 @@ def _render_comparison_chart(result: BacktestResult, baseline: Optional[Backtest
         frame["baseline"] = baseline.simulated_prices
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=frame["date"], y=frame["real"], mode="lines", name="Real", line=dict(color="#8ec5ff", width=2.4)))
-    fig.add_trace(go.Scatter(x=frame["date"], y=frame["simulated"], mode="lines", name="Simulated", line=dict(color="#35d07f", width=2.4)))
+    fig.add_trace(go.Scatter(x=frame["date"], y=frame["real"], mode="lines", name="真实走势", line=dict(color="#8ec5ff", width=2.4)))
+    fig.add_trace(go.Scatter(x=frame["date"], y=frame["simulated"], mode="lines", name="模拟走势", line=dict(color="#35d07f", width=2.4)))
     if "baseline" in frame:
-        fig.add_trace(go.Scatter(x=frame["date"], y=frame["baseline"], mode="lines", name="Baseline", line=dict(color="#f59e0b", width=2.2, dash="dash")))
+        fig.add_trace(go.Scatter(x=frame["date"], y=frame["baseline"], mode="lines", name="基线", line=dict(color="#f59e0b", width=2.2, dash="dash")))
     if not frame.empty:
         fig.add_vline(x=frame["date"].iloc[0], line_color="#f59e0b", line_dash="dot")
     fig.update_layout(
         **dashboard_ui.PLOTLY_DARK_LAYOUT,
-        title="Real vs Simulated",
-        yaxis=dict(title="Index level"),
-        xaxis=dict(title="Date"),
+        title="真实走势 vs 模拟走势",
+        yaxis=dict(title="指数点位"),
+        xaxis=dict(title="日期"),
         height=420,
         legend=dict(orientation="h"),
     )
@@ -364,11 +368,11 @@ def _render_comparison_chart(result: BacktestResult, baseline: Optional[Backtest
 def _render_metric_cards(result: BacktestResult, metrics: Dict[str, float]) -> None:
     cols = st.columns(5)
     cards = [
-        ("Trend alignment", f"{metrics['trend_alignment']:.0%}", "Direction match"),
-        ("Turning points", f"{metrics['turning_point_match']:.0%}", "Regime flips"),
-        ("Drawdown gap", f"{metrics['drawdown_gap']:.2%}", "Closer is better"),
-        ("Vol similarity", f"{metrics['vol_similarity']:.0%}", "Volatility regime"),
-        ("Response lag", f"{metrics['response_gap']:.0f}d", "Timing offset"),
+        ("趋势一致性", f"{metrics['trend_alignment']:.0%}", "方向匹配程度"),
+        ("拐点匹配", f"{metrics['turning_point_match']:.0%}", "阶段切换识别"),
+        ("回撤差距", f"{metrics['drawdown_gap']:.2%}", "越接近越好"),
+        ("波动相似度", f"{metrics['vol_similarity']:.0%}", "波动状态匹配"),
+        ("响应滞后", f"{metrics['response_gap']:.0f}天", "时点偏移"),
     ]
     for idx, (title, value, note) in enumerate(cards):
         with cols[idx]:
@@ -388,10 +392,10 @@ def _render_baseline_delta_cards(result: BacktestResult, baseline: Optional[Back
     if not baseline:
         return
     cards = [
-        ("Relative return", f"{result.total_return - baseline.total_return:+.2%}", "Against no-policy baseline"),
-        ("Drawdown improvement", f"{baseline.max_drawdown - result.max_drawdown:+.2%}", "Positive is better"),
-        ("Excess return", f"{result.excess_return:+.2%}", "vs benchmark"),
-        ("Vol calibration lift", f"{result.volatility_correlation - baseline.volatility_correlation:+.0%}", "Vol regime fit"),
+        ("相对收益", f"{result.total_return - baseline.total_return:+.2%}", "对比无政策基线"),
+        ("回撤改善", f"{baseline.max_drawdown - result.max_drawdown:+.2%}", "正值更优"),
+        ("超额收益", f"{result.excess_return:+.2%}", "相对基准"),
+        ("波动校准提升", f"{result.volatility_correlation - baseline.volatility_correlation:+.0%}", "波动状态拟合"),
     ]
     cols = st.columns(len(cards))
     for idx, (title, value, note) in enumerate(cards):
@@ -415,31 +419,31 @@ def _build_replay_brief(bundle: Dict[str, Any], metrics: Dict[str, float]) -> Li
     stylized = layers.get("stylized_facts", {})
     return [
         {
-            "title": "Path fit",
-            "summary": "Checks the line shape and timing against the real series.",
+            "title": "路径拟合",
+            "summary": "检查路径形态和时序与真实序列的接近程度。",
             "lines": [
-                f"Mode: {engine_mode}",
-                f"Trend alignment: {metrics['trend_alignment']:.0%}",
-                f"Turning-point F1 proxy: {metrics['turning_point_match']:.0%}",
+                f"模式：{_engine_mode_label(engine_mode)}",
+                f"趋势一致性：{metrics['trend_alignment']:.0%}",
+                f"拐点匹配代理值：{metrics['turning_point_match']:.0%}",
             ],
         },
         {
-            "title": "Microstructure fit",
-            "summary": "Focuses on OHLCV consistency and trade-tape behavior.",
+            "title": "微观结构拟合",
+            "summary": "关注 OHLCV 一致性与成交轨迹行为。",
             "lines": [
-                f"Range fit: {micro.get('range_fit', 0.0):.0%}",
-                f"Cancel-rate proxy: {micro.get('cancel_rate_proxy', 0.0):.0%}",
-                "Agent mode uses trade-tape close for simulated prices.",
+                f"区间拟合：{micro.get('range_fit', 0.0):.0%}",
+                f"撤单率代理值：{micro.get('cancel_rate_proxy', 0.0):.0%}",
+                "智能体模式使用成交轨迹收盘价作为模拟价格。",
             ],
         },
         {
-            "title": "Behavioral fit",
-            "summary": "Explains whether the replay reacts like a policy-driven market.",
+            "title": "行为拟合",
+            "summary": "解释回放是否呈现出政策驱动市场的反应特征。",
             "lines": [
-                f"Response lag: {metrics['response_gap']:.0f} days",
-                f"Tail fit: {stylized.get('tail_fit', 0.0):.0%}",
-                f"Feature flags: {bundle.get('feature_flags', {})}",
-                "This is for comparison and defense, not a pixel-perfect clone.",
+                f"响应滞后：{metrics['response_gap']:.0f} 天",
+                f"尾部分布拟合：{stylized.get('tail_fit', 0.0):.0%}",
+                f"功能开关：{bundle.get('feature_flags', {})}",
+                "该结果用于对比与答辩，不是像素级历史复刻。",
             ],
         },
     ]
@@ -465,35 +469,35 @@ def _render_replay_brief(cards: List[Dict[str, Any]]) -> None:
 def _render_agent_readout(policy_text: str, result: BacktestResult, metrics: Dict[str, float]) -> None:
     cards = [
         (
-            "Policy analysis",
-            "The policy text is mapped into a scalar shock that drives the replay.",
+            "政策分析",
+            "政策文本会被映射为标量冲击，用于驱动回放。",
             [
-                f"Policy text length: {len(policy_text)}",
-                f"Trend alignment: {metrics['trend_alignment']:.0%}",
+                f"政策文本长度：{len(policy_text)}",
+                f"趋势一致性：{metrics['trend_alignment']:.0%}",
             ],
         ),
         (
-            "Quant analysis",
-            "The replay is judged on path fit, timing, and volatility regime.",
+            "量化分析",
+            "主要从路径拟合、时序匹配与波动状态三方面评估回放。",
             [
-                f"Price correlation: {result.price_correlation:.3f}",
-                f"Volatility correlation: {result.volatility_correlation:.3f}",
+                f"价格相关性：{result.price_correlation:.3f}",
+                f"波动相关性：{result.volatility_correlation:.3f}",
             ],
         ),
         (
-            "Risk analysis",
-            "A stronger replay should avoid large drawdown and response gaps.",
+            "风险分析",
+            "更可信的回放应尽量避免过大的回撤和明显的响应滞后。",
             [
-                f"Drawdown gap: {metrics['drawdown_gap']:.2%}",
-                f"Response lag: {metrics['response_gap']:.0f}d",
+                f"回撤差距：{metrics['drawdown_gap']:.2%}",
+                f"响应滞后：{metrics['response_gap']:.0f}天",
             ],
         ),
         (
-            "Final review",
-            "Use the report to explain what fits and what still diverges.",
+            "最终结论",
+            "可结合报告说明哪些部分拟合得较好，哪些部分仍有偏差。",
             [
-                f"Simulated prices: {len(result.simulated_prices)}",
-                f"Trade tape rows: {len(result.trade_log)}",
+                f"模拟价格点数：{len(result.simulated_prices)}",
+                f"成交轨迹条数：{len(result.trade_log)}",
             ],
         ),
     ]
@@ -627,10 +631,10 @@ def _render_report_export(export_bundle: Dict[str, Any]) -> None:
         st.markdown(
             f"""
             <div class="summary-card">
-              <div class="summary-label">Report generated</div>
+              <div class="summary-label">报告已生成</div>
               <div class="summary-value">{report_meta.get('title', export_bundle['stem'])}</div>
-              <div class="summary-note">No: {report_meta.get('report_no', export_bundle['stem'])}</div>
-              <div class="summary-note">Recipient: {report_meta.get('recipient', '')}</div>
+              <div class="summary-note">编号：{report_meta.get('report_no', export_bundle['stem'])}</div>
+              <div class="summary-note">收件方：{report_meta.get('recipient', '')}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -640,7 +644,7 @@ def _render_report_export(export_bundle: Dict[str, Any]) -> None:
         bottom_row = st.columns(3)
         with top_row[0]:
             st.download_button(
-                "Download Word",
+                "下载 Word",
                 data=export_bundle["docx_bytes"],
                 file_name=f"{export_bundle['stem']}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -649,7 +653,7 @@ def _render_report_export(export_bundle: Dict[str, Any]) -> None:
             )
         with top_row[1]:
             st.download_button(
-                "Download PDF",
+                "下载 PDF",
                 data=export_bundle["pdf_bytes"],
                 file_name=f"{export_bundle['stem']}.pdf",
                 mime="application/pdf",
@@ -658,7 +662,7 @@ def _render_report_export(export_bundle: Dict[str, Any]) -> None:
             )
         with top_row[2]:
             st.download_button(
-                "Download CSV",
+                "下载 CSV",
                 data=export_bundle["csv_text"],
                 file_name=f"{export_bundle['stem']}_metrics.csv",
                 mime="text/csv",
@@ -667,7 +671,7 @@ def _render_report_export(export_bundle: Dict[str, Any]) -> None:
             )
         with bottom_row[0]:
             st.download_button(
-                "Download Markdown",
+                "下载 Markdown",
                 data=export_bundle["markdown_text"],
                 file_name=f"{export_bundle['stem']}.md",
                 mime="text/markdown",
@@ -676,7 +680,7 @@ def _render_report_export(export_bundle: Dict[str, Any]) -> None:
             )
         with bottom_row[1]:
             st.download_button(
-                "Download JSON",
+                "下载 JSON",
                 data=export_bundle["json_text"],
                 file_name=f"{export_bundle['stem']}.json",
                 mime="application/json",
@@ -685,7 +689,7 @@ def _render_report_export(export_bundle: Dict[str, Any]) -> None:
             )
         with bottom_row[2]:
             st.download_button(
-                "Download Chart Data",
+                "下载图表数据",
                 data=export_bundle["charts_text"],
                 file_name=f"{export_bundle['stem']}_charts.json",
                 mime="application/json",
@@ -698,9 +702,9 @@ def render_history_replay() -> None:
     st.markdown(
         """
         <div class="hero-panel">
-          <div class="hero-kicker">History Playback</div>
+          <div class="hero-kicker">历史回放</div>
           <h1>政策因子回测/历史对照回测</h1>
-          <p>Factor mode stays compatible with the old UI. Agent replay is behind a feature flag and uses trade-tape closes.</p>
+          <p>因子模式兼容旧版界面；智能体回放通过功能开关启用，并使用成交轨迹收盘价。</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -712,10 +716,10 @@ def render_history_replay() -> None:
     template_map = {item["title"]: item for item in _load_policy_templates()}
     history_case_templates = _load_history_case_templates()
     history_case_map = {item["title"]: item for item in history_case_templates}
-    selected_template_label = st.selectbox("Template", options=list(template_map.keys()), index=0)
+    selected_template_label = st.selectbox("模板", options=list(template_map.keys()), index=0)
     selected_template = template_map[selected_template_label]
-    selected_history_case_label = st.selectbox("History case", options=["None"] + list(history_case_map.keys()), index=0)
-    selected_history_case = history_case_map.get(selected_history_case_label) if selected_history_case_label != "None" else None
+    selected_history_case_label = st.selectbox("历史案例", options=["无"] + list(history_case_map.keys()), index=0)
+    selected_history_case = history_case_map.get(selected_history_case_label) if selected_history_case_label != "无" else None
     entry_mode = str(st.session_state.get("history_replay_entry_mode", "factor")).strip().lower()
     default_engine_mode = "agent" if entry_mode == "agent" else "factor"
 
@@ -730,8 +734,8 @@ def render_history_replay() -> None:
     with st.form("history_replay_form"):
         col1, col2 = st.columns([1.2, 1.0])
         with col1:
-            start_date = st.date_input("Start date", value=default_start)
-            end_date = st.date_input("End date", value=default_end)
+            start_date = st.date_input("开始日期", value=default_start)
+            end_date = st.date_input("结束日期", value=default_end)
             default_symbol_index = 1
             if selected_history_case and selected_history_case.get("symbol"):
                 resolved_index = next(
@@ -743,48 +747,49 @@ def render_history_replay() -> None:
                     default_symbol_index,
                 )
                 default_symbol_index = resolved_index
-            symbol_label = st.selectbox("Index", options=list(INDEX_OPTIONS.keys()), index=default_symbol_index)
-            policy_name_default = f"{selected_template['title']} history replay"
+            symbol_label = st.selectbox("指数", options=list(INDEX_OPTIONS.keys()), index=default_symbol_index)
+            policy_name_default = f"{selected_template['title']} 历史回放"
             if selected_history_case:
-                policy_name_default = f"{selected_history_case['title']} replay"
+                policy_name_default = f"{selected_history_case['title']} 回放"
             policy_text_default = str(selected_history_case.get("policy_text")) if selected_history_case else str(selected_template["policy_text"])
-            policy_name = st.text_input("Policy name", value=policy_name_default)
-            policy_text = st.text_area("Policy text", value=policy_text_default, height=110)
+            policy_name = st.text_input("策略名称", value=policy_name_default)
+            policy_text = st.text_area("政策文本", value=policy_text_default, height=110)
         with col2:
             default_background = selected_history_case.get("background") if selected_history_case else list(BACKGROUND_TEMPLATES.keys())[1]
             background = st.selectbox(
-                "Backdrop",
+                "市场背景",
                 options=list(BACKGROUND_TEMPLATES.keys()),
                 index=list(BACKGROUND_TEMPLATES.keys()).index(default_background) if default_background in BACKGROUND_TEMPLATES else 1,
             )
             strength = st.slider(
-                "Replay intensity",
+                "回放强度",
                 min_value=0.3,
                 max_value=1.6,
                 value=float((selected_history_case or selected_template).get("recommended_intensity", 1.0)),
                 step=0.1,
             )
-            rebalance_frequency = st.select_slider("Rebalance cadence", options=[1, 2, 3, 5, 10], value=5)
-            lookback = st.slider("Lookback window", min_value=10, max_value=80, value=20, step=5)
-            engine_mode = st.radio(
-                "Engine mode",
-                options=["factor", "agent"],
+            rebalance_frequency = st.select_slider("调仓频率", options=[1, 2, 3, 5, 10], value=5)
+            lookback = st.slider("回看窗口", min_value=10, max_value=80, value=20, step=5)
+            engine_mode_label = st.radio(
+                "引擎模式",
+                options=["因子模式", "智能体模式"],
                 horizontal=True,
                 index=1 if default_engine_mode == "agent" else 0,
             )
-            enable_agent_replay = st.toggle("Enable agent replay feature flag", value=False)
-            enable_event_driven_v2 = st.toggle("Enable event-driven replay v2", value=False)
-            enable_rolling_calibration = st.toggle("Enable rolling calibration + OOS", value=False)
-            enable_event_store = st.toggle("Enable EventStore feature flag", value=False)
-            enable_baseline = st.toggle("Include factor baseline", value=True)
-            dataset_version = st.text_input("EventStore dataset_version", value="default")
-            scenario_id = st.text_input("Scenario id (optional)", value="")
-            snapshot_id = st.text_input("Snapshot id (optional)", value="")
-        submitted = st.form_submit_button("Run history replay", use_container_width=True, type="primary")
+            engine_mode = "agent" if engine_mode_label == "智能体模式" else "factor"
+            enable_agent_replay = st.toggle("启用智能体回放功能开关", value=False)
+            enable_event_driven_v2 = st.toggle("启用事件驱动回放第 2 版", value=False)
+            enable_rolling_calibration = st.toggle("启用滚动校准 + 样本外评估", value=False)
+            enable_event_store = st.toggle("启用事件存储功能开关", value=False)
+            enable_baseline = st.toggle("包含因子基线", value=True)
+            dataset_version = st.text_input("事件存储数据集版本", value="default")
+            scenario_id = st.text_input("场景编号（可选）", value="")
+            snapshot_id = st.text_input("快照编号（可选）", value="")
+        submitted = st.form_submit_button("运行历史回放", use_container_width=True, type="primary")
 
     if submitted:
         if start_date >= end_date:
-            st.error("Start date must be earlier than end date.")
+            st.error("开始日期必须早于结束日期。")
             return
 
         progress = st.progress(0.0)
@@ -830,7 +835,7 @@ def render_history_replay() -> None:
                 0.7 if enable_baseline and resolved_mode == "factor" else 1.0,
                 progress,
                 status,
-                "factor backtest" if resolved_mode == "factor" else "agent replay",
+                "因子回测" if resolved_mode == "factor" else "智能体回放",
             )
             if enable_baseline and resolved_mode == "factor":
                 baseline_config = BacktestConfig(**{**config.__dict__, "policy_shock": 0.0})
@@ -841,7 +846,7 @@ def render_history_replay() -> None:
                     1.0,
                     progress,
                     status,
-                    "no-policy baseline",
+                    "无政策基线",
                 )
         finally:
             progress.empty()
@@ -871,49 +876,49 @@ def render_history_replay() -> None:
 
     bundle = st.session_state.history_replay_result
     if not bundle:
-        st.info("Choose a time window and replay mode, then run the replay.")
+        st.info("选择时间窗口和回放模式后，点击运行历史回放。")
         return
 
     result: BacktestResult = bundle["result"]
     if not result or not result.real_prices:
-        st.warning("No usable replay result was produced. Adjust the date window and try again.")
+        st.warning("未生成可用的回放结果，请调整日期窗口后重试。")
         return
 
     metrics = bundle["metrics"]
     baseline = bundle.get("baseline_result")
-    st.markdown(f"### {bundle.get('engine_mode', 'factor').title()} comparison")
+    st.markdown(f"### {_engine_mode_label(bundle.get('engine_mode', 'factor'))}对照")
     _render_comparison_chart(result, baseline if bundle.get("engine_mode") == "factor" else None)
     _render_metric_cards(result, metrics)
     _render_baseline_delta_cards(result, baseline if bundle.get("engine_mode") == "factor" else None)
 
-    st.markdown("### Replay brief")
+    st.markdown("### 回放摘要")
     _render_replay_brief(bundle["replay_cards"])
 
-    st.markdown("### Bias explanation")
+    st.markdown("### 偏差说明")
     st.markdown(
         f"""
         <div class="summary-card">
           <div class="summary-value">{_build_bias_explanation(metrics, bundle['policy_name'])}</div>
-          <div class="summary-note">Agent replay uses the trade-tape close as the simulated price source.</div>
+          <div class="summary-note">智能体回放使用成交轨迹收盘价作为模拟价格来源。</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown("### Model readout")
+    st.markdown("### 模型读数")
     st.markdown(
         f"""
         <div class="summary-card">
-          <div class="summary-label">Mode</div>
-          <div class="summary-value">{bundle.get('engine_mode', 'factor')}</div>
-          <div class="summary-note">Config hash: {result.metadata.get('config_hash', '')}</div>
-          <div class="summary-note">Snapshot: {result.metadata.get('data_snapshot', {}).get('snapshot_id', '')}</div>
-          <div class="summary-note">Price source: {result.metadata.get('simulated_price_source', 'equity_curve_scaled')}</div>
+          <div class="summary-label">模式</div>
+          <div class="summary-value">{_engine_mode_label(bundle.get('engine_mode', 'factor'))}</div>
+          <div class="summary-note">配置哈希：{result.metadata.get('config_hash', '')}</div>
+          <div class="summary-note">快照：{result.metadata.get('data_snapshot', {}).get('snapshot_id', '')}</div>
+          <div class="summary-note">价格来源：{result.metadata.get('simulated_price_source', 'equity_curve_scaled')}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
     _render_agent_readout(bundle["policy_text"], result, metrics)
 
-    st.markdown("### Report export")
+    st.markdown("### 报告导出")
     _render_report_export(bundle["export_bundle"])

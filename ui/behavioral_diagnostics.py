@@ -96,7 +96,7 @@ def _render_social_propagation_report(report: Dict[str, Any]) -> None:
 
 def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
     st.markdown("## 行为金融诊断")
-    st.caption("自动读取仿真输出的 stylized facts，聚焦 CSAD、PGR/PLR、波动聚集、回撤分布与 ATH 异象。")
+    st.caption("自动读取仿真输出的典型事实，聚焦 CSAD、PGR/PLR、波动聚集、回撤分布与历史新高异象。")
 
     path = report_path or Path("outputs") / "stylized_facts_report.json"
     if not path.exists():
@@ -117,21 +117,21 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
     with c3:
         st.metric("PLR", f"{_safe_get(report, ['pgr_plr', 'plr']):.3f}")
     with c4:
-        st.metric("波动聚集(|r| lag1)", f"{_safe_get(report, ['volatility_clustering', 'abs_return_lag1_autocorr']):.3f}")
+        st.metric("波动聚集（|r| 一阶滞后）", f"{_safe_get(report, ['volatility_clustering', 'abs_return_lag1_autocorr']):.3f}")
 
     summary_rows = [
-        {"Metric": "CSAD herding gamma2", "Value": _safe_get(report, ["csad", "herding_regression", "gamma2"])},
-        {"Metric": "Disposition gap (PGR-PLR)", "Value": _safe_get(report, ["pgr_plr", "disposition_gap"])},
-        {"Metric": "ATH outperformance", "Value": _safe_get(report, ["all_time_high_effect", "ath_outperformance"])},
-        {"Metric": "Max drawdown", "Value": _safe_get(report, ["drawdown_distribution", "max_drawdown"])},
-        {"Metric": "Loss-aversion intensity mean", "Value": _safe_get(report, ["loss_aversion_intensity", "mean"])},
+        {"指标": "CSAD 羊群回归 gamma2", "数值": _safe_get(report, ["csad", "herding_regression", "gamma2"])},
+        {"指标": "处置效应差值（PGR-PLR）", "数值": _safe_get(report, ["pgr_plr", "disposition_gap"])},
+        {"指标": "历史新高超额表现", "数值": _safe_get(report, ["all_time_high_effect", "ath_outperformance"])},
+        {"指标": "最大回撤", "数值": _safe_get(report, ["drawdown_distribution", "max_drawdown"])},
+        {"指标": "损失厌恶强度均值", "数值": _safe_get(report, ["loss_aversion_intensity", "mean"])},
     ]
     st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
 
     st.markdown("### 原始报告")
     st.json(report)
     st.download_button(
-        "下载 stylized_facts_report.json",
+        "下载典型事实报告 JSON",
         data=json.dumps(report, ensure_ascii=False, indent=2),
         file_name="stylized_facts_report.json",
         mime="application/json",
@@ -140,7 +140,7 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
 
     # Sensitivity scan panel
     sensitivity_path = Path("outputs") / "parameter_sensitivity.csv"
-    st.markdown("### 参数敏感性（loss_aversion / reference_adaptivity / edge_weight）")
+    st.markdown("### 参数敏感性（损失厌恶 / 参考适应 / 边权重）")
     if sensitivity_path.exists():
         try:
             sens_df = pd.read_csv(sensitivity_path)
@@ -152,7 +152,7 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
                     values="avg_trading_intent",
                     aggfunc="mean",
                 )
-                st.caption("平均 trading intent 热力视图（按 loss_aversion x edge_weight）")
+                st.caption("平均交易意图热力图（按损失厌恶 × 边权重）")
                 st.dataframe(pivot, use_container_width=True)
         except Exception as exc:
             st.warning(f"参数敏感性文件读取失败：{exc}")
@@ -161,7 +161,7 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
 
     # Intervention A/B panel
     ab_path = Path("outputs") / "intervention_effect_report.json"
-    st.markdown("### 干预前 / 干预后 A/B Compare")
+    st.markdown("### 干预前 / 干预后 A/B 对照")
     if ab_path.exists():
         try:
             ab = json.loads(ab_path.read_text(encoding="utf-8"))
@@ -171,11 +171,11 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
             for metric in ("volatility", "mean_abs_return", "abuse_event_rate"):
                 b = float(before.get(metric, 0.0))
                 a = float(after.get(metric, 0.0))
-                rows.append({"Metric": metric, "Before": b, "After": a, "Delta": a - b})
+                rows.append({"指标": metric, "干预前": b, "干预后": a, "变化": a - b})
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
             st.caption(
-                f"Intervention active={ab.get('intervention_active', False)}, "
-                f"tick={ab.get('intervention_tick', 'N/A')}"
+                f"干预是否开启={ab.get('intervention_active', False)}，"
+                f"触发时点={ab.get('intervention_tick', '无')}"
             )
         except Exception as exc:
             st.warning(f"A/B 报告读取失败：{exc}")

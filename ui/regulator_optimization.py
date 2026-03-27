@@ -73,13 +73,13 @@ def render_regulator_optimization() -> None:
     with st.form("regulator_optimization_form", clear_on_submit=False):
         left, right = st.columns(2)
         with left:
-            episodes = st.slider("训练 episodes", min_value=10, max_value=400, value=120, step=10)
+            episodes = st.slider("训练轮数", min_value=10, max_value=400, value=120, step=10)
             max_steps = st.slider("每轮最大步数", min_value=4, max_value=96, value=24, step=4)
-            top_k = st.slider("候选动作 Top-K", min_value=1, max_value=5, value=3, step=1)
+            top_k = st.slider("候选动作数量", min_value=1, max_value=5, value=3, step=1)
         with right:
             seed = int(st.number_input("随机种子", min_value=0, max_value=2_147_483_647, value=42, step=1))
-            use_toy_env = st.toggle("Use toy env directly", value=False)
-            st.caption("默认优先 real_env_factory；真实环境初始化失败时，自动回退 toy env。")
+            use_toy_env = st.toggle("直接使用简化环境", value=False)
+            st.caption("默认优先真实环境；真实环境初始化失败时，自动回退到简化环境。")
         submitted = st.form_submit_button("运行监管优化", use_container_width=True, type="primary")
 
     if submitted:
@@ -104,31 +104,31 @@ def render_regulator_optimization() -> None:
     frames = _build_regulator_result_frames(result)
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("平均 episode reward", f"{float(summary.get('avg_episode_reward', 0.0)):.4f}")
+    c1.metric("平均回合收益", f"{float(summary.get('avg_episode_reward', 0.0)):.4f}")
     c2.metric("最优动作得分", f"{float(summary.get('best_action_score', 0.0)):.4f}")
-    c3.metric("Pareto 点数", str(len(frames["pareto"])))
+    c3.metric("帕累托点数", str(len(frames["pareto"])))
     c4.metric("Q 状态数", str(int(summary.get("q_states", 0))))
 
     st.caption(
-        "reproducibility: "
+        "可复现信息："
         f"seed={reproducibility.get('seed', 0)} | "
         f"config_hash={reproducibility.get('config_hash', '')} | "
-        f"episodes={reproducibility.get('episodes', 0)} | "
+        f"训练轮数={reproducibility.get('episodes', 0)} | "
         f"max_steps={reproducibility.get('max_steps_per_episode', 0)}"
     )
     env_selection = reproducibility.get("env_selection", {}) if isinstance(reproducibility, dict) else {}
     if isinstance(env_selection, dict) and env_selection:
         st.caption(
-            "environment: "
+            "环境信息："
             f"path={env_selection.get('selected_path', '')} | "
             f"fallback={env_selection.get('fallback_used', False)}"
         )
 
-    st.markdown("### Counterfactual A/B")
+    st.markdown("### 反事实 A/B 对照")
     left, right = st.columns(2)
     with left:
         if frames["baseline"].empty:
-            st.info("暂无 baseline。")
+            st.info("暂无基线结果。")
         else:
             st.dataframe(frames["baseline"], use_container_width=True, hide_index=True)
     with right:
@@ -137,7 +137,7 @@ def render_regulator_optimization() -> None:
         else:
             st.dataframe(frames["deltas"], use_container_width=True, hide_index=True)
 
-    st.markdown("### Pareto Frontier")
+    st.markdown("### Pareto 前沿")
     pareto_df = frames["pareto"]
     if pareto_df.empty:
         st.info("暂无 Pareto 数据。")
@@ -150,13 +150,13 @@ def render_regulator_optimization() -> None:
             size="liquidity",
             color="avg_reward" if "avg_reward" in pareto_df.columns else None,
             hover_data=hover_cols,
-            title="Pareto Frontier (Stability vs Cost, bubble=Liquidity)",
+            title="帕累托前沿（稳定性 vs 成本，气泡大小=流动性）",
         )
         fig.update_layout(height=480, margin=dict(l=20, r=20, t=60, b=20))
         st.plotly_chart(fig, use_container_width=True)
         st.dataframe(pareto_df, use_container_width=True, hide_index=True)
 
-    st.markdown("### Recommendation And Evidence")
+    st.markdown("### 推荐方案与证据")
     left, right = st.columns(2)
     with left:
         st.json(
@@ -172,22 +172,22 @@ def render_regulator_optimization() -> None:
         if not frames["evidence"].empty:
             st.dataframe(frames["evidence"], use_container_width=True, hide_index=True)
         else:
-            st.info("No recommendation evidence available.")
+            st.info("暂无推荐证据。")
 
     if not frames["candidates"].empty:
-        st.markdown("### Candidate Bundles")
+        st.markdown("### 候选方案")
         st.dataframe(frames["candidates"], use_container_width=True, hide_index=True)
 
     export_cols = st.columns(2)
     export_cols[0].download_button(
-        "Download regulator result JSON",
+        "下载监管优化结果 JSON",
         data=json.dumps(result, ensure_ascii=False, indent=2),
         file_name="regulator_optimization_result.json",
         mime="application/json",
         use_container_width=True,
     )
     export_cols[1].download_button(
-        "Download Pareto CSV",
+        "下载帕累托数据 CSV",
         data=frames["pareto"].to_csv(index=False).encode("utf-8"),
         file_name="regulator_pareto.csv",
         mime="text/csv",

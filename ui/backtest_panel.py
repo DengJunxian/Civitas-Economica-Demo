@@ -38,7 +38,7 @@ STRATEGY_OPTIONS = {
     "均值回归": "mean_reversion",
     "风险平价": "risk_parity",
     "消息驱动": "news_driven",
-    "Portfolio System (政策/情绪约束)": "portfolio_system",
+    "组合系统（政策/情绪约束）": "portfolio_system",
 }
 
 
@@ -214,7 +214,7 @@ def _run_policy_ab_comparison(
 
 def render_backtest_panel(ctrl: Any = None) -> None:
     st.markdown("## 历史回测与研究面板")
-    st.caption("支持 portfolio_system 策略，并支持一键生成政策A/B自动对比报告。")
+    st.caption("支持组合系统策略，并支持一键生成政策 A/B 自动对比报告。")
 
     if "backtest_result" not in st.session_state:
         st.session_state.backtest_result = None
@@ -304,8 +304,8 @@ def render_backtest_panel(ctrl: Any = None) -> None:
                 step=0.05,
             )
 
-        export_qlib = st.checkbox("回测后自动导出 Qlib 研究数据束", value=bool(cfg_state.get("export_qlib_bundle", False)))
-        qlib_bundle_path = st.text_input("Qlib 导出路径", value=str(cfg_state.get("qlib_bundle_path", "outputs/backtest_qlib_bundle")))
+        export_qlib = st.checkbox("回测后自动导出量化研究数据束", value=bool(cfg_state.get("export_qlib_bundle", False)))
+        qlib_bundle_path = st.text_input("量化研究数据束导出路径", value=str(cfg_state.get("qlib_bundle_path", "outputs/backtest_qlib_bundle")))
         submitted = st.form_submit_button("运行历史回测", width="stretch")
 
     if submitted:
@@ -429,7 +429,7 @@ def render_backtest_panel(ctrl: Any = None) -> None:
     with dl_col2:
         st.download_button("下载回测摘要 JSON", data=payload_json, file_name="backtest_summary.json", mime="application/json", width="stretch")
     with dl_col3:
-        if st.button("导出 Qlib 数据束", width="stretch"):
+        if st.button("导出量化研究数据束", width="stretch"):
             session_backtester: Optional[HistoricalBacktester] = st.session_state.get("backtester")
             if not session_backtester:
                 st.error("未找到回测实例，请先运行回测。")

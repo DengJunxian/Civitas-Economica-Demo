@@ -10,6 +10,7 @@ import plotly.express as px
 import streamlit as st
 
 from regulator_agent import run_regulatory_closed_loop
+from ui.narrative import narrate_payload
 
 
 REGULATOR_OPTIMIZATION_PAGE_FLAG = "regulator_optimization_page_v1"
@@ -159,12 +160,16 @@ def render_regulator_optimization() -> None:
     st.markdown("### 推荐方案与证据")
     left, right = st.columns(2)
     with left:
-        st.json(
-            {
-                "action_description": recommendation.get("action_description", ""),
-                "tradeoff_summary": recommendation.get("tradeoff_summary", ""),
-                "side_effects": recommendation.get("side_effects", []),
-            }
+        st.markdown(
+            narrate_payload(
+                "推荐方案解读",
+                {
+                    "action_description": recommendation.get("action_description", ""),
+                    "tradeoff_summary": recommendation.get("tradeoff_summary", ""),
+                    "side_effects": recommendation.get("side_effects", []),
+                },
+                context="解释推荐动作、收益-成本权衡和可能副作用。",
+            )
         )
         if not frames["recommendation"].empty:
             st.dataframe(frames["recommendation"], use_container_width=True, hide_index=True)

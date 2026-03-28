@@ -388,8 +388,9 @@ def _render_sidebar_global() -> None:
                         st.error(f"比赛材料生成失败：{exc}")
 
             if st.session_state.materials_last_export:
-                st.caption("最近生成文件")
-                st.json(st.session_state.materials_last_export)
+                st.caption("最近生成文件（自然语言展示）")
+                for name, path in st.session_state.materials_last_export.items():
+                    st.markdown(f"- 已生成 `{name}`，保存位置：`{path}`")
 
 
 def _render_ai_decision_tab() -> None:

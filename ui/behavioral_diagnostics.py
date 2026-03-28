@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import streamlit as st
 
+from ui.narrative import narrate_payload
+
 
 def _safe_get(report: Dict[str, Any], path: list[str], default: float = 0.0) -> float:
     cur: Any = report
@@ -91,7 +93,14 @@ def _render_social_propagation_report(report: Dict[str, Any]) -> None:
             )
         st.dataframe(pd.DataFrame(packet_rows), use_container_width=True, hide_index=True)
 
-    st.json(report)
+    st.markdown("#### AI 解读")
+    st.markdown(
+        narrate_payload(
+            "社会传播报告解读",
+            report,
+            context="聚焦节点结构、传播链路与谣言压制效果。",
+        )
+    )
 
 
 def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
@@ -128,8 +137,14 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
     ]
     st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
 
-    st.markdown("### 原始报告")
-    st.json(report)
+    st.markdown("### 报告解读")
+    st.markdown(
+        narrate_payload(
+            "行为金融报告解读",
+            report,
+            context="请解释典型事实指标表现与潜在市场行为含义。",
+        )
+    )
     st.download_button(
         "下载典型事实报告 JSON",
         data=json.dumps(report, ensure_ascii=False, indent=2),

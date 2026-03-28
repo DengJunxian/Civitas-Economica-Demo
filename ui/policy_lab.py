@@ -16,7 +16,6 @@ import streamlit as st
 from core.event_store import EventRecord, EventStore, EventType
 from core.macro.government import GovernmentAgent, PolicyShock
 from policy.structured import PolicyPackage
-from ui import dashboard as dashboard_ui
 from ui.reporting import official_report_meta, write_report_artifacts
 
 
@@ -248,6 +247,135 @@ def _build_chart(frame: pd.DataFrame) -> go.Figure:
     return fig
 
 
+def _policy_narrative_key(policy_text: str, summary: Dict[str, float], package_dict: Dict[str, Any]) -> str:
+    payload = {
+        "policy_text": str(policy_text or ""),
+        "summary": dict(summary or {}),
+        "explanation": dict(package_dict.get("explanation", {}) or {}),
+        "top_layers": dict(package_dict.get("top_layers", {}) or {}),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _top_effect_text(items: List[Dict[str, Any]], limit: int = 3) -> str:
+    if not items:
+        return "暂无显著项"
+    ranked = sorted(items, key=lambda item: abs(float(item.get("score", 0.0) or 0.0)), reverse=True)[:limit]
+    parts: List[str] = []
+    for item in ranked:
+        name = str(item.get("name", "未命名"))
+        score = float(item.get("score", 0.0) or 0.0)
+        direction = "受益" if score >= 0 else "承压"
+        parts.append(f"{name}（{direction}）")
+    return "、".join(parts)
+
+
+def _fallback_policy_narrative(policy_text: str, summary: Dict[str, float], package_dict: Dict[str, Any]) -> str:
+    explanation = dict(package_dict.get("explanation", {}) or {})
+    headline = str(explanation.get("headline", "") or "政策通过多条传导链路影响市场预期与资金行为。")
+    primary_path = [str(node) for node in explanation.get("primary_path", []) if str(node).strip()]
+    path_text = " -> ".join(primary_path[:5]) if primary_path else "政策信号 -> 预期修复 -> 风险偏好变化 -> 价格反馈"
+    lag_days = int(explanation.get("expected_lag_days", 0) or 0)
+    side_effects = [str(item) for item in explanation.get("side_effects", []) if str(item).strip()]
+    risk_tip = "、".join(side_effects[:2]) if side_effects else "短期波动可能放大，需关注情绪过冲。"
+    return "\n".join(
+        [
+            f"**一句话结论**：{headline}",
+            f"- 这项政策的核心目标是：{str(policy_text or '').strip()[:120]}",
+            f"- 主要传导路径：{path_text}",
+            f"- 重点受影响主体：{_top_effect_text(list(explanation.get('affected_agents', []) or []))}",
+            f"- 重点受影响行业：{_top_effect_text(list(explanation.get('affected_sectors', []) or []))}",
+            f"- 重点受影响因子：{_top_effect_text(list(explanation.get('affected_factors', []) or []))}",
+            f"- 市场结果指向：{_top_effect_text(list(explanation.get('market_results', []) or []))}",
+            f"- 仿真表现：收益率 {summary.get('return_pct', 0.0):.2%}，最大回撤 {summary.get('max_drawdown', 0.0):.2%}，波动率 {summary.get('volatility', 0.0):.4f}",
+            f"- 预计传导时滞：约 {lag_days} 天；风险提示：{risk_tip}",
+        ]
+    )
+
+
+def _llm_policy_narrative(policy_text: str, summary: Dict[str, float], package_dict: Dict[str, Any]) -> str:
+    try:
+        from core.inference.api_backend import APIBackend
+    except Exception:
+        return ""
+    snapshot = {
+        "policy_text": str(policy_text or ""),
+        "summary": dict(summary or {}),
+        "explanation": dict(package_dict.get("explanation", {}) or {}),
+        "policy_schema": dict(package_dict.get("policy_schema", {}) or {}),
+        "top_layers": dict(package_dict.get("top_layers", {}) or {}),
+    }
+    prompt = "\n".join(
+        [
+            "请把下面的政策仿真结果写成面向评委的中文自然语言解读。",
+            "要求：不要输出 JSON、代码块、键名；先给 1 句结论，再给 4-6 条要点，最后给 1 条风险提示和 2 个建议观察指标。",
+            "请尽量使用简洁、可读、非技术化表达。",
+            f"数据：{json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str)}",
+        ]
+    )
+    try:
+        backend = APIBackend(model="deepseek-chat", max_tokens=520, temperature=0.3)
+        response = str(
+            backend.generate(
+                prompt,
+                system_prompt="你是政策仿真讲解专家，擅长把结构化结果翻译成评委一读就懂的自然语言。",
+                timeout_budget=20.0,
+            )
+            or ""
+        ).strip()
+    except Exception:
+        return ""
+    if not response or response.startswith("[API Error]"):
+        return ""
+    if response.lstrip().startswith("{") or response.lstrip().startswith("["):
+        return ""
+    return response
+
+
+def _get_policy_narrative(policy_text: str, summary: Dict[str, float], package_dict: Dict[str, Any]) -> str:
+    cache = st.session_state.setdefault("policy_lab_narrative_cache", {})
+    key = _policy_narrative_key(policy_text, summary, package_dict)
+    if key in cache:
+        return str(cache[key])
+    text = _llm_policy_narrative(policy_text, summary, package_dict)
+    if not text:
+        text = _fallback_policy_narrative(policy_text, summary, package_dict)
+    cache[key] = text
+    return text
+
+
+def _persist_policy_event(
+    *,
+    selected_title: str,
+    policy_text: str,
+    intensity: float,
+    duration_days: int,
+    rumor_noise: bool,
+) -> None:
+    timestamp = pd.Timestamp.utcnow().isoformat()
+    record = EventRecord(
+        timestamp=timestamp,
+        visibility_time=timestamp,
+        source="policy_lab_ui",
+        confidence=1.0,
+        event_type=EventType.POLICY,
+        payload={
+            "title": f"Policy scenario: {selected_title}",
+            "policy_text": str(policy_text),
+            "intensity": float(intensity),
+            "duration_days": int(duration_days),
+            "rumor_noise": bool(rumor_noise),
+        },
+        metadata={"module": "policy_lab"},
+    )
+    try:
+        EventStore().append_events(dataset_version="policy_lab", events=[record])
+    except Exception:
+        # Event persistence is best-effort and should never block the demo flow.
+        return
+
+
 def render_policy_lab() -> None:
     st.subheader("政策实验台")
 
@@ -324,13 +452,12 @@ def render_policy_lab() -> None:
             )
             st.session_state.policy_lab_bundle = bundle
 
-            event_store = EventStore()
-            event_store.append(
-                EventRecord(
-                    event_type=EventType.POLICY,
-                    title=f"Policy scenario: {selected_title}",
-                    payload={"policy_text": policy_text, "intensity": float(intensity), "duration_days": int(duration_days)},
-                )
+            _persist_policy_event(
+                selected_title=selected_title,
+                policy_text=policy_text,
+                intensity=float(intensity),
+                duration_days=int(duration_days),
+                rumor_noise=bool(rumor_noise),
             )
 
     result = st.session_state.get("policy_lab_result")
@@ -348,20 +475,11 @@ def render_policy_lab() -> None:
     cols[3].metric("波动率", f"{summary['volatility']:.4f}")
 
     st.plotly_chart(_build_chart(frame), use_container_width=True)
-    dashboard_ui.render_market_snapshot(frame.rename(columns={"close": "price"}) if "price" not in frame.columns else frame)
 
     package_dict = result.get("policy_package") or {}
-    explanation = package_dict.get("explanation", {})
     if package_dict:
-        st.markdown("#### 成因解读")
-        st.json(
-            {
-                "policy_schema": package_dict.get("policy_schema", {}),
-                "transmission_graph": package_dict.get("transmission_graph", {}),
-                "why_this_happened": explanation,
-            },
-            expanded=False,
-        )
+        st.markdown("#### 成因解读（自然语言）")
+        st.markdown(_get_policy_narrative(str(result.get("policy_text", "")), summary, package_dict))
 
     bundle = st.session_state.get("policy_lab_bundle")
     if bundle:

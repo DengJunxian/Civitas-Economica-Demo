@@ -18,6 +18,7 @@ from core.competition_demo import (
 )
 from core.ui_text import display_scenario_name, translate_display_text, translate_ui_payload
 from ui import dashboard as dashboard_ui
+from ui.narrative import narrate_payload
 
 
 AUTO_PLAY_INTERVAL_SECONDS = 0.7
@@ -106,21 +107,37 @@ def _render_three_stage_story(scenario: Any, current_step: int) -> None:
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown("### 1) 分析师")
-        st.json(translate_ui_payload(analyst))
+        st.markdown(
+            narrate_payload(
+                "分析师阶段解读",
+                translate_ui_payload(analyst),
+                context="概括分析师观察到的信号、证据和市场判断。",
+            )
+        )
     with c2:
         st.markdown("### 2) 经理")
-        st.json(translate_ui_payload(manager))
+        st.markdown(
+            narrate_payload(
+                "经理阶段解读",
+                translate_ui_payload(manager),
+                context="说明经理的动作选择、仓位调整和执行逻辑。",
+            )
+        )
     with c3:
         st.markdown("### 3) 市场")
-        st.json(
-            translate_ui_payload(
-                {
-                    "step": market_data.get("step", 0),
-                    "close": market_data.get("close", 0.0),
-                    "volume": market_data.get("volume", 0.0),
-                    "panic_level": market_data.get("panic_level", 0.0),
-                    "csad": market_data.get("csad", 0.0),
-                }
+        st.markdown(
+            narrate_payload(
+                "市场反馈阶段解读",
+                translate_ui_payload(
+                    {
+                        "step": market_data.get("step", 0),
+                        "close": market_data.get("close", 0.0),
+                        "volume": market_data.get("volume", 0.0),
+                        "panic_level": market_data.get("panic_level", 0.0),
+                        "csad": market_data.get("csad", 0.0),
+                    }
+                ),
+                context="解释当前市场价格、成交与风险情绪反馈。",
             )
         )
 

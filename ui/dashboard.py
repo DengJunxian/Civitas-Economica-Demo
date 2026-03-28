@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.ui_text import display_risk_alert, translate_display_text, translate_ui_payload
+from ui.narrative import narrate_payload
 
 
 PLOTLY_DARK_LAYOUT = dict(
@@ -472,7 +473,13 @@ def render_decision_evidence_flow(
             for idx, card in enumerate(analyst_cards):
                 label = f"{idx + 1}. {translate_display_text(str(card.get('analyst_id', f'analyst_{idx}')))}"
                 with st.expander(label, expanded=(idx == 0)):
-                    st.json(translate_ui_payload(card))
+                    st.markdown(
+                        narrate_payload(
+                            f"{label}观点解读",
+                            translate_ui_payload(card),
+                            context="提炼分析师观点、证据与风险提示。",
+                        )
+                    )
         else:
             st.info("暂无分析师卡片。")
 
@@ -503,10 +510,22 @@ def render_decision_evidence_flow(
             st.info("暂无矛盾矩阵数据。")
 
     with tab_manager:
-        st.json(translate_ui_payload(manager_final_card))
+        st.markdown(
+            narrate_payload(
+                "经理最终决策解读",
+                translate_ui_payload(manager_final_card),
+                context="解释仓位取向、执行节奏与核心判断。",
+            )
+        )
 
     with tab_risk:
-        st.json(translate_ui_payload(risk_alerts))
+        st.markdown(
+            narrate_payload(
+                "风险预警解读",
+                translate_ui_payload(risk_alerts),
+                context="说明风险等级、触发原因与建议动作。",
+            )
+        )
 
     with tab_calib:
         c1, c2, c3 = st.columns(3)

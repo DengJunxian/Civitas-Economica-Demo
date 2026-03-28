@@ -12,7 +12,9 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from plotly.subplots import make_subplots
 
+from core.data.market_data_provider import MarketDataProvider, MarketDataQuery
 from core.event_store import EventRecord, EventStore, EventType
 from core.macro.government import GovernmentAgent, PolicyShock
 from policy.structured import PolicyPackage
@@ -37,6 +39,12 @@ CONTROL_MODE_OPTIONS = [
     "Mild variant",
     "Risk-stress variant",
 ]
+INDEX_BENCHMARK_OPTIONS = {
+    "上证指数（000001）": "sh000001",
+    "深证成指（399001）": "sz399001",
+    "创业板指（399006）": "sz399006",
+}
+CHART_MODE_OPTIONS = ["日K", "分时"]
 
 
 @dataclass
@@ -180,16 +188,101 @@ def _shock_score(shock: PolicyShock) -> float:
     )
 
 
-def _generate_policy_metrics(*, policy_text: str, intensity: float, duration_days: int, rumor_noise: bool, scenario_key: str) -> pd.DataFrame:
+def _policy_anchor_date() -> pd.Timestamp:
+    key = "policy_lab_open_date"
+    if key not in st.session_state:
+        st.session_state[key] = pd.Timestamp.now(tz="Asia/Shanghai").normalize().strftime("%Y-%m-%d")
+    return pd.to_datetime(st.session_state[key], errors="coerce").normalize()
+
+
+def _load_real_index_history(index_symbol: str, lookback_days: int, end_date: pd.Timestamp) -> pd.DataFrame:
+    start_date = (pd.Timestamp(end_date).normalize() - pd.Timedelta(days=max(int(lookback_days) * 3, 120))).strftime("%Y-%m-%d")
+    query = MarketDataQuery(
+        symbol=str(index_symbol),
+        interval="1d",
+        start=start_date,
+        end=pd.Timestamp(end_date).strftime("%Y-%m-%d"),
+        period_days=max(int(lookback_days), 30),
+        adjust="",
+        market="CN",
+    )
+    try:
+        provider = MarketDataProvider()
+        frame = provider.get_ohlcv(query, use_cache=True, freeze_snapshot=False)
+    except Exception:
+        return pd.DataFrame()
+    if frame.empty:
+        return frame
+    out = frame.sort_values("datetime").tail(max(int(lookback_days), 10)).copy()
+    out["time"] = pd.to_datetime(out["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    out["step"] = np.arange(1, len(out) + 1)
+    for col in ("open", "high", "low", "close", "volume"):
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+    out = out.dropna(subset=["time", "open", "high", "low", "close"])
+    if out.empty:
+        return out
+    if out["volume"].isna().all():
+        out["volume"] = 1_000_000.0
+    out["volume"] = out["volume"].fillna(out["volume"].median())
+    return out[["step", "time", "open", "high", "low", "close", "volume"]].reset_index(drop=True)
+
+
+def _generate_policy_metrics(
+    *,
+    policy_text: str,
+    intensity: float,
+    duration_days: int,
+    rumor_noise: bool,
+    scenario_key: str,
+    market_history: Optional[pd.DataFrame] = None,
+    end_date: Optional[pd.Timestamp] = None,
+) -> pd.DataFrame:
     shock = _compile_scaled_shock(policy_text, intensity)
     score = _shock_score(shock)
     seed = f"{scenario_key}|{policy_text}|{intensity}|{duration_days}|{rumor_noise}"
     rng = np.random.default_rng(_seed_from_text(seed))
 
     periods = max(10, int(duration_days))
-    dates = pd.bdate_range(pd.Timestamp.today().normalize(), periods=periods)
-    price = 3000.0
     rows: List[Dict[str, float | int | str]] = []
+    history = market_history.copy() if isinstance(market_history, pd.DataFrame) and not market_history.empty else pd.DataFrame()
+    if not history.empty:
+        history = history.tail(periods).reset_index(drop=True)
+        base_returns = history["close"].pct_change().fillna(0.0).astype(float)
+        price = float(history.iloc[0]["close"])
+        for idx, row in history.iterrows():
+            step = idx + 1
+            base_ret = float(base_returns.iloc[idx])
+            drift = 0.0002 + np.clip(score, -1.0, 1.0) * 0.0020 * np.exp(-(step - 1) / max(periods * 0.6, 1.0))
+            rumor_term = (shock.rumor_shock * 0.004 if rumor_noise else 0.0) * np.exp(-(step - 1) / max(periods * 0.25, 1.0))
+            ret = base_ret + drift + rumor_term + rng.normal(0.0, 0.0015)
+            prev = price
+            price = max(1600.0, prev * (1.0 + ret))
+            panic = float(np.clip(0.18 + max(0.0, -ret) * 7.5 + max(0.0, rumor_term) * 6.0, 0.05, 0.95))
+            csad = float(np.clip(0.05 + panic * 0.09 + abs(ret) * 4.0, 0.04, 0.22))
+            base_high = float(row.get("high", max(prev, price)))
+            base_low = float(row.get("low", min(prev, price)))
+            high = max(base_high, prev, price) * (1 + abs(rng.normal(0.0, 0.0012)))
+            low = min(base_low, prev, price) * (1 - abs(rng.normal(0.0, 0.0012)))
+            base_volume = float(row.get("volume", 1_000_000.0) or 1_000_000.0)
+            volume = float(base_volume * (1 + 0.25 * abs(score) + 0.35 * panic))
+            rows.append(
+                {
+                    "step": step,
+                    "time": str(row.get("time", "")),
+                    "open": round(prev, 2),
+                    "high": round(high, 2),
+                    "low": round(low, 2),
+                    "close": round(price, 2),
+                    "volume": round(volume, 2),
+                    "csad": round(csad, 4),
+                    "panic_level": round(panic, 4),
+                }
+            )
+        return pd.DataFrame(rows)
+
+    end_anchor = pd.Timestamp(end_date).normalize() if end_date is not None else pd.Timestamp.today().normalize()
+    dates = pd.bdate_range(end=end_anchor, periods=periods)
+    price = 3000.0
     for idx, dt in enumerate(dates, start=1):
         drift = 0.0003 + np.clip(score, -1.0, 1.0) * 0.0025 * np.exp(-(idx - 1) / max(periods * 0.5, 1.0))
         rumor_term = (shock.rumor_shock * 0.008 if rumor_noise else 0.0) * np.exp(-(idx - 1) / max(periods * 0.25, 1.0))
@@ -233,18 +326,160 @@ def _compute_policy_summary(metrics: pd.DataFrame) -> Dict[str, float]:
     }
 
 
-def _build_chart(frame: pd.DataFrame) -> go.Figure:
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=frame["time"], y=frame["close"], mode="lines+markers", name="指数收盘"))
-    fig.add_trace(go.Bar(x=frame["time"], y=frame["volume"], name="成交量", opacity=0.25, yaxis="y2"))
+def _build_chart(frame: pd.DataFrame, *, chart_title: str = "指数日K（东方财富风格）", mode: str = "日K") -> go.Figure:
+    chart = frame.copy()
+    chart["ma5"] = chart["close"].rolling(5).mean()
+    chart["ma10"] = chart["close"].rolling(10).mean()
+    up_mask = (chart["close"] >= chart["open"]).tolist()
+    volume_colors = ["#d9383a" if is_up else "#18a058" for is_up in up_mask]
+
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.74, 0.26])
+    if mode == "分时":
+        chart["avg_price"] = chart["close"].expanding().mean()
+        fig.add_trace(
+            go.Scatter(
+                x=chart["time"],
+                y=chart["close"],
+                mode="lines",
+                name="分时",
+                line=dict(color="#0066cc", width=1.8),
+                hovertemplate="时间=%{x}<br>价格=%{y:.2f}<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=chart["time"],
+                y=chart["avg_price"],
+                mode="lines",
+                name="均价",
+                line=dict(color="#f39c12", width=1.2, dash="dot"),
+                hovertemplate="时间=%{x}<br>均价=%{y:.2f}<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+    else:
+        fig.add_trace(
+            go.Candlestick(
+                x=chart["time"],
+                open=chart["open"],
+                high=chart["high"],
+                low=chart["low"],
+                close=chart["close"],
+                name="日K",
+                increasing_line_color="#d9383a",
+                decreasing_line_color="#18a058",
+                increasing_fillcolor="#d9383a",
+                decreasing_fillcolor="#18a058",
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=chart["time"],
+                y=chart["ma5"],
+                mode="lines",
+                name="MA5",
+                line=dict(color="#f39c12", width=1.4),
+                hovertemplate="时间=%{x}<br>MA5=%{y:.2f}<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=chart["time"],
+                y=chart["ma10"],
+                mode="lines",
+                name="MA10",
+                line=dict(color="#2980b9", width=1.4),
+                hovertemplate="时间=%{x}<br>MA10=%{y:.2f}<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+    fig.add_trace(
+        go.Bar(
+            x=chart["time"],
+            y=chart["volume"],
+            name="成交量",
+            marker_color=volume_colors,
+            opacity=0.8,
+            hovertemplate="时间=%{x}<br>成交量=%{y:,.0f}<extra></extra>",
+        ),
+        row=2,
+        col=1,
+    )
     fig.update_layout(
-        margin=dict(l=10, r=10, t=10, b=10),
-        xaxis_title="日期",
-        yaxis_title="收盘价",
-        yaxis2=dict(title="成交量", overlaying="y", side="right", showgrid=False),
-        legend=dict(orientation="h", y=1.02),
+        margin=dict(l=10, r=10, t=40, b=10),
+        title=dict(text=chart_title, x=0.01, xanchor="left", font=dict(size=16)),
+        paper_bgcolor="#ffffff",
+        plot_bgcolor="#ffffff",
+        legend=dict(orientation="h", y=1.04, x=0.0),
+        hovermode="x unified",
+        xaxis_rangeslider_visible=False,
+    )
+    fig.update_xaxes(
+        showgrid=False,
+        tickangle=0,
+        showspikes=True,
+        spikemode="across",
+        spikesnap="cursor",
+        spikecolor="#9aa0a6",
+        spikethickness=1,
+    )
+    fig.update_yaxes(
+        title_text="指数点位",
+        row=1,
+        col=1,
+        side="right",
+        gridcolor="#ededed",
+        showspikes=True,
+        spikemode="across",
+        spikesnap="cursor",
+        spikecolor="#9aa0a6",
+        spikethickness=1,
+    )
+    fig.update_yaxes(
+        title_text="成交量",
+        row=2,
+        col=1,
+        side="right",
+        gridcolor="#f3f3f3",
+        showspikes=True,
+        spikemode="across",
+        spikesnap="cursor",
+        spikecolor="#9aa0a6",
+        spikethickness=1,
     )
     return fig
+
+
+def _render_quote_banner(frame: pd.DataFrame, *, index_label: str, index_symbol: str, source_text: str, history_end: str) -> None:
+    if frame.empty:
+        return
+    latest = frame.iloc[-1]
+    prev_close = float(frame.iloc[-2]["close"]) if len(frame) > 1 else float(latest["open"])
+    last_close = float(latest["close"])
+    change = last_close - prev_close
+    pct = change / prev_close if abs(prev_close) > 1e-9 else 0.0
+    color = "#d9383a" if change >= 0 else "#18a058"
+    sign = "+" if change >= 0 else ""
+    st.markdown(
+        (
+            "<div style='border:1px solid #e6e6e6;border-radius:8px;padding:8px 12px;background:#fff;'>"
+            f"<div style='font-size:13px;color:#666;'>{index_label}（{index_symbol}） | {source_text} | 截止 {history_end}</div>"
+            f"<div style='font-size:28px;font-weight:700;color:{color};line-height:1.2'>{last_close:.2f}</div>"
+            f"<div style='font-size:14px;color:{color};'>{sign}{change:.2f} ({sign}{pct:.2%})</div>"
+            f"<div style='font-size:12px;color:#666;margin-top:2px;'>"
+            f"开 {float(latest['open']):.2f} / 高 {float(latest['high']):.2f} / 低 {float(latest['low']):.2f} / 量 {float(latest['volume']):,.0f}"
+            "</div></div>"
+        ),
+        unsafe_allow_html=True,
+    )
 
 
 def _policy_narrative_key(policy_text: str, summary: Dict[str, float], package_dict: Dict[str, Any]) -> str:
@@ -309,8 +544,13 @@ def _llm_policy_narrative(policy_text: str, summary: Dict[str, float], package_d
     prompt = "\n".join(
         [
             "请把下面的政策仿真结果写成面向评委的中文自然语言解读。",
-            "要求：不要输出 JSON、代码块、键名；先给 1 句结论，再给 4-6 条要点，最后给 1 条风险提示和 2 个建议观察指标。",
-            "请尽量使用简洁、可读、非技术化表达。",
+            "要求：不要输出 JSON、代码块、键名，必须严格按格式输出。",
+            "【一句话结论】",
+            "【政策如何影响市场】(3-4条)",
+            "【这组结果为什么可信】(2条)",
+            "【风险提示】(1条)",
+            "【建议评委关注的指标】(2条)",
+            "语言请简洁、可直接朗读。",
             f"数据：{json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str)}",
         ]
     )
@@ -352,6 +592,8 @@ def _persist_policy_event(
     intensity: float,
     duration_days: int,
     rumor_noise: bool,
+    index_symbol: str = "",
+    data_source: str = "",
 ) -> None:
     timestamp = pd.Timestamp.utcnow().isoformat()
     record = EventRecord(
@@ -366,6 +608,8 @@ def _persist_policy_event(
             "intensity": float(intensity),
             "duration_days": int(duration_days),
             "rumor_noise": bool(rumor_noise),
+            "index_symbol": str(index_symbol or ""),
+            "data_source": str(data_source or ""),
         },
         metadata={"module": "policy_lab"},
     )
@@ -388,15 +632,27 @@ def render_policy_lab() -> None:
     intensity = st.slider("政策强度", min_value=0.2, max_value=2.0, value=float(selected.get("recommended_intensity", 1.0)), step=0.1)
     duration_days = st.slider("持续天数", min_value=10, max_value=180, value=int(selected.get("recommended_duration", 30)), step=5)
     rumor_noise = st.checkbox("注入传言噪声", value=bool(selected.get("default_rumor_noise", False)))
+    index_label = st.selectbox("真实指数基准", options=list(INDEX_BENCHMARK_OPTIONS.keys()), index=0)
+    history_window_days = st.slider("真实基准回看天数", min_value=60, max_value=360, value=180, step=20)
 
     if st.button("运行政策场景", type="primary"):
         with st.spinner("正在运行政策仿真..."):
+            index_symbol = INDEX_BENCHMARK_OPTIONS[index_label]
+            open_anchor = _policy_anchor_date()
+            history_end = open_anchor - pd.Timedelta(days=1)
+            real_history = _load_real_index_history(index_symbol, max(int(history_window_days), int(duration_days)), history_end)
+            if real_history.empty:
+                st.error("未获取到真实指数数据，请检查网络或数据源配置后重试。")
+                return
+            data_source = "real_index"
             frame = _generate_policy_metrics(
                 policy_text=policy_text,
                 intensity=float(intensity),
                 duration_days=int(duration_days),
                 rumor_noise=bool(rumor_noise),
                 scenario_key=str(selected.get("id", selected_title)),
+                market_history=real_history,
+                end_date=history_end,
             )
             summary = _compute_policy_summary(frame)
             st.session_state.policy_lab_result = {
@@ -404,6 +660,10 @@ def render_policy_lab() -> None:
                 "summary": summary,
                 "policy_text": policy_text,
                 "template": selected,
+                "index_label": index_label,
+                "index_symbol": index_symbol,
+                "data_source": data_source,
+                "history_end": history_end.strftime("%Y-%m-%d"),
             }
             _, package = _compile_policy_bundle(policy_text, float(intensity), policy_type_hint=str(selected.get("policy_type", "")))
             package_dict = package.to_dict()
@@ -418,10 +678,15 @@ def render_policy_lab() -> None:
                 "policy_schema": package_dict.get("policy_schema", {}),
                 "transmission_graph": package_dict.get("transmission_graph", {}),
                 "why_this_happened": package_dict.get("explanation", {}),
+                "index_symbol": index_symbol,
+                "data_source": data_source,
+                "history_end": history_end.strftime("%Y-%m-%d"),
             }
             report_title = f"政策实验台 - {selected_title}"
             report_meta = official_report_meta("policy_lab", report_title)
             report_payload["report_meta"] = report_meta
+            metric_start = str(frame.iloc[0]["time"]) if not frame.empty else ""
+            metric_end = str(frame.iloc[-1]["time"]) if not frame.empty else ""
             markdown_text = "\n".join(
                 [
                     f"# {report_title}",
@@ -432,6 +697,10 @@ def render_policy_lab() -> None:
                     f"- 政策强度：{float(intensity):.1f}",
                     f"- 持续天数：{int(duration_days)}",
                     f"- 传言噪声：{'是' if rumor_noise else '否'}",
+                    f"- 指数基准：{index_label}（{index_symbol}）",
+                    f"- 数据来源：{'真实指数' if data_source == 'real_index' else '仿真回退'}",
+                    f"- 数据区间：{metric_start} 至 {metric_end}",
+                    f"- 截止日期：{history_end.strftime('%Y-%m-%d')}（软件开启前一日）",
                     "",
                     "## 核心指标",
                     f"- 收益率：{summary['return_pct']:.2%}",
@@ -458,6 +727,8 @@ def render_policy_lab() -> None:
                 intensity=float(intensity),
                 duration_days=int(duration_days),
                 rumor_noise=bool(rumor_noise),
+                index_symbol=index_symbol,
+                data_source=data_source,
             )
 
     result = st.session_state.get("policy_lab_result")
@@ -474,7 +745,25 @@ def render_policy_lab() -> None:
     cols[2].metric("最大回撤", f"{summary['max_drawdown'] * 100:.2f}%")
     cols[3].metric("波动率", f"{summary['volatility']:.4f}")
 
-    st.plotly_chart(_build_chart(frame), use_container_width=True)
+    index_label = str(result.get("index_label", "指数基准"))
+    index_symbol = str(result.get("index_symbol", ""))
+    data_source = str(result.get("data_source", "synthetic_fallback"))
+    source_text = "真实指数数据" if data_source == "real_index" else "仿真回退数据"
+    history_end = str(result.get("history_end", ""))
+    chart_mode = st.radio("图表模式", options=CHART_MODE_OPTIONS, horizontal=True, index=0, key="policy_lab_chart_mode")
+    if not frame.empty:
+        _render_quote_banner(
+            frame,
+            index_label=index_label,
+            index_symbol=index_symbol,
+            source_text=source_text,
+            history_end=history_end,
+        )
+        st.caption(f"区间：{frame.iloc[0]['time']} 至 {frame.iloc[-1]['time']}")
+    st.plotly_chart(
+        _build_chart(frame, chart_title=f"{index_label} {chart_mode}（东方财富风格）", mode=chart_mode),
+        use_container_width=True,
+    )
 
     package_dict = result.get("policy_package") or {}
     if package_dict:

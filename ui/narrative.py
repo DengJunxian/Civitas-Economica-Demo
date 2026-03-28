@@ -90,12 +90,19 @@ def _flatten_payload(
 def _fallback_narrative(title: str, payload: Any, context: str) -> str:
     pairs = _flatten_payload(payload)
     if not pairs:
-        return f"**{title}**\n- 暂无可解读内容。"
-    lines = [f"**{title}**", f"- {context}" if context else "- 关键结果如下："]
-    for key, value in pairs[:8]:
+        return f"**一句话结论**：{title}暂无可解读内容。"
+    lines = [
+        f"**一句话结论**：{title}已生成，核心变化集中在关键指标与风险信号。",
+        "**关键观察**：",
+    ]
+    if context:
+        lines.append(f"- 解读范围：{context}")
+    for key, value in pairs[:6]:
         lines.append(f"- {key}: {value}")
-    if len(pairs) > 8:
-        lines.append("- 其余细节已省略。")
+    lines.append("**风险与建议**：")
+    lines.append("- 建议先看趋势方向，再结合波动和风险项判断执行节奏。")
+    if len(pairs) > 6:
+        lines.append("- 其余细节已省略，可结合表格进一步查看。")
     return "\n".join(lines)
 
 
@@ -112,7 +119,12 @@ def _llm_narrative(title: str, payload: Any, context: str) -> str:
     prompt = "\n".join(
         [
             "请把下面结构化信息写成给评委看的中文自然语言解读。",
-            "要求：不要输出 JSON、代码块、键名清单；先给1句话结论，再给4-6条要点，可直接阅读。",
+            "要求：不要输出 JSON、代码块、键名清单。",
+            "请严格按这个格式输出：",
+            "【一句话结论】",
+            "【关键观察】(4-6条)",
+            "【风险提示】(1条)",
+            "【建议关注指标】(2条)",
             f"标题：{title}",
             f"上下文：{context or '无'}",
             f"数据：{serialized}",

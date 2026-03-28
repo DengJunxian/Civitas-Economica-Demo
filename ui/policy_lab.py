@@ -291,12 +291,36 @@ def render_policy_lab() -> None:
                 "transmission_graph": package_dict.get("transmission_graph", {}),
                 "why_this_happened": package_dict.get("explanation", {}),
             }
-            report_meta = official_report_meta(module_name="policy_lab", title=f"政策实验台 - {selected_title}")
+            report_title = f"政策实验台 - {selected_title}"
+            report_meta = official_report_meta("policy_lab", report_title)
+            report_payload["report_meta"] = report_meta
+            markdown_text = "\n".join(
+                [
+                    f"# {report_title}",
+                    "",
+                    f"- 报告编号：{report_meta['report_no']}",
+                    f"- 生成日期：{report_meta['date_cn']}",
+                    f"- 模板：{selected_title}",
+                    f"- 政策强度：{float(intensity):.1f}",
+                    f"- 持续天数：{int(duration_days)}",
+                    f"- 传言噪声：{'是' if rumor_noise else '否'}",
+                    "",
+                    "## 核心指标",
+                    f"- 收益率：{summary['return_pct']:.2%}",
+                    f"- 平均恐慌度：{summary['avg_panic']:.4f}",
+                    f"- 最大回撤：{summary['max_drawdown']:.2%}",
+                    f"- 波动率：{summary['volatility']:.4f}",
+                    "",
+                    "## 政策文本",
+                    policy_text,
+                ]
+            )
             bundle = write_report_artifacts(
-                report_payload,
-                meta=report_meta,
-                output_dir=POLICY_REPORT_DIR,
-                stem=f"policy_lab_{_seed_from_text(policy_text) % 10_000_000}",
+                root_dir=POLICY_REPORT_DIR,
+                report_type="policy_lab",
+                title=report_title,
+                markdown_text=markdown_text,
+                payload=report_payload,
             )
             st.session_state.policy_lab_bundle = bundle
 

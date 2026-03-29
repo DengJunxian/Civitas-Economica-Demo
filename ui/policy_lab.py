@@ -473,7 +473,106 @@ def _generate_policy_metrics_deep(
         "committee_report": committee_report,
         "latest_step_report": latest_report,
     }
-    return pd.DataFrame(rows), deep_meta
+    baseline = pd.DataFrame(rows)
+    deep_meta["counterfactual_regulation"] = _build_regulation_counterfactual_worlds(
+        baseline,
+        intensity=float(intensity),
+    )
+    return baseline, deep_meta
+
+
+def _apply_regulatory_intervention_worldline(
+    frame: pd.DataFrame,
+    *,
+    intervention_step: int,
+    intensity: float,
+) -> pd.DataFrame:
+    if frame.empty:
+        return frame.copy()
+    out = frame.copy().reset_index(drop=True)
+    prev_close = float(out.iloc[0]["open"])
+    for idx, row in out.iterrows():
+        step = int(row["step"])
+        close = float(row["close"])
+        open_price = float(row["open"])
+        high = float(row["high"])
+        low = float(row["low"])
+        panic = float(row["panic_level"])
+        csad = float(row["csad"])
+        volume = float(row["volume"])
+        if step >= intervention_step:
+            phase = step - intervention_step
+            relief = np.exp(-phase / 8.0)
+            close *= 1.0 + (0.0022 * float(intensity) * relief)
+            panic *= 1.0 - (0.24 * relief)
+            csad *= 1.0 - (0.18 * relief)
+            volume *= 1.0 + (0.06 * relief)
+        open_price = prev_close
+        high = max(high, open_price, close) * 1.0015
+        low = min(low, open_price, close) * 0.9985
+        out.at[idx, "open"] = round(open_price, 2)
+        out.at[idx, "high"] = round(max(high, close), 2)
+        out.at[idx, "low"] = round(max(0.01, min(low, close)), 2)
+        out.at[idx, "close"] = round(close, 2)
+        out.at[idx, "panic_level"] = round(float(np.clip(panic, 0.02, 0.98)), 4)
+        out.at[idx, "csad"] = round(float(max(csad, 0.0)), 4)
+        out.at[idx, "volume"] = round(float(max(volume, 1.0)), 2)
+        prev_close = float(out.at[idx, "close"])
+    return out
+
+
+def _worldline_scorecard(frame: pd.DataFrame) -> Dict[str, float]:
+    summary = _compute_policy_summary(frame)
+    return {
+        "return_pct": float(summary["return_pct"]),
+        "max_drawdown": float(summary["max_drawdown"]),
+        "avg_panic": float(summary["avg_panic"]),
+        "max_panic": float(summary["max_panic"]),
+        "volatility": float(summary["volatility"]),
+    }
+
+
+def _build_regulation_counterfactual_worlds(frame: pd.DataFrame, *, intensity: float) -> Dict[str, Any]:
+    if frame.empty:
+        return {}
+    steps = len(frame)
+    early_step = max(2, int(round(steps * 0.25)))
+    late_step = max(3, int(round(steps * 0.70)))
+    no_intervention = frame.copy()
+    early = _apply_regulatory_intervention_worldline(
+        frame,
+        intervention_step=early_step,
+        intensity=float(intensity),
+    )
+    late = _apply_regulatory_intervention_worldline(
+        frame,
+        intervention_step=late_step,
+        intensity=float(intensity),
+    )
+    scorecards = {
+        "no_intervention": _worldline_scorecard(no_intervention),
+        "early_intervention": _worldline_scorecard(early),
+        "late_intervention": _worldline_scorecard(late),
+    }
+    ranking = sorted(
+        scorecards.items(),
+        key=lambda item: (
+            float(item[1]["max_panic"]) * 0.45
+            + float(item[1]["max_drawdown"]) * 0.35
+            + float(item[1]["volatility"]) * 0.20
+            - float(item[1]["return_pct"]) * 0.15
+        ),
+    )
+    return {
+        "intervention_steps": {"early": early_step, "late": late_step},
+        "recommended_timing": str(ranking[0][0]) if ranking else "no_intervention",
+        "scorecards": scorecards,
+        "worlds": {
+            "no_intervention": no_intervention.to_dict(orient="records"),
+            "early_intervention": early.to_dict(orient="records"),
+            "late_intervention": late.to_dict(orient="records"),
+        },
+    }
 
 
 def _compute_policy_summary(metrics: pd.DataFrame) -> Dict[str, float]:
@@ -891,6 +990,51 @@ def _render_sector_rotation_heatmap(package_dict: Dict[str, Any]) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
 
+def _render_regulation_counterfactual_panel(counterfactual: Dict[str, Any]) -> None:
+    worlds = dict(counterfactual.get("worlds", {}) or {})
+    no_df = pd.DataFrame(worlds.get("no_intervention", []) or [])
+    early_df = pd.DataFrame(worlds.get("early_intervention", []) or [])
+    late_df = pd.DataFrame(worlds.get("late_intervention", []) or [])
+    if no_df.empty or early_df.empty or late_df.empty:
+        return
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=no_df["time"], y=no_df["close"], mode="lines", name="不介入", line=dict(color="#6b7280", width=2)))
+    fig.add_trace(go.Scatter(x=early_df["time"], y=early_df["close"], mode="lines", name="提前介入", line=dict(color="#16a34a", width=2.6)))
+    fig.add_trace(go.Scatter(x=late_df["time"], y=late_df["close"], mode="lines", name="延后介入", line=dict(color="#f97316", width=2.6)))
+    fig.update_layout(
+        template="plotly_white",
+        title="监管时点反事实世界线（DEEP）",
+        xaxis_title="时间",
+        yaxis_title="价格",
+        margin=dict(l=20, r=20, t=40, b=20),
+        height=360,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    scorecards = dict(counterfactual.get("scorecards", {}) or {})
+    rows: List[Dict[str, Any]] = []
+    for world_name, metrics in scorecards.items():
+        rows.append(
+            {
+                "world": world_name,
+                "return_pct": float(metrics.get("return_pct", 0.0)),
+                "max_drawdown": float(metrics.get("max_drawdown", 0.0)),
+                "avg_panic": float(metrics.get("avg_panic", 0.0)),
+                "max_panic": float(metrics.get("max_panic", 0.0)),
+                "volatility": float(metrics.get("volatility", 0.0)),
+            }
+        )
+    if rows:
+        score_df = pd.DataFrame(rows)
+        st.dataframe(score_df, use_container_width=True, hide_index=True)
+    recommended = str(counterfactual.get("recommended_timing", ""))
+    steps = dict(counterfactual.get("intervention_steps", {}) or {})
+    st.caption(
+        f"推荐时点：{recommended} | 提前介入步={steps.get('early', '-')}, 延后介入步={steps.get('late', '-')}"
+    )
+
+
 def render_policy_lab() -> None:
     st.subheader("政策实验台")
     st.caption("仅供教学科研与仿真，不构成投资建议。")
@@ -1095,6 +1239,9 @@ def render_policy_lab() -> None:
         if committee_report:
             with st.expander("对抗式防幻觉委员会输出", expanded=False):
                 st.json(committee_report)
+        counterfactual = dict(deep_mode_meta.get("counterfactual_regulation", {}) or {})
+        if counterfactual:
+            _render_regulation_counterfactual_panel(counterfactual)
 
     bundle = st.session_state.get("policy_lab_bundle")
     if bundle:

@@ -394,6 +394,106 @@ class OrderBook:
             "trade_count": int(self.trade_count),
         }
 
+    def sweep_cost_estimate(
+        self,
+        side: OrderSide | str,
+        quantity: int,
+        *,
+        levels: int = 5,
+    ) -> Dict[str, float]:
+        qty = max(0, int(quantity))
+        if qty <= 0:
+            return {
+                "requested_qty": 0.0,
+                "filled_qty": 0.0,
+                "fill_ratio": 0.0,
+                "avg_price": 0.0,
+                "reference_price": float(self.last_price),
+                "slippage_bps": 0.0,
+                "notional": 0.0,
+            }
+
+        side_enum = side if isinstance(side, OrderSide) else OrderSide(str(side).strip().lower())
+        book_side = self.get_depth(max(1, int(levels)))
+        ladder = book_side["asks"] if side_enum == OrderSide.BUY else book_side["bids"]
+        remaining = qty
+        filled = 0
+        notional = 0.0
+        for row in ladder:
+            level_qty = int(max(0, row.get("qty", 0)))
+            if level_qty <= 0:
+                continue
+            take = min(level_qty, remaining)
+            if take <= 0:
+                continue
+            px = float(row.get("price", 0.0))
+            notional += px * take
+            filled += take
+            remaining -= take
+            if remaining <= 0:
+                break
+
+        reference_price = self.get_best_ask() if side_enum == OrderSide.BUY else self.get_best_bid()
+        if reference_price is None or float(reference_price) <= 0:
+            reference_price = float(self.last_price)
+        avg_price = (notional / filled) if filled > 0 else 0.0
+        fill_ratio = float(filled / qty) if qty > 0 else 0.0
+        if filled <= 0 or reference_price <= 0:
+            slippage_bps = 0.0
+        elif side_enum == OrderSide.BUY:
+            slippage_bps = ((avg_price - reference_price) / reference_price) * 10_000.0
+        else:
+            slippage_bps = ((reference_price - avg_price) / reference_price) * 10_000.0
+        return {
+            "requested_qty": float(qty),
+            "filled_qty": float(filled),
+            "fill_ratio": float(fill_ratio),
+            "avg_price": float(avg_price),
+            "reference_price": float(reference_price),
+            "slippage_bps": float(slippage_bps),
+            "notional": float(notional),
+        }
+
+    def order_flow_imbalance(self, *, levels: int = 5) -> float:
+        depth = self.get_depth(max(1, int(levels)))
+        bid_qty = float(sum(max(0, int(row.get("qty", 0))) for row in depth.get("bids", [])))
+        ask_qty = float(sum(max(0, int(row.get("qty", 0))) for row in depth.get("asks", [])))
+        denom = bid_qty + ask_qty
+        if denom <= 0:
+            return 0.0
+        return float((bid_qty - ask_qty) / denom)
+
+    def impact_curve_snapshot(
+        self,
+        *,
+        order_sizes: Optional[List[int]] = None,
+        levels: int = 5,
+    ) -> Dict[str, List[Dict[str, float]]]:
+        sizes = list(order_sizes or [100, 300, 800, 1500])
+        buy_curve: List[Dict[str, float]] = []
+        sell_curve: List[Dict[str, float]] = []
+        for size in sizes:
+            qty = int(max(1, size))
+            buy_stats = self.sweep_cost_estimate(OrderSide.BUY, qty, levels=levels)
+            sell_stats = self.sweep_cost_estimate(OrderSide.SELL, qty, levels=levels)
+            buy_curve.append(
+                {
+                    "size": float(qty),
+                    "slippage_bps": float(buy_stats["slippage_bps"]),
+                    "fill_ratio": float(buy_stats["fill_ratio"]),
+                    "avg_price": float(buy_stats["avg_price"]),
+                }
+            )
+            sell_curve.append(
+                {
+                    "size": float(qty),
+                    "slippage_bps": float(sell_stats["slippage_bps"]),
+                    "fill_ratio": float(sell_stats["fill_ratio"]),
+                    "avg_price": float(sell_stats["avg_price"]),
+                }
+            )
+        return {"buy": buy_curve, "sell": sell_curve}
+
     def clear(self):
         self.bids.clear()
         self.asks.clear()

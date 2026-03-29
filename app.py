@@ -131,6 +131,8 @@ def _init_state() -> None:
         "simulation_mode": "SMART",
         "feature_flags": {
             COMPETITION_MODE_FLAG: True,
+            "competition_safe_mode": True,
+            "market_pipeline_v2": True,
             "regulator_real_env_v1": True,
             "regulator_toy_fallback_v1": True,
         },
@@ -306,6 +308,43 @@ def _generate_competition_materials() -> Dict[str, Path]:
             "snapshot_info": {"scenario": scenario.name},
             "charts": [],
         }
+        agent_taxonomy_markdown = "\n".join(
+            [
+                "# agent_taxonomy",
+                "",
+                "- retail_general: 情绪与政策敏感的散户资金",
+                "- mutual_fund: 基准约束下的机构配置资金",
+                "- quant_timing: 趋势/波动状态切换资金",
+                "- market_maker: 流动性与库存约束资金",
+                "- state_stabilization_fund: 稳市承接资金",
+            ]
+        )
+        policy_causal_chain = {
+            "policy": scenario.name,
+            "path": ["policy_input", "expectation_shift", "order_flow_split", "lob_matching", "market_metrics"],
+            "summary": {
+                "return_pct": float(stat["return_pct"]),
+                "volatility": float(stat["volatility"]),
+                "panic_max": float(stat["panic_max"]),
+                "herding_avg": float(stat["herding_avg"]),
+            },
+        }
+        realism_metrics_csv = "\n".join(
+            [
+                "metric,value",
+                f"return_pct,{float(stat['return_pct'])}",
+                f"volatility,{float(stat['volatility'])}",
+                f"panic_max,{float(stat['panic_max'])}",
+                f"herding_avg,{float(stat['herding_avg'])}",
+            ]
+        )
+        competition_snapshot = {
+            "scenario": scenario.name,
+            "generated_at": now,
+            "seed": 42,
+            "config_hash": json.dumps(feature_flags, sort_keys=True, ensure_ascii=False),
+            "dataset_snapshot_id": f"demo:{scenario.name}",
+        }
         bundle = export_defense_bundle(
             root_dir=MATERIALS_ROOT,
             bundle_name=f"{scenario.name}_competition_bundle",
@@ -323,6 +362,10 @@ def _generate_competition_materials() -> Dict[str, Path]:
                     "technical_route_template": compliance["technical_route_template_path"],
                 },
             },
+            agent_taxonomy_markdown=agent_taxonomy_markdown,
+            policy_causal_chain=policy_causal_chain,
+            realism_metrics_csv=realism_metrics_csv,
+            competition_snapshot=competition_snapshot,
         )
         file_map["bundle_manifest.json"] = bundle["manifest_path"]
         file_map["ai_tool_usage_manifest.json"] = compliance["manifest_path"]
@@ -441,6 +484,30 @@ def _render_ai_decision_tab() -> None:
         dashboard_ui.render_policy_transmission_chain(chain_payload, key_prefix="advanced_ai")
         dashboard_ui.render_risk_event_timeline(upto, key_prefix="advanced_ai")
 
+    role_order_flows = {
+        "retail_general": float(latest["volume"]) * (0.32 - 0.22 * float(latest["panic_level"])),
+        "mutual_fund": float(latest["volume"]) * (0.22 - 0.12 * float(latest["panic_level"])),
+        "quant_timing": float(latest["volume"]) * (0.10 + 0.18 * float(latest["panic_level"])),
+        "market_maker": float(latest["volume"]) * (-0.08 + 0.04 * float(latest["panic_level"])),
+    }
+    spread = max(0.001, float(latest["panic_level"]) * 0.02)
+    buy_vol = float(chain_payload["market_microstructure"]["buy_volume"])
+    sell_vol = float(chain_payload["market_microstructure"]["sell_volume"])
+    open_px = float(latest.get("open", latest["close"]))
+    csad_val = float(latest.get("csad", latest.get("panic_level", 0.0)))
+    micro_metrics = {
+        "spread": spread,
+        "spread_pct": spread / max(1.0, float(latest["close"])),
+        "depth_imbalance": (buy_vol - sell_vol) / max(1.0, buy_vol + sell_vol),
+        "impact": abs(float(latest["close"]) - open_px) / max(1.0, float(latest["close"])),
+        "herding_proxy": abs(csad_val),
+    }
+    dashboard_ui.render_orderflow_microstructure_panel(
+        role_order_flows=role_order_flows,
+        microstructure_metrics=micro_metrics,
+        key_prefix="advanced_ai",
+    )
+
 
 def _render_advanced_analysis() -> None:
     st.session_state.runtime_mode = DEMO_MODE
@@ -545,6 +612,7 @@ def main() -> None:
         _render_advanced_analysis()
     else:
         _render_system_guide()
+    st.caption("仅供教学科研与仿真，不构成投资建议。")
 
 
 if __name__ == "__main__":

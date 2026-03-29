@@ -9,12 +9,17 @@ import math
 import random
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
+from agents.execution_adapter import ExecutionAdapter
 from agents.trading_agent_core import GLOBAL_CONFIG, Persona, TradingAgent
+from core.market_metrics import MarketMetrics
+from core.market_state import MarketState as UnifiedMarketState
+from core.types import ExecutionPlan, Order, OrderSide
 from core.behavioral_finance import (
     StylizedFactsTracker,
     behavioral_update_step,
@@ -45,6 +50,7 @@ from core.social.graph_state import SocialGraphState
 from core.world.event_bus import EventBus
 from engine.market_match import calculate_new_price
 from policy.policy_engine import PolicyEngine
+from policy.interpretation_engine import AgentBelief, PolicyInterpretationEngine
 from simulation_runner import BufferedIntent, ExogenousBackdropPoint, SimulationRunner
 
 
@@ -58,6 +64,13 @@ if not logger.handlers:
 
 def _clip(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, float(value)))
+
+
+@dataclass(slots=True)
+class LegacyActionView:
+    action: str
+    amount: float
+    target_price: Optional[float]
 
 
 class RumorManipulatorAgent:
@@ -165,6 +178,8 @@ class MarketEnvironment:
         agents: List[TradingAgent],
         *,
         use_isolated_matching: bool = True,
+        market_pipeline_v2: bool = True,
+        legacy_agent_fallback: bool = True,
         simulation_runner: Optional[SimulationRunner] = None,
         runner_symbol: str = "A_SHARE_IDX",
         steps_per_day: int = 10,
@@ -193,6 +208,8 @@ class MarketEnvironment:
         self.price_history: List[float] = [self.current_price]
         self.policy_engine = PolicyEngine()
         self.use_isolated_matching = use_isolated_matching
+        self.market_pipeline_v2 = bool(market_pipeline_v2)
+        self.legacy_agent_fallback = bool(legacy_agent_fallback)
         self.runner_symbol = runner_symbol
         self.last_step_report: Dict[str, Any] = {}
         self.last_stage_order: List[str] = []
@@ -236,6 +253,11 @@ class MarketEnvironment:
         self.spoofing_agent = SpoofingAgent(intensity=self._abuse_agent_scale)
         self._exogenous_backdrop: List[ExogenousBackdropPoint] = []
         self._latest_hybrid_point: Optional[Dict[str, float]] = None
+        self.policy_interpreter = PolicyInterpretationEngine(default_symbols=[self.runner_symbol])
+        self.execution_adapter = ExecutionAdapter(default_symbol=self.runner_symbol)
+        self._last_policy_package: Optional[Any] = None
+        self._last_agent_beliefs: List[AgentBelief] = []
+        self.unified_market_state = UnifiedMarketState.from_symbol_price(self.runner_symbol, self.current_price)
 
         self.macro_state = macro_state or MacroState()
         self.event_bus = event_bus or EventBus()
@@ -257,10 +279,11 @@ class MarketEnvironment:
         self._initialize_strategy_genomes()
 
         logger.info(
-            "Initialized MarketEnvironment: agents=%s, price=%.2f, isolated=%s",
+            "Initialized MarketEnvironment: agents=%s, price=%.2f, isolated=%s, pipeline_v2=%s",
             len(self.agents),
             self.current_price,
             self.use_isolated_matching,
+            self.market_pipeline_v2,
         )
 
     def _build_default_households(self, n: int) -> List[HouseholdAgent]:
@@ -510,9 +533,10 @@ class MarketEnvironment:
         returns: List[float] = []
         base_price = float(max(old_price, 1e-6))
         for action in agent_actions:
-            direction = str(getattr(action, "action", "HOLD")).upper()
-            amount = float(getattr(action, "amount", 0.0) or 0.0)
-            target = getattr(action, "target_price", None)
+            action_view = self._coerce_action_view(action, default_price=base_price)
+            direction = str(action_view.action).upper()
+            amount = float(action_view.amount)
+            target = action_view.target_price
             target_price = float(target) if target is not None else base_price
             price_signal = (target_price - base_price) / base_price
             size_signal = float(np.tanh(amount / 5000.0) * 0.04)
@@ -526,6 +550,50 @@ class MarketEnvironment:
         if not returns:
             returns = [0.0]
         return returns
+
+    def _coerce_action_view(self, action: Any, *, default_price: float) -> LegacyActionView:
+        if isinstance(action, ExecutionPlan):
+            qty = float(action.resolved_qty(default_price))
+            px = action.resolved_reference_price(default_price)
+            return LegacyActionView(action=str(action.action).upper(), amount=qty, target_price=float(px))
+        if isinstance(action, Order):
+            direction = "BUY" if action.side == OrderSide.BUY else "SELL"
+            return LegacyActionView(action=direction, amount=float(action.quantity), target_price=float(action.price))
+        direction = str(getattr(action, "action", "HOLD") or "HOLD").upper()
+        amount = float(getattr(action, "amount", 0.0) or 0.0)
+        target = getattr(action, "target_price", None)
+        target_price = float(target) if target is not None else default_price
+        return LegacyActionView(action=direction, amount=amount, target_price=target_price)
+
+    def _resolve_execution_plan(
+        self,
+        *,
+        agent: Any,
+        action: Any,
+        belief: Optional[AgentBelief],
+        market_state_payload: Mapping[str, Any],
+    ) -> Optional[ExecutionPlan]:
+        if isinstance(action, ExecutionPlan):
+            return action
+        if isinstance(action, Order):
+            return self.execution_adapter.plan_from_order(action)
+        if belief is not None and hasattr(agent, "decide_from_belief"):
+            try:
+                plan = agent.decide_from_belief(belief, dict(market_state_payload))
+                if isinstance(plan, ExecutionPlan):
+                    return plan
+            except Exception:
+                logger.exception("decide_from_belief failed for %s", getattr(agent, "agent_id", "unknown"))
+        action_view = self._coerce_action_view(action, default_price=float(market_state_payload.get("last_price", 0.0)))
+        return self.execution_adapter.plan_from_legacy_action(
+            agent_id=str(getattr(agent, "agent_id", "unknown")),
+            symbol=str(market_state_payload.get("symbol", self.runner_symbol)),
+            action=action_view.action,
+            amount=action_view.amount,
+            target_price=action_view.target_price,
+            step=self.simulation_time,
+            market_state=market_state_payload,
+        )
 
     def _update_disposition_book(self, agent_actions: Sequence[Any], old_price: float) -> None:
         for idx, action in enumerate(agent_actions):
@@ -744,7 +812,7 @@ class MarketEnvironment:
             "macro_context": macro_context.to_payload(),
         }
 
-        async def process_agent(agent: TradingAgent):
+        async def process_agent(agent: Any):
             behavioral_state = self._behavioral_state_for_agent(agent)
             genome = self._genome_for_agent(agent)
             behavioral_state = self._apply_genome_behavior_overlay(behavioral_state, genome)
@@ -777,7 +845,29 @@ class MarketEnvironment:
                 "risk_aversion": float(genome.risk_aversion),
                 "debate_participation": float(genome.debate_participation),
             }
-            return await agent.generate_trading_decision(payload, retrieved_context)
+            if hasattr(agent, "generate_trading_decision"):
+                return await agent.generate_trading_decision(payload, retrieved_context)
+            if hasattr(agent, "act"):
+                try:
+                    from agents.base_agent import MarketSnapshot
+
+                    snapshot = MarketSnapshot(
+                        symbol=self.runner_symbol,
+                        last_price=float(self.current_price),
+                        best_bid=float(self.current_price * 0.999),
+                        best_ask=float(self.current_price * 1.001),
+                        bid_ask_spread=float(max(self.current_price * 0.002, 0.01)),
+                        mid_price=float(self.current_price),
+                        total_volume=0,
+                        market_trend=float(self.macro_state.sentiment_index - 0.5),
+                        panic_level=float(max(0.0, 1.0 - self.macro_state.sentiment_index)),
+                        timestamp=float(self.simulation_time),
+                        policy_description=str(policy_text or ""),
+                    )
+                    return await agent.act(snapshot, [str(policy_text or "market_stable")])
+                except Exception:
+                    logger.exception("Agent act() fallback failed for %s", getattr(agent, "agent_id", "unknown"))
+            return LegacyActionView(action="HOLD", amount=0.0, target_price=float(self.current_price))
 
         logger.info("Collecting agent decisions: %s agents", len(self.agents))
         agent_actions = await asyncio.gather(*(process_agent(agent) for agent in self.agents))
@@ -785,6 +875,16 @@ class MarketEnvironment:
             str(getattr(agent, "agent_id", f"agent_{idx}")): action
             for idx, (agent, action) in enumerate(zip(self.agents, agent_actions))
         }
+        self._last_agent_beliefs = self.policy_interpreter.batch_interpret(
+            self._last_policy_package,
+            self.agents,
+            {
+                "symbols": [self.runner_symbol],
+                "symbol": self.runner_symbol,
+                "last_price": float(self.current_price),
+                "prices": {self.runner_symbol: float(self.current_price)},
+            },
+        )
 
         # 5) trading intent
         self.last_stage_order.append("trading intent")
@@ -793,8 +893,9 @@ class MarketEnvironment:
         buy_volume = 0.0
         sell_volume = 0.0
         for action in agent_actions:
-            action_type = str(getattr(action, "action", "HOLD")).upper()
-            amount = float(getattr(action, "amount", 0.0) or 0.0)
+            action_view = self._coerce_action_view(action, default_price=self.current_price)
+            action_type = str(action_view.action).upper()
+            amount = float(action_view.amount)
             if action_type == "BUY":
                 buy_volume += amount
             elif action_type == "SELL":
@@ -815,43 +916,79 @@ class MarketEnvironment:
         trade_count = 0
         buffered_intents = 0
         matching_mode = "impact_model"
+        matching_snapshot: Dict[str, Any] = {}
 
         if self.use_isolated_matching:
             try:
                 matching_mode = "isolated_ipc"
-                for idx, action in enumerate(agent_actions):
-                    action_type = str(getattr(action, "action", "HOLD")).upper()
-                    amount = float(getattr(action, "amount", 0.0) or 0.0)
-                    if action_type not in {"BUY", "SELL"} or amount <= 0:
-                        continue
-
-                    target_price = getattr(action, "target_price", None)
-                    intent_price = float(target_price) if target_price else float(self.current_price)
-                    intent = BufferedIntent(
-                        intent_id=str(uuid.uuid4()),
-                        agent_id=getattr(self.agents[idx], "agent_id", f"agent_{idx}"),
-                        side=action_type.lower(),
-                        quantity=max(1, int(amount)),
-                        price=max(0.01, intent_price),
-                        symbol=self.runner_symbol,
-                        activate_step=self.simulation_time,
-                        intent_type="order",
-                        metadata={"abuse_tag": "organic"},
+                if self.market_pipeline_v2:
+                    plans: List[ExecutionPlan] = []
+                    market_state_payload = {
+                        "symbol": self.runner_symbol,
+                        "symbols": [self.runner_symbol],
+                        "last_price": float(self.current_price),
+                        "prices": {self.runner_symbol: float(self.current_price)},
+                    }
+                    for idx, action in enumerate(agent_actions):
+                        belief = self._last_agent_beliefs[idx] if idx < len(self._last_agent_beliefs) else None
+                        plan = self._resolve_execution_plan(
+                            agent=self.agents[idx],
+                            action=action,
+                            belief=belief,
+                            market_state_payload=market_state_payload,
+                        )
+                        if plan is not None:
+                            plans.append(plan)
+                    intents = self.execution_adapter.compile_batch(
+                        plans,
+                        market_state=market_state_payload,
+                        step=self.simulation_time,
                     )
-                    self._register_order_submission(intent, tick=self.simulation_time)
-                    ack = self.simulation_runner.submit_intent(intent)
-                    buffered_intents = max(buffered_intents, int(ack.get("buffer_size", 0)))
+                    for intent in malicious_intents:
+                        if intent.symbol != self.runner_symbol:
+                            intent.symbol = self.runner_symbol
+                        if intent.activate_step is None:
+                            intent.activate_step = self.simulation_time
+                        intents.append(intent)
+                    for intent in intents:
+                        self._register_order_submission(intent, tick=self.simulation_time)
+                    snapshot = self.simulation_runner.submit_batch(intents)
+                    buffered_intents = int(snapshot.get("buffer_size", 0))
+                else:
+                    for idx, action in enumerate(agent_actions):
+                        action_view = self._coerce_action_view(action, default_price=self.current_price)
+                        action_type = str(action_view.action).upper()
+                        amount = float(action_view.amount)
+                        if action_type not in {"BUY", "SELL"} or amount <= 0:
+                            continue
 
-                for intent in malicious_intents:
-                    if intent.symbol != self.runner_symbol:
-                        intent.symbol = self.runner_symbol
-                    if intent.activate_step is None:
-                        intent.activate_step = self.simulation_time
-                    self._register_order_submission(intent, tick=self.simulation_time)
-                    ack = self.simulation_runner.submit_intent(intent)
-                    buffered_intents = max(buffered_intents, int(ack.get("buffer_size", 0)))
+                        intent_price = float(action_view.target_price or self.current_price)
+                        intent = BufferedIntent(
+                            intent_id=str(uuid.uuid4()),
+                            agent_id=getattr(self.agents[idx], "agent_id", f"agent_{idx}"),
+                            side=action_type.lower(),
+                            quantity=max(1, int(amount)),
+                            price=max(0.01, intent_price),
+                            symbol=self.runner_symbol,
+                            activate_step=self.simulation_time,
+                            intent_type="order",
+                            metadata={"abuse_tag": "organic"},
+                        )
+                        self._register_order_submission(intent, tick=self.simulation_time)
+                        ack = self.simulation_runner.submit_intent(intent)
+                        buffered_intents = max(buffered_intents, int(ack.get("buffer_size", 0)))
 
-                snapshot = self.simulation_runner.advance_time(1)
+                    for intent in malicious_intents:
+                        if intent.symbol != self.runner_symbol:
+                            intent.symbol = self.runner_symbol
+                        if intent.activate_step is None:
+                            intent.activate_step = self.simulation_time
+                        self._register_order_submission(intent, tick=self.simulation_time)
+                        ack = self.simulation_runner.submit_intent(intent)
+                        buffered_intents = max(buffered_intents, int(ack.get("buffer_size", 0)))
+
+                    snapshot = self.simulation_runner.advance_time(1)
+                matching_snapshot = dict(snapshot)
                 trade_count = int(snapshot.get("trade_count", 0))
                 if snapshot.get("last_price") is not None:
                     self.current_price = float(snapshot["last_price"])
@@ -861,9 +998,27 @@ class MarketEnvironment:
                 logger.exception("isolated matching failed; fallback to impact model: %s", exc)
                 matching_mode = "fallback_impact_model"
                 self.current_price = calculate_new_price(buy_volume, sell_volume, self.current_price)
+                matching_snapshot = {
+                    "last_price": float(self.current_price),
+                    "trade_count": 0,
+                    "best_bid": None,
+                    "best_ask": None,
+                    "depth": {"bids": [], "asks": []},
+                    "activity_stats": {},
+                    "buffer_size": 0,
+                }
                 abuse_detection = self.abuse_sandbox.detect(self.simulation_time)
         else:
             self.current_price = calculate_new_price(buy_volume, sell_volume, self.current_price)
+            matching_snapshot = {
+                "last_price": float(self.current_price),
+                "trade_count": 0,
+                "best_bid": None,
+                "best_ask": None,
+                "depth": {"bids": [], "asks": []},
+                "activity_stats": {},
+                "buffer_size": 0,
+            }
             for intent in malicious_intents:
                 self._register_order_submission(intent, tick=self.simulation_time)
                 if str(intent.intent_type).lower() == "cancel" or str(intent.side).lower() == "cancel":
@@ -891,6 +1046,24 @@ class MarketEnvironment:
             self._abuse_agent_scale = max(0.25, self._abuse_agent_scale * 0.5)
             self.rumor_manipulator_agent.intensity = self._abuse_agent_scale
             self.spoofing_agent.intensity = self._abuse_agent_scale
+
+        role_order_flows: Dict[str, float] = {}
+        for agent, action in zip(self.agents, agent_actions):
+            archetype_key = str(getattr(getattr(agent, "persona", None), "archetype_key", "unknown") or "unknown")
+            action_view = self._coerce_action_view(action, default_price=self.current_price)
+            signed_qty = float(action_view.amount if action_view.action == "BUY" else -action_view.amount if action_view.action == "SELL" else 0.0)
+            role_order_flows[archetype_key] = role_order_flows.get(archetype_key, 0.0) + signed_qty
+
+        self.unified_market_state = self.unified_market_state.apply_snapshot(
+            matching_snapshot,
+            symbol=self.runner_symbol,
+            policy_pkg=self._last_policy_package.to_dict() if self._last_policy_package is not None else None,
+        )
+        micro_metrics = MarketMetrics.compute(
+            snapshot=matching_snapshot,
+            trade_tape=list(matching_snapshot.get("trades", []) or []),
+            role_flows=role_order_flows,
+        )
 
         # 7) metrics update
         self.last_stage_order.append("metrics update")
@@ -952,10 +1125,14 @@ class MarketEnvironment:
             "new_price": self.current_price,
             "price_change_pct": price_change,
             "matching_mode": matching_mode,
+            "pipeline_version": "v2" if self.market_pipeline_v2 else "v1",
             "trade_count": trade_count,
             "buffered_intents": buffered_intents,
             "stage_order": list(self.last_stage_order),
             "macro_state": self.macro_state.to_dict(),
+            "market_state": self.unified_market_state.to_dict(),
+            "microstructure_metrics": micro_metrics,
+            "role_order_flows": role_order_flows,
             "social_mean_sentiment": contagion.mean_sentiment,
             "policy_transmission_chain": policy_chain,
             "macro_context": macro_context.to_payload(),
@@ -976,6 +1153,18 @@ class MarketEnvironment:
                 "tick": self._intervention_tick,
             },
         }
+        if self._last_policy_package is not None:
+            self.last_step_report["policy_package"] = self._last_policy_package.to_dict()
+        if self._last_agent_beliefs:
+            self.last_step_report["agent_beliefs"] = [
+                {
+                    "confidence": float(belief.confidence),
+                    "latency_bars": int(belief.latency_bars),
+                    "disagreement_tags": list(belief.disagreement_tags),
+                    "expected_return": dict(belief.expected_return),
+                }
+                for belief in self._last_agent_beliefs
+            ]
         self.last_step_report["stylized_facts_snapshot"] = self.stylized_facts_tracker.report()
         try:
             saved = self.stylized_facts_tracker.save_json(self.stylized_facts_report_path)
@@ -1011,13 +1200,30 @@ class MarketEnvironment:
 
     def _compile_policy(self, policy_text: Optional[str]) -> Optional[PolicyShock]:
         if not policy_text:
+            self._last_policy_package = None
             return None
-        shock = self.government.compile_policy_text(policy_text, tick=self.simulation_time)
+        policy_package = self.government.compile_policy_package(policy_text, tick=self.simulation_time)
+        self._last_policy_package = policy_package
+        shock = PolicyShock(
+            policy_id=policy_package.event.policy_id,
+            policy_text=str(policy_text),
+            **policy_package.to_policy_shock_fields(),
+        )
+        shock.metadata = {
+            "policy_event": policy_package.event.to_dict(),
+            "policy_package": policy_package.to_dict(),
+            "parser_version": policy_package.parser_version,
+            "feature_flags": dict(policy_package.metadata.get("feature_flags", {})),
+            "config_hash": str(policy_package.metadata.get("config_hash", "")),
+        }
         self.event_bus.publish(
             event_type="policy_compiled",
             stage="policy",
             tick=self.simulation_time,
-            payload=shock.to_dict(),
+            payload={
+                **shock.to_dict(),
+                "policy_package": policy_package.to_dict(),
+            },
         )
         # Optional memory broadcast for agents with memory banks.
         for agent in self.agents:

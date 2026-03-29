@@ -709,6 +709,7 @@ def render_history_replay() -> None:
         """,
         unsafe_allow_html=True,
     )
+    st.caption("仅供教学科研与仿真，不构成投资建议。")
 
     if "history_replay_result" not in st.session_state:
         st.session_state.history_replay_result = None

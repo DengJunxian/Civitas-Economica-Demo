@@ -744,6 +744,29 @@ class StructuredPolicyParser:
         sector_effects = {name: _layer_score(channel_map, weights) for name, weights in sector_weights.items()}
         factor_effects = {name: _layer_score(channel_map, weights) for name, weights in factor_weights.items()}
         agent_class_effects = {name: _layer_score(channel_map, weights) for name, weights in agent_weights.items()}
+        fine_agent_aliases = {
+            "retail_general": "retail",
+            "retail_value": "retail",
+            "retail_emotional": "retail",
+            "retail_day_trader": "retail",
+            "retail_swing": "retail",
+            "retail_momentum_chaser": "retail",
+            "retail_mean_reverter": "retail",
+            "mutual_fund": "institution",
+            "private_fund_discretionary": "institution",
+            "long_term_institution": "institution",
+            "pension_fund": "institution",
+            "insurer": "institution",
+            "quant_stock_selector": "quant",
+            "quant_timing": "quant",
+            "trend_trader": "quant",
+            "event_driven_capital": "institution",
+            "media_propagator": "rumor_trader",
+            "state_stabilization_fund": "state_stabilization",
+        }
+        for alias, coarse in fine_agent_aliases.items():
+            if coarse in agent_class_effects:
+                agent_class_effects[alias] = float(agent_class_effects[coarse])
 
         # Small regime adjustments so the UI can show a distinct story by backdrop.
         regime_bias = {

@@ -28,6 +28,15 @@ _KEYWORD_MAP = {
     "reasoner": "model_variant",
     "chat": "model_variant",
 }
+_EXCLUDED_PATH_PARTS = {
+    "venv",
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".tmp",
+    "tmp",
+    "outputs",
+}
 
 
 def resolve_competition_feature_flags(feature_flags: Optional[Mapping[str, Any]] = None) -> Dict[str, bool]:
@@ -51,6 +60,9 @@ def competition_mode_enabled(
 def _iter_candidate_files(project_root: Path) -> Iterable[Path]:
     for path in project_root.rglob("*"):
         if not path.is_file():
+            continue
+        lowered_parts = {part.lower() for part in path.parts}
+        if lowered_parts.intersection(_EXCLUDED_PATH_PARTS):
             continue
         if any(part.startswith(".") for part in path.parts if part not in {".", ".."}):
             continue

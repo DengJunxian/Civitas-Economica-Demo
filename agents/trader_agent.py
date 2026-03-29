@@ -13,6 +13,7 @@ TraderAgent 瀹炵幇 鈥?鍩轰簬璁ょ煡闂幆鐨勪氦鏄撴櫤鑳戒綋
 """
 
 import asyncio
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -39,6 +40,14 @@ from agents.cognition.graph_builder import GraphExtractor
 from agents.roles.news_analyst import NewsAnalyst
 from agents.roles.quant_analyst import QuantAnalyst
 from agents.roles.risk_analyst import RiskAnalyst
+
+
+@dataclass
+class LegacyDecisionAction:
+    action: str
+    amount: float
+    target_price: Optional[float] = None
+
 
 class TraderAgent(BaseAgent):
     """
@@ -1341,6 +1350,93 @@ class TraderAgent(BaseAgent):
             return plan
 
         return plan.to_order()
+
+    async def generate_trading_decision(self, market_data: Dict[str, Any], retrieved_context: str = "") -> Any:
+        """Compatibility bridge for legacy simulation loop."""
+        price = float(market_data.get("current_price", 0.0) or 0.0)
+        if price <= 0:
+            price = 1.0
+        snapshot = MarketSnapshot(
+            symbol=str(market_data.get("symbol", "A_SHARE_IDX")),
+            last_price=price,
+            best_bid=float(market_data.get("best_bid", price * 0.999) or price * 0.999),
+            best_ask=float(market_data.get("best_ask", price * 1.001) or price * 1.001),
+            bid_ask_spread=float(market_data.get("spread", max(price * 0.002, 0.01)) or max(price * 0.002, 0.01)),
+            mid_price=price,
+            total_volume=int(market_data.get("volume", 0) or 0),
+            volatility=float(market_data.get("volatility", 0.0) or 0.0),
+            market_trend=float(market_data.get("trend", 0.0) or 0.0),
+            panic_level=float(market_data.get("panic_level", 0.0) or 0.0),
+            timestamp=float(market_data.get("timestamp", time.time()) or time.time()),
+            policy_description=str(market_data.get("latest_broadcast", "") or ""),
+        )
+        news = [str(market_data.get("latest_broadcast", "") or "market_stable")]
+        result = await self.act(snapshot, news)
+        if isinstance(result, ExecutionPlan):
+            return result
+        if isinstance(result, Order):
+            action = "BUY" if result.side == OrderSide.BUY else "SELL"
+            return LegacyDecisionAction(action=action, amount=float(result.quantity), target_price=float(result.price))
+        return LegacyDecisionAction(action="HOLD", amount=0.0, target_price=price)
+
+    def decide_from_belief(self, belief: Any, market_state: Optional[Dict[str, Any]] = None) -> Optional[ExecutionPlan]:
+        """Derive an execution plan from policy interpretation belief."""
+        if belief is None:
+            return None
+        expected_return = dict(getattr(belief, "expected_return", {}) or {})
+        if not expected_return:
+            return None
+        symbol = str(max(expected_return.items(), key=lambda kv: abs(float(kv[1])))[0])
+        alpha = float(expected_return.get(symbol, 0.0))
+        confidence = float(getattr(belief, "confidence", 0.5) or 0.5)
+        if abs(alpha) < 1e-4:
+            return None
+        action = "BUY" if alpha > 0 else "SELL"
+        ref_price = 0.0
+        if market_state:
+            prices = market_state.get("prices", {})
+            if isinstance(prices, dict):
+                ref_price = float(prices.get(symbol, 0.0) or 0.0)
+            if ref_price <= 0:
+                ref_price = float(market_state.get("last_price", 0.0) or 0.0)
+        if ref_price <= 0 and self._price_history:
+            ref_price = float(self._price_history[-1])
+        if ref_price <= 0:
+            ref_price = 1.0
+        risk_budget = max(0.05, min(1.0, 0.4 + 0.4 * confidence + 0.2 * abs(alpha)))
+        if action == "BUY":
+            qty = int((self.cash_balance * risk_budget) / ref_price)
+        else:
+            qty = int(self.portfolio.get(symbol, 0) * risk_budget)
+            if qty <= 0:
+                qty = int(max(0, self.portfolio.get(symbol, 0)))
+        qty = max(0, int(qty))
+        if qty <= 0:
+            return None
+        reasoning_output = {
+            "symbol": symbol,
+            "timestamp": time.time(),
+            "decision": {
+                "action": action,
+                "qty": qty,
+                "price": ref_price,
+                "urgency": max(0.1, min(1.0, abs(alpha) * 3.0)),
+                "slicing_rule": "twap-like" if qty >= 500 else "single",
+                "time_horizon": 3 if qty >= 500 else 1,
+                "participation_rate": min(0.45, 0.15 + 0.2 * confidence),
+            },
+            "belief_metadata": dict(getattr(belief, "metadata", {}) or {}),
+        }
+        plan = self._build_execution_plan(reasoning_output)
+        if plan is None:
+            return None
+        plan.metadata["belief"] = {
+            "confidence": confidence,
+            "latency_bars": int(getattr(belief, "latency_bars", 0) or 0),
+            "disagreement_tags": list(getattr(belief, "disagreement_tags", []) or []),
+            "expected_return": expected_return,
+        }
+        return plan
 
     async def update_memory(
         self,

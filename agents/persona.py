@@ -60,6 +60,11 @@ class PersonaArchetype:
     leverage_bias: float = 0.0
     execution_preference: str = "balanced"
     order_horizon_bars: int = 1
+    info_latency_bars: int = 1
+    herding_tendency: float = 0.5
+    contrarian_tendency: float = 0.2
+    risk_budget: float = 0.5
+    sentiment_sensitivity: float = 0.5
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -95,6 +100,11 @@ class PersonaArchetype:
             "leverage_bias": float(self.leverage_bias),
             "execution_preference": self.execution_preference,
             "order_horizon_bars": int(self.order_horizon_bars),
+            "info_latency_bars": int(self.info_latency_bars),
+            "herding_tendency": float(self.herding_tendency),
+            "contrarian_tendency": float(self.contrarian_tendency),
+            "risk_budget": float(self.risk_budget),
+            "sentiment_sensitivity": float(self.sentiment_sensitivity),
             "constraints": self.constraint_schema(),
             "memory_profile": self.memory_schema(),
         }
@@ -127,7 +137,13 @@ class PersonaArchetype:
             "inventory_limit": float(self.inventory_limit),
             "execution_preference": self.execution_preference,
             "order_horizon_bars": int(self.order_horizon_bars),
+            "info_latency_bars": int(self.info_latency_bars),
             "flow_pressure": float(self.flow_pressure),
+            "herding_tendency": float(self.herding_tendency),
+            "contrarian_tendency": float(self.contrarian_tendency),
+            "risk_budget": float(self.risk_budget),
+            "sentiment_sensitivity": float(self.sentiment_sensitivity),
+            "holding_horizon_days": float(_holding_period_to_days(self.holding_period)),
         }
 
     def memory_schema(self) -> Dict[str, Any]:

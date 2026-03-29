@@ -620,8 +620,98 @@ def _persist_policy_event(
         return
 
 
+def _render_agent_disagreement_chart(package_dict: Dict[str, Any]) -> None:
+    agent_effects = dict(package_dict.get("agent_class_effects", {}) or {})
+    if not agent_effects:
+        return
+    frame = (
+        pd.DataFrame({"agent": list(agent_effects.keys()), "score": [float(v) for v in agent_effects.values()]})
+        .sort_values("score", key=lambda series: series.abs(), ascending=False)
+        .head(12)
+    )
+    fig = go.Figure(
+        data=[
+            go.Bar(
+                x=frame["agent"],
+                y=frame["score"],
+                marker_color=["#16a34a" if v >= 0 else "#dc2626" for v in frame["score"]],
+            )
+        ]
+    )
+    fig.update_layout(
+        template="plotly_white",
+        title="投资者政策解读分歧",
+        xaxis_title="角色",
+        yaxis_title="影响得分",
+        margin=dict(l=20, r=20, t=40, b=20),
+        height=320,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_role_orderflow_waterfall(frame: pd.DataFrame, package_dict: Dict[str, Any]) -> None:
+    if frame.empty:
+        return
+    agent_effects = dict(package_dict.get("agent_class_effects", {}) or {})
+    if not agent_effects:
+        return
+    scale = float(frame["volume"].mean() / max(len(agent_effects), 1))
+    rows: List[Dict[str, Any]] = []
+    for role, score in agent_effects.items():
+        rows.append({"role": str(role), "net_flow": float(score) * scale})
+    flow_df = pd.DataFrame(rows).sort_values("net_flow")
+    fig = go.Figure(
+        go.Waterfall(
+            x=flow_df["role"],
+            y=flow_df["net_flow"],
+            measure=["relative"] * len(flow_df),
+            connector={"line": {"color": "rgb(63, 63, 63)"}},
+            increasing={"marker": {"color": "#16a34a"}},
+            decreasing={"marker": {"color": "#ef4444"}},
+        )
+    )
+    fig.update_layout(
+        template="plotly_white",
+        title="角色订单流拆解（估计）",
+        yaxis_title="净买卖量（估计）",
+        margin=dict(l=20, r=20, t=40, b=20),
+        height=320,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_sector_rotation_heatmap(package_dict: Dict[str, Any]) -> None:
+    sector_effects = dict(package_dict.get("sector_effects", {}) or {})
+    if not sector_effects:
+        return
+    ordered = sorted(sector_effects.items(), key=lambda kv: abs(float(kv[1])), reverse=True)[:12]
+    labels = [str(name) for name, _ in ordered]
+    values = [float(value) for _, value in ordered]
+    z = np.array([values])
+    fig = go.Figure(
+        data=[
+            go.Heatmap(
+                z=z,
+                x=labels,
+                y=["sector_heat"],
+                colorscale="RdYlGn",
+                zmid=0.0,
+                colorbar=dict(title="影响"),
+            )
+        ]
+    )
+    fig.update_layout(
+        template="plotly_white",
+        title="板块热度轮动（政策冲击）",
+        margin=dict(l=20, r=20, t=40, b=20),
+        height=260,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def render_policy_lab() -> None:
     st.subheader("政策实验台")
+    st.caption("仅供教学科研与仿真，不构成投资建议。")
 
     templates = _load_policy_templates()
     template_map = {str(item.get("title", f"template-{idx}")): item for idx, item in enumerate(templates)}
@@ -767,6 +857,12 @@ def render_policy_lab() -> None:
 
     package_dict = result.get("policy_package") or {}
     if package_dict:
+        c1, c2 = st.columns(2)
+        with c1:
+            _render_agent_disagreement_chart(package_dict)
+        with c2:
+            _render_role_orderflow_waterfall(frame, package_dict)
+        _render_sector_rotation_heatmap(package_dict)
         st.markdown("#### 成因解读（自然语言）")
         st.markdown(_get_policy_narrative(str(result.get("policy_text", "")), summary, package_dict))
 

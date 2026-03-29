@@ -563,6 +563,10 @@ def export_defense_bundle(
     feature_flags: Optional[Dict[str, Any]] = None,
     compliance_artifacts: Optional[Dict[str, Any]] = None,
     social_propagation_artifacts: Optional[Dict[str, Any]] = None,
+    agent_taxonomy_markdown: Optional[str] = None,
+    policy_causal_chain: Optional[Dict[str, Any]] = None,
+    realism_metrics_csv: Optional[str] = None,
+    competition_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Export one-click defense materials package:
@@ -586,6 +590,10 @@ def export_defense_bundle(
     causal_chain_path = bundle_root / "causal_chain_graph.json"
     outline_path = bundle_root / "defense_outline.md"
     social_path = bundle_root / "social_propagation_report.json"
+    agent_taxonomy_path = bundle_root / "agent_taxonomy.md"
+    policy_causal_chain_path = bundle_root / "policy_causal_chain.json"
+    realism_metrics_path = bundle_root / "realism_metrics.csv"
+    competition_snapshot_path = bundle_root / "competition_mode_snapshot.json"
     manifest_path = bundle_root / "bundle_manifest.json"
 
     design_path.write_text(design_chapter_markdown, encoding="utf-8")
@@ -596,6 +604,20 @@ def export_defense_bundle(
     if social_propagation_artifacts:
         social_path.write_text(
             json.dumps(serializable_payload(social_propagation_artifacts), ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    if agent_taxonomy_markdown:
+        agent_taxonomy_path.write_text(str(agent_taxonomy_markdown), encoding="utf-8")
+    if policy_causal_chain is not None:
+        policy_causal_chain_path.write_text(
+            json.dumps(serializable_payload(policy_causal_chain), ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    if realism_metrics_csv:
+        realism_metrics_path.write_text(str(realism_metrics_csv), encoding="utf-8")
+    if competition_snapshot is not None:
+        competition_snapshot_path.write_text(
+            json.dumps(serializable_payload(competition_snapshot), ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
         )
 
@@ -624,6 +646,14 @@ def export_defense_bundle(
     }
     if social_propagation_artifacts:
         manifest["files"]["social_propagation_report"] = str(social_path)
+    if agent_taxonomy_markdown:
+        manifest["files"]["agent_taxonomy"] = str(agent_taxonomy_path)
+    if policy_causal_chain is not None:
+        manifest["files"]["policy_causal_chain"] = str(policy_causal_chain_path)
+    if realism_metrics_csv:
+        manifest["files"]["realism_metrics"] = str(realism_metrics_path)
+    if competition_snapshot is not None:
+        manifest["files"]["competition_mode_snapshot"] = str(competition_snapshot_path)
     if compliance_artifacts:
         for key, value in dict(compliance_artifacts.get("files", {})).items():
             manifest["files"][key] = str(value)

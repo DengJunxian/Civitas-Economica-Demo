@@ -293,6 +293,25 @@ class SimulationRunner:
     def submit_intent(self, intent: BufferedIntent) -> Dict[str, Any]:
         return self._request("submit_intent", asdict(intent))
 
+    def submit_batch(self, intents: List[BufferedIntent], *, advance_steps: int = 1) -> Dict[str, Any]:
+        submitted = 0
+        accepted = 0
+        max_buffer_size = 0
+        acks: List[Dict[str, Any]] = []
+        for intent in intents:
+            ack = self.submit_intent(intent)
+            acks.append(ack)
+            submitted += 1
+            if bool(ack.get("accepted", False)):
+                accepted += 1
+            max_buffer_size = max(max_buffer_size, int(ack.get("buffer_size", 0) or 0))
+        snapshot = self.advance_time(max(1, int(advance_steps)))
+        snapshot["submitted_count"] = int(submitted)
+        snapshot["accepted_count"] = int(accepted)
+        snapshot["max_buffer_size"] = int(max_buffer_size)
+        snapshot["acks"] = acks
+        return snapshot
+
     def advance_time(self, steps: int = 1) -> Dict[str, Any]:
         return self._request("advance_time", {"steps": steps})
 

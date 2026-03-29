@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from plotly.subplots import make_subplots
 from core.data.market_data_provider import MarketDataProvider, MarketDataQuery
 from core.event_store import EventRecord, EventStore, EventType
 from core.macro.government import GovernmentAgent, PolicyShock
+from core.runtime_mode import RuntimeModeProfile, resolve_runtime_mode_profile
 from policy.structured import PolicyPackage
 from ui.reporting import official_report_meta, write_report_artifacts
 
@@ -53,6 +55,24 @@ class PolicyNarrativeCard:
     summary: str
     bullets: List[str]
     tone: str = "neutral"
+
+
+def _resolve_runtime_profile() -> RuntimeModeProfile:
+    mode = str(st.session_state.get("simulation_mode", "SMART")).strip().upper()
+    return resolve_runtime_mode_profile(mode)
+
+
+def _run_async(coro: Any) -> Any:
+    try:
+        return asyncio.run(coro)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
 
 
 def _default_template_library() -> List[Dict[str, Any]]:
@@ -311,6 +331,151 @@ def _generate_policy_metrics(
     return pd.DataFrame(rows)
 
 
+def _run_policy_committee_review(policy_text: str, runtime_profile: RuntimeModeProfile) -> Dict[str, Any]:
+    if not runtime_profile.enable_policy_committee or not runtime_profile.use_live_api:
+        return {}
+    try:
+        from config import GLOBAL_CONFIG
+        from core.policy_committee import PolicyCommittee
+    except Exception as exc:
+        return {"error": f"committee_import_error: {exc}"}
+
+    if not (GLOBAL_CONFIG.DEEPSEEK_API_KEY or GLOBAL_CONFIG.ZHIPU_API_KEY):
+        return {"error": "committee_skipped_no_api_key"}
+
+    try:
+        committee = PolicyCommittee(api_key=GLOBAL_CONFIG.DEEPSEEK_API_KEY)
+        result = committee.interpret(policy_text)
+        return {
+            "parameters": dict(result.parameters or {}),
+            "compliance_passed": bool(result.compliance.passed),
+            "violations": list(result.compliance.violations or []),
+            "warnings": list(result.compliance.warnings or []),
+            "reasoning_chain": list(result.reasoning_chain or []),
+            "final_state": dict(result.final_state or {}),
+        }
+    except Exception as exc:
+        return {"error": f"committee_runtime_error: {exc}"}
+
+
+def _generate_policy_metrics_deep(
+    *,
+    policy_text: str,
+    intensity: float,
+    duration_days: int,
+    rumor_noise: bool,
+    runtime_profile: RuntimeModeProfile,
+    end_date: Optional[pd.Timestamp] = None,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    from agents.persona import Persona
+    from agents.trader_agent import TraderAgent
+    from engine.simulation_loop import MarketEnvironment
+
+    symbol = "A_SHARE_IDX"
+    role_specs: List[Tuple[str, float]] = [
+        ("retail_day_trader", 240_000.0),
+        ("retail_swing", 320_000.0),
+        ("retail_momentum_chaser", 200_000.0),
+        ("mutual_fund", 1_800_000.0),
+        ("quant_arbitrage", 1_400_000.0),
+        ("market_maker", 2_200_000.0),
+    ]
+    llm_cutoff = max(3, int(round(len(role_specs) * 0.67)))
+    agents: List[TraderAgent] = []
+    for idx, (archetype_key, cash) in enumerate(role_specs):
+        persona = Persona.from_archetype(archetype_key, name=f"{archetype_key}_{idx:02d}")
+        use_llm = bool(runtime_profile.llm_primary and idx < llm_cutoff)
+        agent = TraderAgent(
+            agent_id=f"deep_{idx:02d}",
+            cash_balance=float(cash),
+            portfolio={symbol: int(200 + 40 * idx)},
+            psychology_profile={
+                "feature_flags": {"trader_intent_execution_split_v1": True},
+                "institution_type": archetype_key,
+            },
+            persona=persona,
+            use_llm=use_llm,
+            model_priority=list(runtime_profile.model_priority),
+            execution_plan_enabled=True,
+        )
+        agents.append(agent)
+
+    env = MarketEnvironment(
+        agents,
+        use_isolated_matching=True,
+        market_pipeline_v2=bool(runtime_profile.market_pipeline_v2),
+        runner_symbol=symbol,
+        simulation_mode=runtime_profile.mode,
+        llm_primary=bool(runtime_profile.llm_primary),
+        deep_reasoning_pause_s=float(runtime_profile.pause_for_llm_seconds),
+        model_priority=list(runtime_profile.model_priority),
+        enable_policy_committee=bool(runtime_profile.enable_policy_committee),
+    )
+
+    committee_report = _run_policy_committee_review(policy_text, runtime_profile)
+    policy_payload = f"{policy_text} [policy_intensity={float(intensity):.2f}]"
+    env.schedule_policy_shock(policy_payload)
+    if float(intensity) >= 1.1:
+        env.schedule_policy_shock("政策力度超预期，资金对冲与追价行为同步放大。")
+    if rumor_noise:
+        env.schedule_policy_shock("谣言扩散导致恐慌交易升温，监管机构发布澄清提示。")
+
+    steps = max(8, min(int(max(6.0, duration_days * max(0.6, min(1.2, float(intensity))))), 18))
+    anchor = pd.Timestamp(end_date).normalize() if end_date is not None else pd.Timestamp.today().normalize()
+    dates = pd.bdate_range(end=anchor, periods=steps)
+    rows: List[Dict[str, Any]] = []
+    last_close = float(env.current_price)
+    latest_report: Dict[str, Any] = {}
+    try:
+        for idx in range(steps):
+            latest_report = dict(_run_async(env.simulation_step()) or {})
+            close = float(latest_report.get("new_price", last_close) or last_close)
+            open_price = float(latest_report.get("old_price", last_close) or last_close)
+            spread_proxy = abs(float(latest_report.get("price_change_pct", 0.0) or 0.0)) / 100.0
+            high = max(open_price, close) * (1.0 + 0.001 + spread_proxy * 0.35)
+            low = min(open_price, close) * (1.0 - 0.001 - spread_proxy * 0.35)
+            volume = float(latest_report.get("buy_volume", 0.0) or 0.0) + float(
+                latest_report.get("sell_volume", 0.0) or 0.0
+            )
+            macro_state = dict(latest_report.get("macro_state", {}) or {})
+            sentiment = float(macro_state.get("sentiment_index", 0.5) or 0.5)
+            panic = float(np.clip(1.0 - sentiment + spread_proxy * 5.0, 0.05, 0.95))
+            diagnostics = dict(latest_report.get("behavioral_diagnostics", {}) or {})
+            csad = float(diagnostics.get("csad", 0.05) or 0.05)
+            rows.append(
+                {
+                    "step": idx + 1,
+                    "time": dates[idx].strftime("%Y-%m-%d"),
+                    "open": round(open_price, 2),
+                    "high": round(high, 2),
+                    "low": round(max(0.01, low), 2),
+                    "close": round(close, 2),
+                    "volume": round(max(volume, 1.0), 2),
+                    "csad": round(max(csad, 0.0), 4),
+                    "panic_level": round(panic, 4),
+                }
+            )
+            last_close = close
+    finally:
+        env.close()
+
+    thinking_stats = dict(latest_report.get("thinking_stats", {}) or {})
+    if not thinking_stats:
+        thinking_stats = {
+            "fast_count": int(sum(int(getattr(agent, "fast_think_count", 0) or 0) for agent in agents)),
+            "slow_count": int(sum(int(getattr(agent, "slow_think_count", 0) or 0) for agent in agents)),
+        }
+    deep_meta: Dict[str, Any] = {
+        "mode_profile": runtime_profile.to_dict(),
+        "llm_agent_count": int(sum(1 for agent in agents if bool(getattr(agent, "use_llm", False)))),
+        "agent_count": len(agents),
+        "thinking_stats": thinking_stats,
+        "committee_report": committee_report,
+        "latest_step_report": latest_report,
+    }
+    return pd.DataFrame(rows), deep_meta
+
+
 def _compute_policy_summary(metrics: pd.DataFrame) -> Dict[str, float]:
     close = metrics["close"].astype(float)
     returns = close.pct_change().fillna(0.0)
@@ -529,7 +694,14 @@ def _fallback_policy_narrative(policy_text: str, summary: Dict[str, float], pack
     )
 
 
-def _llm_policy_narrative(policy_text: str, summary: Dict[str, float], package_dict: Dict[str, Any]) -> str:
+def _llm_policy_narrative(
+    policy_text: str,
+    summary: Dict[str, float],
+    package_dict: Dict[str, Any],
+    runtime_profile: RuntimeModeProfile,
+) -> str:
+    if not runtime_profile.use_live_api:
+        return ""
     try:
         from core.inference.api_backend import APIBackend
     except Exception:
@@ -544,6 +716,7 @@ def _llm_policy_narrative(policy_text: str, summary: Dict[str, float], package_d
     prompt = "\n".join(
         [
             "请把下面的政策仿真结果写成面向评委的中文自然语言解读。",
+            "要求体现：快思考/慢思考切换、政策委员会防幻觉、订单簿撮合反馈。",
             "要求：不要输出 JSON、代码块、键名，必须严格按格式输出。",
             "【一句话结论】",
             "【政策如何影响市场】(3-4条)",
@@ -555,11 +728,15 @@ def _llm_policy_narrative(policy_text: str, summary: Dict[str, float], package_d
         ]
     )
     try:
-        backend = APIBackend(model="deepseek-chat", max_tokens=520, temperature=0.3)
+        model_name = str(runtime_profile.model_priority[0]) if runtime_profile.model_priority else "deepseek-chat"
+        backend = APIBackend(model=model_name, max_tokens=520, temperature=0.3)
         response = str(
             backend.generate(
                 prompt,
-                system_prompt="你是政策仿真讲解专家，擅长把结构化结果翻译成评委一读就懂的自然语言。",
+                system_prompt=(
+                    "你是政策风洞答辩讲解专家，强调DeepSeek/智谱双路路由、"
+                    "快慢思考触发、委员会防幻觉与可解释市场传导。"
+                ),
                 timeout_budget=20.0,
             )
             or ""
@@ -573,12 +750,17 @@ def _llm_policy_narrative(policy_text: str, summary: Dict[str, float], package_d
     return response
 
 
-def _get_policy_narrative(policy_text: str, summary: Dict[str, float], package_dict: Dict[str, Any]) -> str:
+def _get_policy_narrative(
+    policy_text: str,
+    summary: Dict[str, float],
+    package_dict: Dict[str, Any],
+    runtime_profile: RuntimeModeProfile,
+) -> str:
     cache = st.session_state.setdefault("policy_lab_narrative_cache", {})
-    key = _policy_narrative_key(policy_text, summary, package_dict)
+    key = f"{runtime_profile.mode}:{_policy_narrative_key(policy_text, summary, package_dict)}"
     if key in cache:
         return str(cache[key])
-    text = _llm_policy_narrative(policy_text, summary, package_dict)
+    text = _llm_policy_narrative(policy_text, summary, package_dict, runtime_profile)
     if not text:
         text = _fallback_policy_narrative(policy_text, summary, package_dict)
     cache[key] = text
@@ -712,6 +894,8 @@ def _render_sector_rotation_heatmap(package_dict: Dict[str, Any]) -> None:
 def render_policy_lab() -> None:
     st.subheader("政策实验台")
     st.caption("仅供教学科研与仿真，不构成投资建议。")
+    runtime_profile = _resolve_runtime_profile()
+    st.caption(f"当前模式：{runtime_profile.label} | {runtime_profile.summary}")
 
     templates = _load_policy_templates()
     template_map = {str(item.get("title", f"template-{idx}")): item for idx, item in enumerate(templates)}
@@ -735,15 +919,27 @@ def render_policy_lab() -> None:
                 st.error("未获取到真实指数数据，请检查网络或数据源配置后重试。")
                 return
             data_source = "real_index"
-            frame = _generate_policy_metrics(
-                policy_text=policy_text,
-                intensity=float(intensity),
-                duration_days=int(duration_days),
-                rumor_noise=bool(rumor_noise),
-                scenario_key=str(selected.get("id", selected_title)),
-                market_history=real_history,
-                end_date=history_end,
-            )
+            deep_meta: Dict[str, Any] = {}
+            if runtime_profile.mode == "DEEP":
+                frame, deep_meta = _generate_policy_metrics_deep(
+                    policy_text=policy_text,
+                    intensity=float(intensity),
+                    duration_days=int(duration_days),
+                    rumor_noise=bool(rumor_noise),
+                    runtime_profile=runtime_profile,
+                    end_date=history_end,
+                )
+                data_source = "deep_mode_simulation"
+            else:
+                frame = _generate_policy_metrics(
+                    policy_text=policy_text,
+                    intensity=float(intensity),
+                    duration_days=int(duration_days),
+                    rumor_noise=bool(rumor_noise),
+                    scenario_key=str(selected.get("id", selected_title)),
+                    market_history=real_history,
+                    end_date=history_end,
+                )
             summary = _compute_policy_summary(frame)
             st.session_state.policy_lab_result = {
                 "frame": frame,
@@ -754,6 +950,9 @@ def render_policy_lab() -> None:
                 "index_symbol": index_symbol,
                 "data_source": data_source,
                 "history_end": history_end.strftime("%Y-%m-%d"),
+                "runtime_mode": runtime_profile.mode,
+                "runtime_profile": runtime_profile.to_dict(),
+                "deep_mode_meta": deep_meta,
             }
             _, package = _compile_policy_bundle(policy_text, float(intensity), policy_type_hint=str(selected.get("policy_type", "")))
             package_dict = package.to_dict()
@@ -771,6 +970,9 @@ def render_policy_lab() -> None:
                 "index_symbol": index_symbol,
                 "data_source": data_source,
                 "history_end": history_end.strftime("%Y-%m-%d"),
+                "runtime_mode": runtime_profile.mode,
+                "runtime_profile": runtime_profile.to_dict(),
+                "deep_mode_meta": deep_meta,
             }
             report_title = f"政策实验台 - {selected_title}"
             report_meta = official_report_meta("policy_lab", report_title)
@@ -788,7 +990,8 @@ def render_policy_lab() -> None:
                     f"- 持续天数：{int(duration_days)}",
                     f"- 传言噪声：{'是' if rumor_noise else '否'}",
                     f"- 指数基准：{index_label}（{index_symbol}）",
-                    f"- 数据来源：{'真实指数' if data_source == 'real_index' else '仿真回退'}",
+                    f"- 运行模式：{runtime_profile.mode}",
+                    f"- 数据来源：{'真实指数' if data_source == 'real_index' else ('深度模式多智能体仿真' if data_source == 'deep_mode_simulation' else '仿真回退')}",
                     f"- 数据区间：{metric_start} 至 {metric_end}",
                     f"- 截止日期：{history_end.strftime('%Y-%m-%d')}（软件开启前一日）",
                     "",
@@ -838,7 +1041,12 @@ def render_policy_lab() -> None:
     index_label = str(result.get("index_label", "指数基准"))
     index_symbol = str(result.get("index_symbol", ""))
     data_source = str(result.get("data_source", "synthetic_fallback"))
-    source_text = "真实指数数据" if data_source == "real_index" else "仿真回退数据"
+    if data_source == "real_index":
+        source_text = "真实指数数据"
+    elif data_source == "deep_mode_simulation":
+        source_text = "深度模式多智能体仿真"
+    else:
+        source_text = "仿真回退数据"
     history_end = str(result.get("history_end", ""))
     chart_mode = st.radio("图表模式", options=CHART_MODE_OPTIONS, horizontal=True, index=0, key="policy_lab_chart_mode")
     if not frame.empty:
@@ -856,6 +1064,7 @@ def render_policy_lab() -> None:
     )
 
     package_dict = result.get("policy_package") or {}
+    result_runtime_profile = resolve_runtime_mode_profile(str(result.get("runtime_mode", "SMART")))
     if package_dict:
         c1, c2 = st.columns(2)
         with c1:
@@ -864,7 +1073,28 @@ def render_policy_lab() -> None:
             _render_role_orderflow_waterfall(frame, package_dict)
         _render_sector_rotation_heatmap(package_dict)
         st.markdown("#### 成因解读（自然语言）")
-        st.markdown(_get_policy_narrative(str(result.get("policy_text", "")), summary, package_dict))
+        st.markdown(
+            _get_policy_narrative(
+                str(result.get("policy_text", "")),
+                summary,
+                package_dict,
+                result_runtime_profile,
+            )
+        )
+
+    deep_mode_meta = result.get("deep_mode_meta") or {}
+    if isinstance(deep_mode_meta, dict) and deep_mode_meta:
+        st.markdown("#### 深度模式诊断")
+        stats = dict(deep_mode_meta.get("thinking_stats", {}) or {})
+        llm_agent_count = int(deep_mode_meta.get("llm_agent_count", 0) or 0)
+        metric_cols = st.columns(3)
+        metric_cols[0].metric("LLM主驱动代理数", f"{llm_agent_count}")
+        metric_cols[1].metric("快思考次数", f"{int(stats.get('fast_count', 0) or 0)}")
+        metric_cols[2].metric("慢思考次数", f"{int(stats.get('slow_count', 0) or 0)}")
+        committee_report = dict(deep_mode_meta.get("committee_report", {}) or {})
+        if committee_report:
+            with st.expander("对抗式防幻觉委员会输出", expanded=False):
+                st.json(committee_report)
 
     bundle = st.session_state.get("policy_lab_bundle")
     if bundle:

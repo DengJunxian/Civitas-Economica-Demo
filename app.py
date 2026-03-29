@@ -25,6 +25,7 @@ from core.competition_compliance import (
     competition_mode_enabled,
     write_competition_compliance_artifacts,
 )
+from core.runtime_mode import merge_mode_feature_flags, resolve_runtime_mode_profile
 from core.ui_text import display_runtime_mode, display_scenario_name
 from ui.backtest_panel import render_backtest_panel
 from ui.behavioral_diagnostics import render_behavioral_diagnostics
@@ -93,6 +94,17 @@ def _feature_flag_enabled(flag_name: str, *, default: bool = False) -> bool:
     return bool(default)
 
 
+def _sync_runtime_mode_profile() -> None:
+    mode = str(st.session_state.get("simulation_mode", "SMART"))
+    profile = resolve_runtime_mode_profile(mode)
+    st.session_state.runtime_mode_profile = profile.to_dict()
+    flags = st.session_state.get("feature_flags", {})
+    st.session_state.feature_flags = merge_mode_feature_flags(
+        mode,
+        flags if isinstance(flags, MutableMapping) else {},
+    )
+
+
 def _load_theme() -> None:
     if THEME_PATH.exists():
         css = THEME_PATH.read_text(encoding="utf-8")
@@ -129,6 +141,7 @@ def _init_state() -> None:
         "policy_lab_result": None,
         "history_replay_result": None,
         "simulation_mode": "SMART",
+        "runtime_mode_profile": resolve_runtime_mode_profile("SMART").to_dict(),
         "feature_flags": {
             COMPETITION_MODE_FLAG: True,
             "competition_safe_mode": True,
@@ -144,6 +157,7 @@ def _init_state() -> None:
     st.session_state.entry = _normalize_entry(str(st.session_state.get("entry", "系统说明")))
     if st.session_state.entry not in ENTRY_POINTS:
         st.session_state.entry = "系统说明"
+    _sync_runtime_mode_profile()
 
 
 def _render_top_entry_selector() -> None:
@@ -399,7 +413,16 @@ def _render_sidebar_global() -> None:
         )
         if selected_mode_key != st.session_state.simulation_mode:
             st.session_state.simulation_mode = selected_mode_key
+            _sync_runtime_mode_profile()
             st.toast(f"已切换至 {sim_mode_display[selected_mode_key]}")
+        else:
+            _sync_runtime_mode_profile()
+
+        runtime_profile = st.session_state.get("runtime_mode_profile", {})
+        if isinstance(runtime_profile, MutableMapping):
+            summary = str(runtime_profile.get("summary", ""))
+            pause_seconds = float(runtime_profile.get("pause_for_llm_seconds", 0.0) or 0.0)
+            st.caption(f"模式摘要：{summary} | LLM暂停={pause_seconds:.2f}s")
 
         st.markdown("---")
         st.caption("默认先做政策实验或历史回放。需要专家级细节时，再进入“高级分析”。")

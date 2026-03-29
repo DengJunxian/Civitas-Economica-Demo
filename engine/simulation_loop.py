@@ -45,6 +45,7 @@ from core.macro.household import HouseholdAgent, HouseholdSignal
 from core.macro.state import MacroContextDTO, MacroState
 from core.market_engine import blend_price_with_backdrop
 from core.regulatory_sandbox import MarketAbuseSandbox
+from core.runtime_mode import RuntimeModeProfile, resolve_runtime_mode_profile
 from core.social.contagion import ContagionSnapshot, SocialContagionEngine
 from core.social.graph_state import SocialGraphState
 from core.world.event_bus import EventBus
@@ -180,6 +181,11 @@ class MarketEnvironment:
         use_isolated_matching: bool = True,
         market_pipeline_v2: bool = True,
         legacy_agent_fallback: bool = True,
+        simulation_mode: str = "SMART",
+        llm_primary: Optional[bool] = None,
+        deep_reasoning_pause_s: float = 0.0,
+        model_priority: Optional[Sequence[str]] = None,
+        enable_policy_committee: Optional[bool] = None,
         simulation_runner: Optional[SimulationRunner] = None,
         runner_symbol: str = "A_SHARE_IDX",
         steps_per_day: int = 10,
@@ -210,6 +216,16 @@ class MarketEnvironment:
         self.use_isolated_matching = use_isolated_matching
         self.market_pipeline_v2 = bool(market_pipeline_v2)
         self.legacy_agent_fallback = bool(legacy_agent_fallback)
+        self.simulation_mode = str(simulation_mode or "SMART").strip().upper()
+        self.runtime_profile: RuntimeModeProfile = resolve_runtime_mode_profile(self.simulation_mode)
+        self.llm_primary = bool(self.runtime_profile.llm_primary if llm_primary is None else llm_primary)
+        self.deep_reasoning_pause_s = max(0.0, float(deep_reasoning_pause_s or 0.0))
+        self.model_priority = list(model_priority or self.runtime_profile.model_priority)
+        self.enable_policy_committee = bool(
+            self.runtime_profile.enable_policy_committee
+            if enable_policy_committee is None
+            else enable_policy_committee
+        )
         self.runner_symbol = runner_symbol
         self.last_step_report: Dict[str, Any] = {}
         self.last_stage_order: List[str] = []
@@ -256,6 +272,7 @@ class MarketEnvironment:
         self.policy_interpreter = PolicyInterpretationEngine(default_symbols=[self.runner_symbol])
         self.execution_adapter = ExecutionAdapter(default_symbol=self.runner_symbol)
         self._last_policy_package: Optional[Any] = None
+        self._last_policy_committee_review: Dict[str, Any] = {}
         self._last_agent_beliefs: List[AgentBelief] = []
         self.unified_market_state = UnifiedMarketState.from_symbol_price(self.runner_symbol, self.current_price)
 
@@ -277,14 +294,30 @@ class MarketEnvironment:
             self.simulation_runner.start()
         self._configure_hybrid_backdrop(exogenous_backdrop)
         self._initialize_strategy_genomes()
+        self._apply_runtime_mode_to_agents()
 
         logger.info(
-            "Initialized MarketEnvironment: agents=%s, price=%.2f, isolated=%s, pipeline_v2=%s",
+            "Initialized MarketEnvironment: agents=%s, price=%.2f, isolated=%s, pipeline_v2=%s, mode=%s",
             len(self.agents),
             self.current_price,
             self.use_isolated_matching,
             self.market_pipeline_v2,
+            self.simulation_mode,
         )
+
+    def _apply_runtime_mode_to_agents(self) -> None:
+        for agent in self.agents:
+            try:
+                if hasattr(agent, "use_llm"):
+                    if self.llm_primary:
+                        setattr(agent, "use_llm", True)
+                    elif not self.runtime_profile.use_live_api:
+                        setattr(agent, "use_llm", False)
+                brain = getattr(agent, "brain", None)
+                if brain is not None and hasattr(brain, "model_priority"):
+                    setattr(brain, "model_priority", list(self.model_priority))
+            except Exception:
+                continue
 
     def _build_default_households(self, n: int) -> List[HouseholdAgent]:
         households: List[HouseholdAgent] = []
@@ -869,6 +902,9 @@ class MarketEnvironment:
                     logger.exception("Agent act() fallback failed for %s", getattr(agent, "agent_id", "unknown"))
             return LegacyActionView(action="HOLD", amount=0.0, target_price=float(self.current_price))
 
+        if self.llm_primary and self.deep_reasoning_pause_s > 0:
+            await asyncio.sleep(self.deep_reasoning_pause_s)
+
         logger.info("Collecting agent decisions: %s agents", len(self.agents))
         agent_actions = await asyncio.gather(*(process_agent(agent) for agent in self.agents))
         actions_by_agent: Dict[str, Any] = {
@@ -1053,6 +1089,12 @@ class MarketEnvironment:
             action_view = self._coerce_action_view(action, default_price=self.current_price)
             signed_qty = float(action_view.amount if action_view.action == "BUY" else -action_view.amount if action_view.action == "SELL" else 0.0)
             role_order_flows[archetype_key] = role_order_flows.get(archetype_key, 0.0) + signed_qty
+        thinking_stats = {
+            "fast_count": int(sum(int(getattr(agent, "fast_think_count", 0) or 0) for agent in self.agents)),
+            "slow_count": int(sum(int(getattr(agent, "slow_think_count", 0) or 0) for agent in self.agents)),
+            "llm_enabled_agents": int(sum(1 for agent in self.agents if bool(getattr(agent, "use_llm", False)))),
+            "llm_primary": bool(self.llm_primary),
+        }
 
         self.unified_market_state = self.unified_market_state.apply_snapshot(
             matching_snapshot,
@@ -1128,11 +1170,15 @@ class MarketEnvironment:
             "pipeline_version": "v2" if self.market_pipeline_v2 else "v1",
             "trade_count": trade_count,
             "buffered_intents": buffered_intents,
+            "simulation_mode": self.simulation_mode,
+            "mode_runtime": self.runtime_profile.to_dict(),
+            "llm_pause_seconds": float(self.deep_reasoning_pause_s),
             "stage_order": list(self.last_stage_order),
             "macro_state": self.macro_state.to_dict(),
             "market_state": self.unified_market_state.to_dict(),
             "microstructure_metrics": micro_metrics,
             "role_order_flows": role_order_flows,
+            "thinking_stats": thinking_stats,
             "social_mean_sentiment": contagion.mean_sentiment,
             "policy_transmission_chain": policy_chain,
             "macro_context": macro_context.to_payload(),
@@ -1155,6 +1201,8 @@ class MarketEnvironment:
         }
         if self._last_policy_package is not None:
             self.last_step_report["policy_package"] = self._last_policy_package.to_dict()
+        if self._last_policy_committee_review:
+            self.last_step_report["policy_committee_review"] = dict(self._last_policy_committee_review)
         if self._last_agent_beliefs:
             self.last_step_report["agent_beliefs"] = [
                 {
@@ -1201,9 +1249,28 @@ class MarketEnvironment:
     def _compile_policy(self, policy_text: Optional[str]) -> Optional[PolicyShock]:
         if not policy_text:
             self._last_policy_package = None
+            self._last_policy_committee_review = {}
             return None
         policy_package = self.government.compile_policy_package(policy_text, tick=self.simulation_time)
         self._last_policy_package = policy_package
+        self._last_policy_committee_review = {}
+        if self.llm_primary and self.enable_policy_committee and self.runtime_profile.use_live_api:
+            try:
+                from config import GLOBAL_CONFIG as APP_CONFIG
+                from core.policy_committee import PolicyCommittee as AdversarialPolicyCommittee
+
+                committee = AdversarialPolicyCommittee(api_key=APP_CONFIG.DEEPSEEK_API_KEY)
+                committee_result = committee.interpret(str(policy_text))
+                self._last_policy_committee_review = {
+                    "parameters": dict(committee_result.parameters or {}),
+                    "compliance_passed": bool(committee_result.compliance.passed),
+                    "violations": list(committee_result.compliance.violations or []),
+                    "warnings": list(committee_result.compliance.warnings or []),
+                    "reasoning_chain": list(committee_result.reasoning_chain or []),
+                    "final_state": dict(committee_result.final_state or {}),
+                }
+            except Exception as exc:
+                self._last_policy_committee_review = {"error": str(exc)}
         shock = PolicyShock(
             policy_id=policy_package.event.policy_id,
             policy_text=str(policy_text),
@@ -1216,6 +1283,8 @@ class MarketEnvironment:
             "feature_flags": dict(policy_package.metadata.get("feature_flags", {})),
             "config_hash": str(policy_package.metadata.get("config_hash", "")),
         }
+        if self._last_policy_committee_review:
+            shock.metadata["policy_committee_review"] = dict(self._last_policy_committee_review)
         self.event_bus.publish(
             event_type="policy_compiled",
             stage="policy",
@@ -1223,6 +1292,7 @@ class MarketEnvironment:
             payload={
                 **shock.to_dict(),
                 "policy_package": policy_package.to_dict(),
+                "policy_committee_review": dict(self._last_policy_committee_review),
             },
         )
         # Optional memory broadcast for agents with memory banks.

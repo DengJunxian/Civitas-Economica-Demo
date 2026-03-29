@@ -146,6 +146,9 @@ class TraderAgent(BaseAgent):
         self._last_news_count = 0
         self._last_social_sentiment = "neutral"
         self._fast_mode_consecutive_steps = 0
+        self.fast_think_count = 0
+        self.slow_think_count = 0
+        self.last_thinking_path = "fast"
         self.last_behavior_card: Dict[str, Any] = {}
         
         # GraphRAG 璁板繂灞?
@@ -718,6 +721,8 @@ class TraderAgent(BaseAgent):
             "timestamp": snapshot.timestamp,
             "behavioral_state": dict(self.last_behavioral_state),
         }
+        self.fast_think_count += 1
+        self.last_thinking_path = "fast"
         decision_payload = self._apply_behavioral_intent_overlay(decision_payload, snapshot)
         self.last_behavior_card = dict(decision_payload.get("behavior_card", {}))
         return decision_payload
@@ -938,6 +943,8 @@ class TraderAgent(BaseAgent):
             
         # Trigger System 2 (Slow Thinking)
         self._fast_mode_consecutive_steps = 0
+        self.slow_think_count += 1
+        self.last_thinking_path = "slow"
         
         snapshot: MarketSnapshot = perceived_data["snapshot"]
         news = perceived_data["news"]

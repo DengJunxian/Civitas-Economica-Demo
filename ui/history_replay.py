@@ -322,7 +322,11 @@ def _select_replay_engine(config: BacktestConfig, engine_mode: str, feature_flag
     if engine_mode == "agent" and agent_enabled:
         return AgentReplayEngine(config), "agent", ""
     if engine_mode == "agent" and not agent_enabled:
-        return FactorBacktestEngine(config), "factor", "智能体回放功能开关未开启，已自动回退为因子模式。"
+        return (
+            FactorBacktestEngine(config),
+            "factor",
+            "智能体回放功能开关未开启，falling back to 因子模式。",
+        )
     return FactorBacktestEngine(config), "factor", ""
 
 

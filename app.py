@@ -52,11 +52,11 @@ ENTRY_POINTS = [
     "真实性报告",
     "政策A/B推演",
     "监管优化",
+    "高级分析",
     "系统说明",
 ]
 ENTRY_ALIASES = {
     "历史政策回放": "历史因子回测",
-    "高级分析": "真实性报告",
     "历史Agent回放": "历史智能体回放",
 }
 ENTRY_DESCRIPTIONS = {
@@ -66,6 +66,7 @@ ENTRY_DESCRIPTIONS = {
     "真实性报告": "查看路径拟合、微观结构拟合、行为模式拟合及可解释差异。",
     "政策A/B推演": "同一政策在不同干预方案下做对照实验，支持答辩展示。",
     "监管优化": "面向监管目标做动作搜索，输出稳市场-流动性-成本权衡。",
+    "高级分析": "集中展示证据链、行为金融诊断与专家级答辩视图。",
     "系统说明": "快速了解架构、数据流与工程实现边界。",
 }
 ENTRY_PURPOSE = {
@@ -75,6 +76,7 @@ ENTRY_PURPOSE = {
     "真实性报告": "解释哪里像真、哪里不像真",
     "政策A/B推演": "政策组合对照与机制解释",
     "监管优化": "监管动作优化与权衡分析",
+    "高级分析": "专家级答辩与证据追问",
     "系统说明": "了解系统如何工作",
 }
 THEME_PATH = Path("theme") / "competition_dark.css"
@@ -425,9 +427,9 @@ def _render_sidebar_global() -> None:
             st.caption(f"模式摘要：{summary} | LLM暂停={pause_seconds:.2f}s")
 
         st.markdown("---")
-        st.caption("默认先做政策实验或历史回放。需要专家级细节时，再进入“高级分析”。")
+        st.caption("建议先看“系统说明”建立整体认知，再进入政策试验台和历史回放，最后用“高级分析”回答追问。")
 
-        if st.session_state.entry in {"真实性报告", "监管优化"}:
+        if st.session_state.entry in {"真实性报告", "监管优化", "高级分析"}:
             scenarios = list_competition_scenarios()
             if scenarios:
                 if st.session_state.demo_scenario_name not in scenarios:
@@ -554,51 +556,116 @@ def _render_system_guide() -> None:
     st.markdown(
         """
         <div class="hero-panel" style="margin-top: 10px;">
-            <h1 style="font-size: 28px; margin-bottom: 15px;">欢迎使用数治观澜</h1>
+            <div class="hero-kicker">Judge Quick View</div>
+            <h1 style="font-size: 28px; margin-bottom: 15px;">3 分钟理解这个项目</h1>
             <p style="font-size: 16px; color: #8aa0c2; max-width: 100%;">
-                —— 基于大模型多智能体的金融政策风动推演沙箱 · <b>前端使用说明书</b>
+                数治观澜是一套面向金融政策评估与监管答辩的多智能体推演沙箱，
+                重点展示“政策输入 -> 智能体决策 -> 市场撮合 -> 风险诊断 -> 材料导出”的完整闭环。
             </p>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
+
+    top_cols = st.columns(3)
+    top_cards = [
+        (
+            "项目定位",
+            "把抽象政策冲击翻译成可以看、可以解释、可以复盘的市场推演过程。",
+            ["面向政策评估", "支持答辩演示", "强调可解释结果"],
+        ),
+        (
+            "核心能力",
+            "同时具备前台演示、历史回放、真实性诊断和监管优化四类能力。",
+            ["多智能体市场仿真", "历史场景重放", "行为金融指标诊断"],
+        ),
+        (
+            "评委建议路线",
+            "先看系统说明，再跑政策试验台，最后用高级分析回答追问。",
+            ["第 1 步：系统说明", "第 2 步：政策试验台", "第 3 步：高级分析"],
+        ),
+    ]
+    for col, (title, summary, bullets) in zip(top_cols, top_cards):
+        with col:
+            bullet_html = "".join(f"<li>{item}</li>" for item in bullets)
+            st.markdown(
+                f"""
+                <div class="ops-card">
+                  <div class="ops-card-title">{title}</div>
+                  <div class="ops-card-summary">{summary}</div>
+                  <ul class="ops-card-list">{bullet_html}</ul>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("### 评委建议演示路径")
+    route_cols = st.columns(4)
+    route_cards = [
+        ("1. 系统说明", "先建立项目整体认知。", ["看项目定位", "看核心闭环", "看页面导航"]),
+        ("2. 政策试验台", "输入政策并运行主演示。", ["展示K线与风险热度", "解释政策传导", "导出报告"]),
+        ("3. 历史回放", "证明项目不只是炫技界面。", ["因子回测对照", "智能体历史重放", "偏差说明"]),
+        ("4. 高级分析", "回答“为什么可信”。", ["证据链", "微观结构图", "行为金融诊断"]),
+    ]
+    for col, (title, summary, bullets) in zip(route_cols, route_cards):
+        with col:
+            bullet_html = "".join(f"<li>{item}</li>" for item in bullets)
+            st.markdown(
+                f"""
+                <div class="story-card">
+                  <div class="story-card-title">{title}</div>
+                  <div class="story-card-summary">{summary}</div>
+                  <ul class="story-card-list">{bullet_html}</ul>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("### 页面功能总览")
+    overview_cols = st.columns(2)
+    overview_cards = [
+        (
+            "面向演示的页面",
+            [
+                "政策试验台：展示政策输入后的市场路径和风险指标变化。",
+                "政策A/B推演：对比不同干预方案的效果差异。",
+                "监管优化：围绕稳市场、流动性和成本做权衡搜索。",
+            ],
+        ),
+        (
+            "面向答辩的页面",
+            [
+                "历史因子回测：给出传统基准，方便说明不是纯黑盒。",
+                "历史智能体回放：展示真实历史窗口里的决策与成交重放。",
+                "真实性报告/高级分析：解释哪里拟真、哪里仍有偏差。",
+            ],
+        ),
+    ]
+    for col, (title, items) in zip(overview_cols, overview_cards):
+        item_html = "".join(f"<li>{item}</li>" for item in items)
+        with col:
+            st.markdown(
+                f"""
+                <div class="summary-card">
+                  <div class="summary-label">{title}</div>
+                  <ul class="ops-card-list">{item_html}</ul>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("### 技术闭环")
     st.markdown(
         """
-        ### 1. 系统概览与核心定位
-        本项目旨在构建一个高拟真度、事件驱动的金融市场与政策推演数字沙箱。系统通过**大语言模型（LLMs）**及**多智能体（Multi-Agent）**架构，模拟宏观政策颁布、社会舆情传播以及微观交易行为，为政府部门、监管机构及金融风控专家提供政策效果评估、尾部风险预警以及市场群体心理推演平台。
-        
-        本前端面板为“数治观澜”的交互入口。面板采用定制的政务深蓝科技风，包含四大核心模块：
-
-        ---
-
-        ### 2. 核心功能模块指引
-        请通过左上方导航栏（或本页面上方标签）切换模块：
-
-        #### 2.1 🎯 政策试验台 (Policy Lab)
-        - **用途：** 动态输入或配置宏观政策与外部事件（如：超预期降息、地缘突发新闻等），实时观测数字沙箱中虚拟市场与各类 Agent 对该事件的联合响应。
-        - **操作指引：** 在本页面设定假设条件和执行步骤。启动推演后，系统将进行多智能体仿真计算，并同步输出大盘指数走势、市场情绪波动、风险热度（Panic Level）等联动指标看板。
-
-        #### 2.2 ⏪ 历史政策回放 (History Replay)
-        - **用途：** 将沙箱生成的“虚拟市场数据”与真实历史区间的“真实资本市场走势”进行对比，用于验证底层大规模异构 Agent 机制设计的回测拟合度。
-        - **操作指引：** 通过历史事件下拉菜单，载入内置的历史场景。系统将使用双轴/或平行时间线展示“仿真推演世界”与“真实发生世界”特征，用于回测评估。
-
-        #### 2.3 🔬 高级分析 (Advanced Analysis)
-        - **用途：** 面向风控专家与架构师，提供最详细的模型执行逻辑追踪、行为金融学深度诊断，并支持对底层 Agent 控制参数的大规模调优。
-        - **核心子面板包含：**
-          - **智能决策解读**：专家界面不展示枯燥的原始 JSON 日志，而是直观展示底层智能体（如分析师、策略经理）组成的“决策证据链”。
-          - **市场行为分析**：包含订单簿 (LOB) 逐笔交易深度动画、社会网络中传播的情绪热图以及政策传导桑基图。
-          - **研究参数与调试**：包含更硬核的控制参数（例如：机构交易员容忍度、噪音分子比例等），可用来对宏观市场施加压力测试或故障注入。
-        
-        ---
-
-        ### 3. 底层仿真引擎工作原理模型
-        1. **信息编译与冲击输入**：输入的自然语言政策文本或环境指标变更，由引擎自动编译为结构化的环境冲击（Macro Shock）。
-        2. **网络传播与响应**：不同的 LLM Agent（模拟新闻机构、零售散户、企业等）捕捉冲击信号并开始信息链传导。
-        3. **量化与策略决策**：多智能体（例如专业做市商、套利者和基金经理模型）通过投票与聚合逻辑生成实际的订单意图与置信度。
-        4. **高频引擎撮合 (C++ LOB Engine)**：模拟所有的意向订单发往底层原生 C++ 撮合引擎，在极大规模并发下构建含有真实流动性的逐笔行情数据。
-        5. **数据呈现**：推演结束，将各类资金流向、深度图表及微观诊断数据回传给数治观澜的前端并加以渲染。
+        1. 政策文本先被结构化编译成可执行冲击。
+        2. 多智能体根据政策、情绪和市场状态生成决策意图。
+        3. 订单进入底层撮合引擎，生成价格、成交量和微观结构数据。
+        4. 前端同步展示市场主图、风险热度、行为金融诊断和证据链。
+        5. 系统可导出答辩材料，支持现场演示和赛后复盘。
         """
     )
+
+    st.info("如果时间只有几分钟，建议直接从左侧进入“政策试验台”，运行默认模板后再切换到“高级分析”。")
 
 
 def main() -> None:

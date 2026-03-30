@@ -15,6 +15,7 @@ import streamlit as st
 from core.agent_replay import AgentReplayEngine
 from core.backtester import BacktestConfig, BacktestResult, FactorBacktestEngine
 from core.event_store import EventStore
+from ui.backtest_panel import render_backtest_panel
 from ui import dashboard as dashboard_ui
 from ui.policy_lab import _compile_scaled_shock, _load_policy_templates
 from ui.reporting import official_report_meta, write_report_artifacts
@@ -37,12 +38,20 @@ BACKGROUND_TEMPLATES = {
 
 HISTORY_REPORT_DIR = Path("outputs") / "history_reports"
 HISTORY_CASE_GLOB = "history_case_*.json"
+HISTORY_WORKSPACE_LABELS = {
+    "factor": "智能因子回测",
+    "agent": "历史智能体回放",
+}
 
 
 def _default_window() -> tuple[date, date]:
     end = date.today() - timedelta(days=2)
     start = end - timedelta(days=240)
     return start, end
+
+
+def _resolve_history_workspace(entry_mode: str | None) -> str:
+    return "agent" if str(entry_mode or "").strip().lower() == "agent" else "factor"
 
 
 def _compile_policy_score(policy_text: str, strength: float, background: str) -> float:
@@ -702,18 +711,24 @@ def _render_report_export(export_bundle: Dict[str, Any]) -> None:
             )
 
 
-def render_history_replay() -> None:
-    st.markdown(
-        """
-        <div class="hero-panel">
-          <div class="hero-kicker">历史回放</div>
-          <h1>政策因子回测/历史对照回测</h1>
-          <p>因子模式兼容旧版界面；智能体回放通过功能开关启用，并使用成交轨迹收盘价。</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.caption("仅供教学科研与仿真，不构成投资建议。")
+def _render_agent_replay_workspace(
+    *,
+    show_header: bool = True,
+    default_engine_mode: str = "factor",
+    show_engine_mode_switch: bool = True,
+) -> None:
+    if show_header:
+        st.markdown(
+            """
+            <div class="hero-panel">
+              <div class="hero-kicker">历史智能体回放</div>
+              <h1>政策因子回测/历史对照回测</h1>
+              <p>因子模式兼容旧版界面；智能体回放通过功能开关启用，并使用成交轨迹收盘价。</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.caption("仅供教学科研与仿真，不构成投资建议。")
 
     if "history_replay_result" not in st.session_state:
         st.session_state.history_replay_result = None
@@ -775,14 +790,18 @@ def render_history_replay() -> None:
             )
             rebalance_frequency = st.select_slider("调仓频率", options=[1, 2, 3, 5, 10], value=5)
             lookback = st.slider("回看窗口", min_value=10, max_value=80, value=20, step=5)
-            engine_mode_label = st.radio(
-                "引擎模式",
-                options=["因子模式", "智能体模式"],
-                horizontal=True,
-                index=1 if default_engine_mode == "agent" else 0,
-            )
-            engine_mode = "agent" if engine_mode_label == "智能体模式" else "factor"
-            enable_agent_replay = st.toggle("启用智能体回放功能开关", value=False)
+            if show_engine_mode_switch:
+                engine_mode_label = st.radio(
+                    "引擎模式",
+                    options=["因子模式", "智能体模式"],
+                    horizontal=True,
+                    index=1 if default_engine_mode == "agent" else 0,
+                )
+                engine_mode = "agent" if engine_mode_label == "智能体模式" else "factor"
+            else:
+                engine_mode = default_engine_mode
+                st.info("当前工作台默认使用智能体重放引擎，可通过下方功能开关退回兼容模式。")
+            enable_agent_replay = st.toggle("启用智能体回放功能开关", value=engine_mode == "agent")
             enable_event_driven_v2 = st.toggle("启用事件驱动回放第 2 版", value=False)
             enable_rolling_calibration = st.toggle("启用滚动校准 + 样本外评估", value=False)
             enable_event_store = st.toggle("启用事件存储功能开关", value=False)
@@ -927,3 +946,74 @@ def render_history_replay() -> None:
 
     st.markdown("### 报告导出")
     _render_report_export(bundle["export_bundle"])
+
+
+def render_history_replay(ctrl: Any = None) -> None:
+    default_workspace = _resolve_history_workspace(st.session_state.get("history_replay_entry_mode"))
+    workspace_options = list(HISTORY_WORKSPACE_LABELS.values())
+    workspace_index = 1 if default_workspace == "agent" else 0
+
+    st.markdown(
+        """
+        <div class="hero-panel">
+          <div class="hero-kicker">历史智能回测</div>
+          <h1>智能因子回测与历史智能体回放工作台</h1>
+          <p>统一入口管理传统因子回测、历史智能体重放、路径拟合和报告导出，减少页面跳转。</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("仅供教学科研与仿真，不构成投资建议。")
+
+    intro_cols = st.columns(2)
+    cards = [
+        (
+            "智能因子回测",
+            "保留传统因子/组合研究工作流，用于策略基准、政策 A/B 对比和数据导出。",
+            ["传统回测参数更完整", "支持因子诊断与交易明细", "支持政策 A/B 自动对比"],
+        ),
+        (
+            "历史智能体回放",
+            "重放历史窗口中的策略响应、撮合成交和拟真路径，用于展示机制解释能力。",
+            ["支持事件驱动和样本外评估开关", "支持真实路径对照与偏差说明", "可直接导出答辩报告"],
+        ),
+    ]
+    for col, (title, summary, bullets) in zip(intro_cols, cards):
+        bullet_html = "".join(f"<li>{item}</li>" for item in bullets)
+        with col:
+            st.markdown(
+                f"""
+                <div class="story-card">
+                  <div class="story-card-title">{title}</div>
+                  <div class="story-card-summary">{summary}</div>
+                  <ul class="story-card-list">{bullet_html}</ul>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    selected_workspace_label = st.radio(
+        "回测工作台",
+        options=workspace_options,
+        index=workspace_index,
+        horizontal=True,
+        key="history_replay_workspace_selector",
+    )
+    selected_workspace = next(
+        key for key, label in HISTORY_WORKSPACE_LABELS.items() if label == selected_workspace_label
+    )
+    st.session_state["history_replay_entry_mode"] = selected_workspace
+
+    if selected_workspace == "factor":
+        st.markdown("### 智能因子回测")
+        st.caption("适合做策略基准、因子诊断、政策参数敏感性和政策 A/B 对照。")
+        render_backtest_panel(ctrl=ctrl, show_header=False)
+        return
+
+    st.markdown("### 历史智能体回放")
+    st.caption("适合重放特定历史窗口中的政策冲击、交易撮合与市场响应路径。")
+    _render_agent_replay_workspace(
+        show_header=False,
+        default_engine_mode="agent",
+        show_engine_mode_switch=False,
+    )

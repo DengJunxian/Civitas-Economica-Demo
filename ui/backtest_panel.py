@@ -212,9 +212,10 @@ def _run_policy_ab_comparison(
     }
 
 
-def render_backtest_panel(ctrl: Any = None) -> None:
-    st.markdown("## 历史回测与研究面板")
-    st.caption("支持组合系统策略，并支持一键生成政策 A/B 自动对比报告。")
+def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None:
+    if show_header:
+        st.markdown("## 智能因子回测")
+        st.caption("支持组合系统策略、因子诊断、政策 A/B 自动对比与量化研究数据导出。")
 
     if "backtest_result" not in st.session_state:
         st.session_state.backtest_result = None

@@ -67,6 +67,13 @@ def _clip(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, float(value)))
 
 
+class _NoPolicyEngine:
+    """Policy source that never emits automatic random events."""
+
+    def emit_policy(self, tick: int) -> Optional[str]:
+        return None
+
+
 @dataclass(slots=True)
 class LegacyActionView:
     action: str
@@ -186,6 +193,7 @@ class MarketEnvironment:
         deep_reasoning_pause_s: float = 0.0,
         model_priority: Optional[Sequence[str]] = None,
         enable_policy_committee: Optional[bool] = None,
+        enable_random_policy_events: bool = True,
         simulation_runner: Optional[SimulationRunner] = None,
         runner_symbol: str = "A_SHARE_IDX",
         steps_per_day: int = 10,
@@ -212,7 +220,8 @@ class MarketEnvironment:
         self.simulation_time = 0
         self.current_price = float(GLOBAL_CONFIG.get("initial_market_price", 100.0))
         self.price_history: List[float] = [self.current_price]
-        self.policy_engine = PolicyEngine()
+        self.enable_random_policy_events = bool(enable_random_policy_events)
+        self.policy_engine = PolicyEngine() if self.enable_random_policy_events else _NoPolicyEngine()
         self.use_isolated_matching = use_isolated_matching
         self.market_pipeline_v2 = bool(market_pipeline_v2)
         self.legacy_agent_fallback = bool(legacy_agent_fallback)
@@ -238,7 +247,7 @@ class MarketEnvironment:
         self._day_count = 0
         self._initial_cash: Dict[str, float] = {}
         self._wealth_history: Dict[str, List[float]] = {}
-        self._policy_shocks: List[str] = []
+        self._policy_shocks: List[Dict[str, Any]] = []
         self.policy_transmission_history: List[Dict[str, Any]] = []
         self._last_social_mean: float = 0.0
         self.stylized_facts_tracker = StylizedFactsTracker(prices=[self.current_price])
@@ -486,15 +495,40 @@ class MarketEnvironment:
         except Exception:
             pass
 
-    def schedule_policy_shock(self, policy_text: str) -> None:
-        """Inject an external policy text that will be compiled next step."""
-        if policy_text:
-            self._policy_shocks.append(str(policy_text))
+    def schedule_policy_shock(
+        self,
+        policy_text: str,
+        *,
+        intensity: float = 1.0,
+        policy_id: Optional[str] = None,
+        source: str = "external",
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> Optional[str]:
+        """Inject an external policy text that will be compiled on the next step."""
+        text = str(policy_text or "").strip()
+        if not text:
+            return None
+        record = {
+            "policy_text": text,
+            "intensity": float(max(0.0, intensity)),
+            "policy_id": policy_id or f"policy_queue_{self.simulation_time}_{uuid.uuid4().hex[:8]}",
+            "source": str(source or "external"),
+            "metadata": dict(metadata or {}),
+        }
+        self._policy_shocks.append(record)
+        return str(record["policy_id"])
 
     def _consume_policy_shock(self) -> Optional[str]:
         if not self._policy_shocks:
             return None
-        return self._policy_shocks.pop(0)
+        return str(self._policy_shocks.pop(0).get("policy_text", ""))
+
+    def _consume_policy_shocks(self) -> List[Dict[str, Any]]:
+        if not self._policy_shocks:
+            return []
+        items = list(self._policy_shocks)
+        self._policy_shocks.clear()
+        return items
 
     def _base_risk_for_agent(self, agent: TradingAgent) -> float:
         persona = getattr(agent, "persona", None)
@@ -822,8 +856,28 @@ class MarketEnvironment:
 
         # 1) policy
         self.last_stage_order.append("policy")
-        policy_text = self._consume_policy_shock() or self.policy_engine.emit_policy(self.simulation_time)
-        policy_shock = self._compile_policy(policy_text)
+        scheduled_policy = self._policy_shocks.pop(0) if self._policy_shocks else None
+        if scheduled_policy is None:
+            emitted_policy = self.policy_engine.emit_policy(self.simulation_time)
+            if emitted_policy:
+                scheduled_policy = {
+                    "policy_text": emitted_policy,
+                    "intensity": 1.0,
+                    "policy_id": None,
+                    "source": "auto",
+                    "metadata": {},
+                }
+
+        policy_text = str(scheduled_policy.get("policy_text", "")).strip() if scheduled_policy else None
+        policy_intensity = float(scheduled_policy.get("intensity", 1.0) if scheduled_policy else 1.0)
+        policy_source = str(scheduled_policy.get("source", "external") if scheduled_policy else "external")
+        policy_id = scheduled_policy.get("policy_id") if scheduled_policy else None
+        policy_shock = self._compile_policy(
+            policy_text,
+            intensity=policy_intensity,
+            policy_source=policy_source,
+            policy_id=policy_id if policy_id is not None else None,
+        )
 
         # 2) macro update
         self.last_stage_order.append("macro update")
@@ -1161,11 +1215,19 @@ class MarketEnvironment:
 
         self.last_step_report = {
             "tick": self.simulation_time,
+            "day_count": self._day_count,
+            "steps_per_day": self.steps_per_day,
             "buy_volume": buy_volume,
             "sell_volume": sell_volume,
             "old_price": old_price,
             "new_price": self.current_price,
             "price_change_pct": price_change,
+            "policy_input": {
+                "policy_id": policy_id,
+                "policy_text": policy_text or "",
+                "policy_intensity": float(policy_intensity),
+                "policy_source": policy_source,
+            },
             "matching_mode": matching_mode,
             "pipeline_version": "v2" if self.market_pipeline_v2 else "v1",
             "trade_count": trade_count,
@@ -1194,6 +1256,7 @@ class MarketEnvironment:
                 "backdrop_weight": float(self.hybrid_backdrop_weight),
                 "point": self._latest_hybrid_point,
             },
+            "random_policy_events_enabled": bool(self.enable_random_policy_events),
             "intervention": {
                 "active": bool(self._intervention_active),
                 "tick": self._intervention_tick,
@@ -1246,12 +1309,23 @@ class MarketEnvironment:
         )
         return dict(self.last_step_report)
 
-    def _compile_policy(self, policy_text: Optional[str]) -> Optional[PolicyShock]:
+    def _compile_policy(
+        self,
+        policy_text: Optional[str],
+        *,
+        intensity: float = 1.0,
+        policy_source: str = "external",
+        policy_id: Optional[str] = None,
+    ) -> Optional[PolicyShock]:
         if not policy_text:
             self._last_policy_package = None
             self._last_policy_committee_review = {}
             return None
-        policy_package = self.government.compile_policy_package(policy_text, tick=self.simulation_time)
+        policy_package = self.government.compile_policy_package(
+            policy_text,
+            tick=self.simulation_time,
+            intensity=float(max(0.0, intensity)),
+        )
         self._last_policy_package = policy_package
         self._last_policy_committee_review = {}
         if self.llm_primary and self.enable_policy_committee and self.runtime_profile.use_live_api:
@@ -1272,7 +1346,7 @@ class MarketEnvironment:
             except Exception as exc:
                 self._last_policy_committee_review = {"error": str(exc)}
         shock = PolicyShock(
-            policy_id=policy_package.event.policy_id,
+            policy_id=policy_id or policy_package.event.policy_id,
             policy_text=str(policy_text),
             **policy_package.to_policy_shock_fields(),
         )
@@ -1282,6 +1356,8 @@ class MarketEnvironment:
             "parser_version": policy_package.parser_version,
             "feature_flags": dict(policy_package.metadata.get("feature_flags", {})),
             "config_hash": str(policy_package.metadata.get("config_hash", "")),
+            "policy_source": str(policy_source or "external"),
+            "input_intensity": float(max(0.0, intensity)),
         }
         if self._last_policy_committee_review:
             shock.metadata["policy_committee_review"] = dict(self._last_policy_committee_review)

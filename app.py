@@ -47,8 +47,7 @@ st.set_page_config(
 
 ENTRY_POINTS = [
     "政策试验台",
-    "历史因子回测",
-    "历史智能体回放",
+    "历史智能回测",
     "真实性报告",
     "政策A/B推演",
     "监管优化",
@@ -56,13 +55,14 @@ ENTRY_POINTS = [
     "系统说明",
 ]
 ENTRY_ALIASES = {
-    "历史政策回放": "历史因子回测",
-    "历史Agent回放": "历史智能体回放",
+    "历史政策回放": "历史智能回测",
+    "历史Agent回放": "历史智能回测",
+    "历史因子回测": "历史智能回测",
+    "历史智能体回放": "历史智能回测",
 }
 ENTRY_DESCRIPTIONS = {
     "政策试验台": "输入新政策，观察市场、风险与情绪如何联动变化。",
-    "历史因子回测": "保留传统因子/组合回测能力，用于基准对照。",
-    "历史智能体回放": "在历史窗口重放智能体决策与撮合成交，并输出模拟 K 线量价数据。",
+    "历史智能回测": "统一承载智能因子回测与历史智能体回放，减少页面切换并保留两种研究路径。",
     "真实性报告": "查看路径拟合、微观结构拟合、行为模式拟合及可解释差异。",
     "政策A/B推演": "同一政策在不同干预方案下做对照实验，支持答辩展示。",
     "监管优化": "面向监管目标做动作搜索，输出稳市场-流动性-成本权衡。",
@@ -71,8 +71,7 @@ ENTRY_DESCRIPTIONS = {
 }
 ENTRY_PURPOSE = {
     "政策试验台": "输入政策并运行多智能体仿真",
-    "历史因子回测": "因子与组合回测对照",
-    "历史智能体回放": "真实成交驱动的历史重放",
+    "历史智能回测": "在同一工作台切换因子回测与智能体重放",
     "真实性报告": "解释哪里像真、哪里不像真",
     "政策A/B推演": "政策组合对照与机制解释",
     "监管优化": "监管动作优化与权衡分析",
@@ -256,8 +255,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
 
 ## 功能模块
 - 政策试验台
-- 历史因子回测
-- 历史 Agent 回放
+- 历史智能回测
 - 真实性报告
 - 政策 A/B 推演
 - 监管优化
@@ -306,7 +304,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
                 "scenario": scenario.name,
                 "generated_at": now,
             },
-            app_flow=["政策试验台", "历史因子回测", "历史智能体回放", "真实性报告", "政策A/B推演", "监管优化"],
+            app_flow=["政策试验台", "历史智能回测", "真实性报告", "政策A/B推演", "监管优化"],
         )
         realism_payload = {
             "title": "真实性评估摘要",
@@ -604,7 +602,7 @@ def _render_system_guide() -> None:
     route_cards = [
         ("1. 系统说明", "先建立项目整体认知。", ["看项目定位", "看核心闭环", "看页面导航"]),
         ("2. 政策试验台", "输入政策并运行主演示。", ["展示K线与风险热度", "解释政策传导", "导出报告"]),
-        ("3. 历史回放", "证明项目不只是炫技界面。", ["因子回测对照", "智能体历史重放", "偏差说明"]),
+        ("3. 历史智能回测", "证明项目不只是炫技界面。", ["切换因子/智能体工作台", "查看历史路径重放", "解释偏差说明"]),
         ("4. 高级分析", "回答“为什么可信”。", ["证据链", "微观结构图", "行为金融诊断"]),
     ]
     for col, (title, summary, bullets) in zip(route_cols, route_cards):
@@ -635,8 +633,7 @@ def _render_system_guide() -> None:
         (
             "面向答辩的页面",
             [
-                "历史因子回测：给出传统基准，方便说明不是纯黑盒。",
-                "历史智能体回放：展示真实历史窗口里的决策与成交重放。",
+                "历史智能回测：在同一工作台完成因子基准与智能体历史重放。",
                 "真实性报告/高级分析：解释哪里拟真、哪里仍有偏差。",
             ],
         ),
@@ -678,14 +675,12 @@ def main() -> None:
     if entry == "政策试验台":
         st.session_state.runtime_mode = DEMO_MODE
         render_policy_lab()
-    elif entry == "历史因子回测":
+    elif entry == "历史智能回测":
         st.session_state.runtime_mode = LIVE_MODE
-        st.session_state["history_replay_entry_mode"] = "factor"
-        render_history_replay()
-    elif entry == "历史智能体回放":
-        st.session_state.runtime_mode = LIVE_MODE
-        st.session_state["history_replay_entry_mode"] = "agent"
-        render_history_replay()
+        st.session_state["history_replay_entry_mode"] = str(
+            st.session_state.get("history_replay_entry_mode", "factor")
+        ).strip().lower() or "factor"
+        render_history_replay(ctrl=st.session_state.get("controller"))
     elif entry == "真实性报告":
         st.session_state.runtime_mode = LIVE_MODE
         render_behavioral_diagnostics()

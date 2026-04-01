@@ -61,4 +61,7 @@ async def test_macro_micro_coupling_stage_order_and_context_injection() -> None:
     assert "macro_variables" in chain
     assert "social_sentiment" in chain
     assert "industry_agent" in chain
+    assert "agent_beliefs" in chain
+    assert "coverage" in chain["agent_beliefs"]
+    assert "cohorts" in chain["agent_beliefs"]
     assert "market_microstructure" in chain

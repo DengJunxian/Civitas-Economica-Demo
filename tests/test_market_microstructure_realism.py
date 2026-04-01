@@ -66,6 +66,8 @@ def test_market_microstructure_metrics_and_order_book_realism_interfaces():
     assert metrics["spread"] >= 0.0
     assert metrics["depth_bid_total"] >= 0.0
     assert metrics["depth_ask_total"] >= 0.0
+    assert metrics["cancel_to_trade_ratio"] >= 0.0
+    assert metrics["slippage_bps"] >= 0.0
     assert -1.0 <= metrics["herding_proxy"] <= 1.0
 
     assert sweep["requested_qty"] == 100.0
@@ -73,4 +75,3 @@ def test_market_microstructure_metrics_and_order_book_realism_interfaces():
     assert -1.0 <= ofi <= 1.0
     assert len(curve["buy"]) == 2
     assert len(curve["sell"]) == 2
-

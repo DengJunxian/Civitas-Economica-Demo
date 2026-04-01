@@ -1396,6 +1396,13 @@ class TraderAgent(BaseAgent):
         symbol = str(max(expected_return.items(), key=lambda kv: abs(float(kv[1])))[0])
         alpha = float(expected_return.get(symbol, 0.0))
         confidence = float(getattr(belief, "confidence", 0.5) or 0.5)
+        expected_risk = dict(getattr(belief, "expected_risk", {}) or {})
+        liquidity_score = dict(getattr(belief, "liquidity_score", {}) or {})
+        belief_metadata = dict(getattr(belief, "metadata", {}) or {})
+        disagreement_tags = list(getattr(belief, "disagreement_tags", []) or [])
+        latency_bars = int(getattr(belief, "latency_bars", 0) or 0)
+        pass_through = float(belief_metadata.get("effective_pass_through", 1.0) or 0.0)
+        channel_bias = float(belief_metadata.get("channel_bias", 0.0) or 0.0)
         if abs(alpha) < 1e-4:
             return None
         action = "BUY" if alpha > 0 else "SELL"
@@ -1410,7 +1417,24 @@ class TraderAgent(BaseAgent):
             ref_price = float(self._price_history[-1])
         if ref_price <= 0:
             ref_price = 1.0
-        risk_budget = max(0.05, min(1.0, 0.4 + 0.4 * confidence + 0.2 * abs(alpha)))
+
+        liquidity = float(liquidity_score.get(symbol, 0.5) or 0.5)
+        risk_signal = float(expected_risk.get(symbol, 0.25) or 0.25)
+        lag_penalty = max(0.25, 1.0 - 0.12 * float(latency_bars))
+        disagreement_penalty = 1.0
+        if "low_policy_confidence" in disagreement_tags:
+            disagreement_penalty *= 0.70
+        if "lagged_policy_pass_through" in disagreement_tags:
+            disagreement_penalty *= 0.75
+        if "weak_agent_specific_signal" in disagreement_tags:
+            disagreement_penalty *= 0.85
+        risk_penalty = max(0.35, 1.0 - 0.45 * max(0.0, risk_signal - 0.2))
+
+        signal_strength = min(1.0, abs(alpha) / 0.12)
+        pass_through_boost = max(0.20, min(1.0, pass_through))
+        conviction = signal_strength * confidence * pass_through_boost * lag_penalty * disagreement_penalty * risk_penalty
+
+        risk_budget = max(0.03, min(1.0, 0.10 + 0.90 * conviction))
         if action == "BUY":
             qty = int((self.cash_balance * risk_budget) / ref_price)
         else:
@@ -1420,6 +1444,35 @@ class TraderAgent(BaseAgent):
         qty = max(0, int(qty))
         if qty <= 0:
             return None
+
+        if action == "BUY":
+            urgency = max(0.05, min(1.0, 0.18 + 0.42 * conviction + 0.10 * max(0.0, channel_bias)))
+            if liquidity < 0.45:
+                order_type = "limit"
+                slicing_rule = "twap-like" if qty >= 200 else "single"
+                time_horizon = 4 if qty >= 200 else 2
+                participation_rate = min(0.22, 0.08 + 0.12 * conviction)
+            else:
+                order_type = "limit" if conviction < 0.55 else "ioc"
+                slicing_rule = "twap-like" if qty >= 400 else "single"
+                time_horizon = 3 if qty >= 400 else 1
+                participation_rate = min(0.35, 0.10 + 0.22 * conviction)
+        else:
+            stress_urgency = max(0.0, (1.0 - liquidity) * 0.35 + max(0.0, risk_signal - 0.2) * 0.45)
+            urgency = max(0.10, min(1.0, 0.24 + 0.35 * conviction + stress_urgency))
+            if liquidity < 0.40 or risk_signal > 0.55:
+                order_type = "market" if urgency >= 0.70 else "ioc"
+                slicing_rule = "single" if qty < 300 else "twap-like"
+                time_horizon = 1 if qty < 300 else 2
+                participation_rate = min(0.50, 0.18 + 0.30 * urgency)
+            else:
+                order_type = "limit"
+                slicing_rule = "twap-like" if qty >= 400 else "single"
+                time_horizon = 2 if qty >= 400 else 1
+                participation_rate = min(0.35, 0.12 + 0.20 * conviction)
+
+        max_slippage = max(0.0025, min(0.03, 0.004 + 0.012 * urgency + 0.006 * max(0.0, risk_signal - liquidity)))
+        cancel_replace_policy = "cancel-replace" if order_type in {"limit", "post-only"} and time_horizon > 1 else "none"
         reasoning_output = {
             "symbol": symbol,
             "timestamp": time.time(),
@@ -1427,21 +1480,35 @@ class TraderAgent(BaseAgent):
                 "action": action,
                 "qty": qty,
                 "price": ref_price,
-                "urgency": max(0.1, min(1.0, abs(alpha) * 3.0)),
-                "slicing_rule": "twap-like" if qty >= 500 else "single",
-                "time_horizon": 3 if qty >= 500 else 1,
-                "participation_rate": min(0.45, 0.15 + 0.2 * confidence),
+                "urgency": urgency,
+                "order_type": order_type,
+                "slicing_rule": slicing_rule,
+                "cancel_replace_policy": cancel_replace_policy,
+                "time_horizon": time_horizon,
+                "participation_rate": participation_rate,
+                "max_slippage": max_slippage,
             },
-            "belief_metadata": dict(getattr(belief, "metadata", {}) or {}),
+            "belief_metadata": belief_metadata,
         }
         plan = self._build_execution_plan(reasoning_output)
         if plan is None:
             return None
         plan.metadata["belief"] = {
             "confidence": confidence,
-            "latency_bars": int(getattr(belief, "latency_bars", 0) or 0),
-            "disagreement_tags": list(getattr(belief, "disagreement_tags", []) or []),
+            "latency_bars": latency_bars,
+            "disagreement_tags": disagreement_tags,
             "expected_return": expected_return,
+            "expected_risk": expected_risk,
+            "liquidity_score": liquidity_score,
+            "effective_pass_through": pass_through,
+            "channel_bias": channel_bias,
+        }
+        plan.metadata["belief_execution"] = {
+            "conviction": float(conviction),
+            "risk_budget": float(risk_budget),
+            "lag_penalty": float(lag_penalty),
+            "disagreement_penalty": float(disagreement_penalty),
+            "risk_penalty": float(risk_penalty),
         }
         return plan
 

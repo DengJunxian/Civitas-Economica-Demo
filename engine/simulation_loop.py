@@ -19,7 +19,7 @@ from agents.execution_adapter import ExecutionAdapter
 from agents.trading_agent_core import GLOBAL_CONFIG, Persona, TradingAgent
 from core.market_metrics import MarketMetrics
 from core.market_state import MarketState as UnifiedMarketState
-from core.types import ExecutionPlan, Order, OrderSide
+from core.types import ExecutionPlan, Order, OrderSide, OrderType
 from core.behavioral_finance import (
     StylizedFactsTracker,
     behavioral_update_step,
@@ -640,10 +640,72 @@ class MarketEnvironment:
         belief: Optional[AgentBelief],
         market_state_payload: Mapping[str, Any],
     ) -> Optional[ExecutionPlan]:
+        def _overlay_plan_with_belief(plan: Optional[ExecutionPlan]) -> Optional[ExecutionPlan]:
+            if plan is None or belief is None:
+                return plan
+            if dict(getattr(plan, "metadata", {}) or {}).get("belief_execution"):
+                return plan
+
+            symbol = str(getattr(plan, "symbol", market_state_payload.get("symbol", self.runner_symbol)) or self.runner_symbol)
+            liquidity_map = dict(getattr(belief, "liquidity_score", {}) or {})
+            risk_map = dict(getattr(belief, "expected_risk", {}) or {})
+            metadata = dict(getattr(belief, "metadata", {}) or {})
+            pass_through = _clip(float(metadata.get("effective_pass_through", 1.0) or 0.0), 0.0, 1.0)
+            confidence = _clip(float(getattr(belief, "confidence", 0.5) or 0.5), 0.0, 1.0)
+            latency_bars = max(0, int(getattr(belief, "latency_bars", 0) or 0))
+            disagreement_tags = list(getattr(belief, "disagreement_tags", []) or [])
+            liquidity = _clip(float(liquidity_map.get(symbol, 0.5) or 0.5), 0.0, 1.0)
+            risk_signal = _clip(float(risk_map.get(symbol, 0.25) or 0.25), 0.0, 1.0)
+
+            disagreement_penalty = 1.0
+            if "low_policy_confidence" in disagreement_tags:
+                disagreement_penalty *= 0.75
+            if "lagged_policy_pass_through" in disagreement_tags:
+                disagreement_penalty *= 0.72
+            if "weak_agent_specific_signal" in disagreement_tags:
+                disagreement_penalty *= 0.85
+            lag_penalty = max(0.30, 1.0 - 0.10 * latency_bars)
+            risk_penalty = max(0.45, 1.0 - 0.40 * max(0.0, risk_signal - 0.2))
+            overlay_scale = max(0.12, pass_through * confidence * lag_penalty * disagreement_penalty * risk_penalty)
+
+            original_qty = int(plan.resolved_qty(float(market_state_payload.get("last_price", 0.0) or 0.0)))
+            if original_qty > 0:
+                adjusted_qty = max(1, int(round(original_qty * (0.25 + 0.75 * overlay_scale))))
+                plan.target_qty = adjusted_qty
+            if plan.target_notional is not None:
+                plan.target_notional = float(max(0.0, float(plan.target_notional) * (0.25 + 0.75 * overlay_scale)))
+
+            if plan.side == OrderSide.BUY:
+                plan.urgency = float(_clip(plan.urgency * (0.55 + 0.45 * overlay_scale), 0.02, 1.0))
+                plan.participation_rate = float(_clip(plan.participation_rate * (0.60 + 0.40 * overlay_scale), 0.02, 1.0))
+                if pass_through < 0.45 or liquidity < 0.40:
+                    plan.order_type = OrderType.LIMIT
+                    plan.slicing_rule = "twap-like" if plan.resolved_qty(plan.price) >= 200 else "single"
+                    plan.time_horizon = max(int(plan.time_horizon), 2 + latency_bars // 2)
+            else:
+                stress = max(0.0, (1.0 - liquidity) * 0.4 + max(0.0, risk_signal - 0.2) * 0.5)
+                plan.urgency = float(_clip(plan.urgency * (0.80 + 0.20 * overlay_scale) + stress, 0.02, 1.0))
+                plan.participation_rate = float(_clip(plan.participation_rate * (0.80 + 0.35 * overlay_scale) + 0.10 * stress, 0.02, 1.0))
+                if liquidity < 0.40 or risk_signal > 0.55:
+                    plan.order_type = OrderType.MARKET if plan.urgency >= 0.70 else OrderType.IOC
+                    plan.time_horizon = 1 if plan.resolved_qty(plan.price) < 300 else min(int(plan.time_horizon), 2)
+
+            plan.max_slippage = float(_clip(plan.max_slippage * (0.85 + 0.40 * max(risk_signal, pass_through)), 0.001, 0.05))
+            plan.metadata["belief_overlay"] = {
+                "effective_pass_through": float(pass_through),
+                "confidence": float(confidence),
+                "latency_bars": int(latency_bars),
+                "liquidity_score": float(liquidity),
+                "expected_risk": float(risk_signal),
+                "overlay_scale": float(overlay_scale),
+                "disagreement_tags": disagreement_tags,
+            }
+            return plan
+
         if isinstance(action, ExecutionPlan):
-            return action
+            return _overlay_plan_with_belief(action)
         if isinstance(action, Order):
-            return self.execution_adapter.plan_from_order(action)
+            return _overlay_plan_with_belief(self.execution_adapter.plan_from_order(action))
         if belief is not None and hasattr(agent, "decide_from_belief"):
             try:
                 plan = agent.decide_from_belief(belief, dict(market_state_payload))
@@ -652,14 +714,16 @@ class MarketEnvironment:
             except Exception:
                 logger.exception("decide_from_belief failed for %s", getattr(agent, "agent_id", "unknown"))
         action_view = self._coerce_action_view(action, default_price=float(market_state_payload.get("last_price", 0.0)))
-        return self.execution_adapter.plan_from_legacy_action(
-            agent_id=str(getattr(agent, "agent_id", "unknown")),
-            symbol=str(market_state_payload.get("symbol", self.runner_symbol)),
-            action=action_view.action,
-            amount=action_view.amount,
-            target_price=action_view.target_price,
-            step=self.simulation_time,
-            market_state=market_state_payload,
+        return _overlay_plan_with_belief(
+            self.execution_adapter.plan_from_legacy_action(
+                agent_id=str(getattr(agent, "agent_id", "unknown")),
+                symbol=str(market_state_payload.get("symbol", self.runner_symbol)),
+                action=action_view.action,
+                amount=action_view.amount,
+                target_price=action_view.target_price,
+                step=self.simulation_time,
+                market_state=market_state_payload,
+            )
         )
 
     def _update_disposition_book(self, agent_actions: Sequence[Any], old_price: float) -> None:
@@ -969,10 +1033,14 @@ class MarketEnvironment:
             self._last_policy_package,
             self.agents,
             {
+                "tick": int(self.simulation_time),
                 "symbols": [self.runner_symbol],
                 "symbol": self.runner_symbol,
                 "last_price": float(self.current_price),
                 "prices": {self.runner_symbol: float(self.current_price)},
+                "macro_state": self.macro_state.to_dict(),
+                "liquidity_index": float(self.macro_state.liquidity_index),
+                "sentiment_index": float(self.macro_state.sentiment_index),
             },
         )
 
@@ -1200,6 +1268,25 @@ class MarketEnvironment:
             trade_count=trade_count,
             matching_mode=matching_mode,
         )
+        belief_returns: List[float] = []
+        belief_latencies: List[float] = []
+        for belief in self._last_agent_beliefs:
+            expected = getattr(belief, "expected_return", {}) or {}
+            if isinstance(expected, Mapping) and self.runner_symbol in expected:
+                belief_returns.append(float(expected.get(self.runner_symbol, 0.0)))
+            belief_latencies.append(float(getattr(belief, "latency_bars", 0.0)))
+        realism_diagnostics = MarketMetrics.scorecard(
+            snapshot=matching_snapshot,
+            metrics=micro_metrics,
+            policy_input={
+                "policy_text": policy_text or "",
+                "policy_intensity": float(policy_intensity),
+                "policy_source": policy_source,
+            },
+            policy_chain=policy_chain,
+            belief_returns=belief_returns,
+            belief_latencies=belief_latencies,
+        )
         self.policy_transmission_history.append(policy_chain)
         if len(self.policy_transmission_history) > 200:
             self.policy_transmission_history = self.policy_transmission_history[-200:]
@@ -1239,6 +1326,7 @@ class MarketEnvironment:
             "macro_state": self.macro_state.to_dict(),
             "market_state": self.unified_market_state.to_dict(),
             "microstructure_metrics": micro_metrics,
+            "realism_diagnostics": realism_diagnostics,
             "role_order_flows": role_order_flows,
             "thinking_stats": thinking_stats,
             "social_mean_sentiment": contagion.mean_sentiment,
@@ -1540,6 +1628,53 @@ class MarketEnvironment:
         for signal in firm_signals:
             sector_groups[signal.sector].append(signal.sector_outlook)
 
+        belief_groups: Dict[str, Dict[str, Any]] = defaultdict(
+            lambda: {
+                "count": 0,
+                "confidence_sum": 0.0,
+                "latency_sum": 0.0,
+                "expected_return_sum": 0.0,
+                "liquidity_sum": 0.0,
+                "pass_through_sum": 0.0,
+                "disagreement_tags": set(),
+            }
+        )
+        belief_return_samples: List[float] = []
+        for belief in self._last_agent_beliefs:
+            metadata = getattr(belief, "metadata", {}) or {}
+            persona_key = str(metadata.get("persona_key", "unknown") or "unknown")
+            bucket = belief_groups[persona_key]
+            bucket["count"] += 1
+            bucket["confidence_sum"] += float(getattr(belief, "confidence", 0.0))
+            bucket["latency_sum"] += float(getattr(belief, "latency_bars", 0.0))
+            bucket["pass_through_sum"] += float(metadata.get("effective_pass_through", 0.0) or 0.0)
+            returns = getattr(belief, "expected_return", {}) or {}
+            liquidities = getattr(belief, "liquidity_score", {}) or {}
+            if isinstance(returns, Mapping) and self.runner_symbol in returns:
+                sample = float(returns.get(self.runner_symbol, 0.0))
+                bucket["expected_return_sum"] += sample
+                belief_return_samples.append(sample)
+            if isinstance(liquidities, Mapping) and self.runner_symbol in liquidities:
+                bucket["liquidity_sum"] += float(liquidities.get(self.runner_symbol, 0.0))
+            bucket["disagreement_tags"].update(str(tag) for tag in getattr(belief, "disagreement_tags", []) or [])
+
+        belief_summary = {
+            "coverage": int(sum(int(item["count"]) for item in belief_groups.values())),
+            "dispersion": float(np.std(np.asarray(belief_return_samples, dtype=float))) if belief_return_samples else 0.0,
+            "cohorts": {
+                persona_key: {
+                    "count": int(bucket["count"]),
+                    "avg_confidence": float(bucket["confidence_sum"] / max(bucket["count"], 1)),
+                    "avg_latency_bars": float(bucket["latency_sum"] / max(bucket["count"], 1)),
+                    "avg_expected_return": float(bucket["expected_return_sum"] / max(bucket["count"], 1)),
+                    "avg_liquidity_score": float(bucket["liquidity_sum"] / max(bucket["count"], 1)),
+                    "avg_effective_pass_through": float(bucket["pass_through_sum"] / max(bucket["count"], 1)),
+                    "disagreement_tags": sorted(bucket["disagreement_tags"]),
+                }
+                for persona_key, bucket in belief_groups.items()
+            },
+        }
+
         return {
             "policy": policy_text or "no_policy",
             "macro_variables": {
@@ -1565,6 +1700,7 @@ class MarketEnvironment:
                     sector: sum(values) / len(values) for sector, values in sector_groups.items() if values
                 },
             },
+            "agent_beliefs": belief_summary,
             "market_microstructure": {
                 "buy_volume": buy_volume,
                 "sell_volume": sell_volume,

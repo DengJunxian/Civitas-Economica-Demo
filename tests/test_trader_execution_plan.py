@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 from agents.base_agent import MarketSnapshot
 from agents.trader_agent import TraderAgent
 from core.types import ExecutionPlan, Order, OrderSide, OrderType
+from policy.interpretation_engine import AgentBelief
 
 
 def make_snapshot(price: float = 10.0) -> MarketSnapshot:
@@ -136,3 +137,102 @@ async def test_intent_execution_split_feature_flag_separates_intent_from_executi
     assert plan.metadata["execution_trace"]["schema_version"] == "intent_execution_split_v1"
     assert plan.metadata["snapshot_info"]["persona"]["constraints"]["schema_version"] == "persona_constraints_v1"
     assert plan.target_qty <= 1200
+
+
+def _belief(
+    *,
+    alpha: float,
+    confidence: float,
+    liquidity: float,
+    risk: float,
+    pass_through: float,
+    latency_bars: int,
+    channel_bias: float = 0.0,
+    disagreement_tags: list[str] | None = None,
+) -> AgentBelief:
+    return AgentBelief(
+        expected_return={"TEST": alpha},
+        expected_risk={"TEST": risk},
+        liquidity_score={"TEST": liquidity},
+        confidence=confidence,
+        latency_bars=latency_bars,
+        disagreement_tags=list(disagreement_tags or []),
+        metadata={
+            "persona_key": "retail_day_trader",
+            "effective_pass_through": pass_through,
+            "channel_bias": channel_bias,
+            "channel_weights": {"liquidity": 0.5},
+            "channel_activation": {"liquidity": pass_through},
+        },
+    )
+
+
+def test_decide_from_belief_scales_execution_with_policy_pass_through():
+    agent = TraderAgent(
+        "belief_agent",
+        cash_balance=80_000,
+        execution_plan_enabled=True,
+    )
+
+    early = _belief(
+        alpha=0.08,
+        confidence=0.75,
+        liquidity=0.55,
+        risk=0.30,
+        pass_through=0.20,
+        latency_bars=4,
+        disagreement_tags=["lagged_policy_pass_through"],
+    )
+    late = _belief(
+        alpha=0.08,
+        confidence=0.75,
+        liquidity=0.55,
+        risk=0.30,
+        pass_through=0.95,
+        latency_bars=1,
+    )
+
+    early_plan = agent.decide_from_belief(early, {"prices": {"TEST": 10.0}, "last_price": 10.0})
+    late_plan = agent.decide_from_belief(late, {"prices": {"TEST": 10.0}, "last_price": 10.0})
+
+    assert isinstance(early_plan, ExecutionPlan)
+    assert isinstance(late_plan, ExecutionPlan)
+    assert late_plan.target_qty > early_plan.target_qty
+    assert late_plan.urgency > early_plan.urgency
+    assert late_plan.participation_rate >= early_plan.participation_rate
+    assert late_plan.metadata["belief_execution"]["conviction"] > early_plan.metadata["belief_execution"]["conviction"]
+
+
+def test_decide_from_belief_uses_more_aggressive_sell_execution_under_stress():
+    agent = TraderAgent(
+        "sell_belief_agent",
+        cash_balance=20_000,
+        portfolio={"TEST": 2_000},
+        execution_plan_enabled=True,
+    )
+
+    stressed_sell = _belief(
+        alpha=-0.10,
+        confidence=0.80,
+        liquidity=0.18,
+        risk=0.82,
+        pass_through=0.90,
+        latency_bars=1,
+    )
+    calm_sell = _belief(
+        alpha=-0.10,
+        confidence=0.80,
+        liquidity=0.82,
+        risk=0.20,
+        pass_through=0.90,
+        latency_bars=1,
+    )
+
+    stressed_plan = agent.decide_from_belief(stressed_sell, {"prices": {"TEST": 10.0}, "last_price": 10.0})
+    calm_plan = agent.decide_from_belief(calm_sell, {"prices": {"TEST": 10.0}, "last_price": 10.0})
+
+    assert isinstance(stressed_plan, ExecutionPlan)
+    assert isinstance(calm_plan, ExecutionPlan)
+    assert stressed_plan.order_type in {OrderType.MARKET, OrderType.IOC}
+    assert stressed_plan.urgency >= calm_plan.urgency
+    assert stressed_plan.participation_rate >= calm_plan.participation_rate

@@ -80,6 +80,49 @@ class PolicyInterpretationEngine:
             return 0.5
         return float(_clip(getattr(archetype, "liquidity_preference", 0.5), 0.0, 1.0))
 
+    def _persona_rumor_sensitivity(self, persona: Any) -> float:
+        archetype = getattr(persona, "archetype", None)
+        if archetype is None:
+            return 0.5
+        return float(_clip(getattr(archetype, "rumor_sensitivity", 0.5), 0.0, 1.0))
+
+    def _persona_benchmark_pressure(self, persona: Any) -> float:
+        archetype = getattr(persona, "archetype", None)
+        if archetype is None:
+            return 0.5
+        return float(_clip(getattr(archetype, "benchmark_tracking_pressure", 0.5), 0.0, 1.0))
+
+    def _bars_since_policy(self, policy_pkg: PolicyPackage, market_state: Optional[Mapping[str, Any]]) -> int:
+        current_tick = int((market_state or {}).get("tick", getattr(policy_pkg.event, "tick", 0)) or getattr(policy_pkg.event, "tick", 0))
+        policy_tick = int(getattr(policy_pkg.event, "tick", 0) or 0)
+        return max(0, current_tick - policy_tick)
+
+    def _channel_weight(self, channel: Any, persona: Any) -> float:
+        sensitivity = self._persona_policy_sensitivity(persona)
+        rumor_sensitivity = self._persona_rumor_sensitivity(persona)
+        liquidity_pref = self._persona_liquidity_pref(persona)
+        benchmark_pressure = self._persona_benchmark_pressure(persona)
+        channel_name = str(getattr(channel, "name", "") or getattr(channel, "channel_type", "") or "").strip().lower()
+
+        if channel_name == "rumor_suppression":
+            return float(_clip(0.20 + 0.80 * rumor_sensitivity, 0.0, 1.5))
+        if channel_name in {"liquidity", "tax_frictions"}:
+            return float(_clip(0.25 + 0.75 * sensitivity + 0.15 * (1.0 - liquidity_pref), 0.0, 1.5))
+        if channel_name in {"rate", "credit_spread"}:
+            return float(_clip(0.25 + 0.65 * sensitivity + 0.20 * benchmark_pressure, 0.0, 1.5))
+        if channel_name == "fiscal_demand":
+            return float(_clip(0.25 + 0.75 * sensitivity, 0.0, 1.5))
+        if channel_name == "sentiment_confidence":
+            return float(_clip(0.20 + 0.45 * sensitivity + 0.35 * rumor_sensitivity, 0.0, 1.5))
+        return float(_clip(0.25 + 0.75 * sensitivity, 0.0, 1.5))
+
+    def _channel_activation(self, channel: Any, *, bars_since_policy: int, latency_bars: int) -> float:
+        channel_lag = int(getattr(channel, "lag_days", 0) or 0)
+        effective_lag = max(0, latency_bars + channel_lag)
+        if effective_lag <= 0:
+            return 1.0
+        return float(_clip((bars_since_policy + 1) / float(effective_lag + 1), 0.0, 1.0))
+
     def _resolve_sector(self, symbol: str) -> str:
         if symbol in self.symbol_sector_map:
             return str(self.symbol_sector_map[symbol])
@@ -156,9 +199,27 @@ class PolicyInterpretationEngine:
         confidence = _clip(policy_confidence * (0.7 + 0.6 * sensitivity), 0.05, 0.99)
         liquidity_pref = self._persona_liquidity_pref(persona)
         latency_bars = self._persona_latency(persona)
+        bars_since_policy = self._bars_since_policy(policy_pkg, market_state)
         market_bias = float(market_effects.get("market_bias", 0.0))
         liquidity_bias = float(market_effects.get("liquidity_bias", 0.0))
         volatility_bias = float(market_effects.get("volatility_bias", 0.0))
+
+        channel_weights: Dict[str, float] = {}
+        channel_activation: Dict[str, float] = {}
+        channel_signal = 0.0
+        channel_weight_total = 0.0
+        for channel in list(getattr(policy_pkg, "channels", []) or []):
+            name = str(getattr(channel, "name", "generic") or "generic")
+            weight = self._channel_weight(channel, persona)
+            activation = self._channel_activation(channel, bars_since_policy=bars_since_policy, latency_bars=latency_bars)
+            impact = float(getattr(channel, "impact", 0.0) or 0.0)
+            channel_weights[name] = float(weight)
+            channel_activation[name] = float(activation)
+            channel_signal += impact * weight * activation
+            channel_weight_total += abs(impact) * max(weight * activation, 1e-6)
+        normalized_channel_bias = channel_signal / channel_weight_total if channel_weight_total > 0 else 0.0
+        effective_pass_through = float(sum(channel_activation.values()) / max(len(channel_activation), 1)) if channel_activation else 1.0
+        effective_confidence = float(_clip(confidence * (0.55 + 0.45 * effective_pass_through), 0.05, 0.99))
 
         expected_return: Dict[str, float] = {}
         expected_risk: Dict[str, float] = {}
@@ -168,16 +229,16 @@ class PolicyInterpretationEngine:
         for symbol in symbols:
             sector = self._resolve_sector(symbol)
             sector_bias = float((policy_pkg.sector_effects or {}).get(sector, 0.0))
-            value = 0.45 * market_bias + 0.35 * agent_bias + 0.20 * sector_bias
-            expected_return[symbol] = _clip(value * confidence, -0.30, 0.30)
+            value = 0.30 * market_bias + 0.25 * agent_bias + 0.15 * sector_bias + 0.30 * normalized_channel_bias
+            expected_return[symbol] = _clip(value * effective_confidence, -0.30, 0.30)
 
-            risk_value = 0.18 + 0.42 * abs(volatility_bias) + 0.22 * (1.0 - confidence)
+            risk_value = 0.18 + 0.42 * abs(volatility_bias) + 0.18 * (1.0 - effective_confidence) + 0.10 * (1.0 - effective_pass_through)
             expected_risk[symbol] = _clip(risk_value, 0.01, 1.0)
 
-            liq = 0.50 + 0.40 * liquidity_bias - 0.25 * liquidity_pref
+            liq = 0.50 + 0.40 * liquidity_bias * effective_pass_through - 0.25 * liquidity_pref
             liquidity_score[symbol] = _clip(liq, 0.0, 1.0)
 
-        if confidence < 0.35:
+        if effective_confidence < 0.35:
             disagreement_tags.append("low_policy_confidence")
         if abs(agent_bias) < 0.05:
             disagreement_tags.append("weak_agent_specific_signal")
@@ -185,6 +246,8 @@ class PolicyInterpretationEngine:
             disagreement_tags.append("tail_risk_elevated")
         if latency_bars > 2:
             disagreement_tags.append("slow_information_processing")
+        if effective_pass_through < 0.5:
+            disagreement_tags.append("lagged_policy_pass_through")
         if isinstance(portfolio, Mapping) and portfolio:
             disagreement_tags.append("position_constraint_active")
 
@@ -192,15 +255,20 @@ class PolicyInterpretationEngine:
             "persona_key": persona_key,
             "agent_bias": float(agent_bias),
             "market_bias": float(market_bias),
+            "channel_bias": float(normalized_channel_bias),
             "volatility_bias": float(volatility_bias),
             "liquidity_bias": float(liquidity_bias),
+            "bars_since_policy": int(bars_since_policy),
+            "effective_pass_through": float(effective_pass_through),
+            "channel_weights": channel_weights,
+            "channel_activation": channel_activation,
             "policy_id": getattr(policy_pkg.event, "policy_id", ""),
         }
         return AgentBelief(
             expected_return=expected_return,
             expected_risk=expected_risk,
             liquidity_score=liquidity_score,
-            confidence=float(confidence),
+            confidence=float(effective_confidence),
             latency_bars=int(latency_bars),
             disagreement_tags=disagreement_tags,
             metadata=metadata,
@@ -220,4 +288,3 @@ class PolicyInterpretationEngine:
             portfolio = getattr(agent, "portfolio", None)
             beliefs.append(self.interpret(policy_pkg, persona, market_state, portfolio))
         return beliefs
-

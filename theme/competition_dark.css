@@ -180,6 +180,71 @@ ul[role="listbox"] li {
   font-size: 15px;
 }
 
+.hero-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.hero-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(77, 166, 255, 0.25);
+  background: rgba(77, 166, 255, 0.1);
+  color: #d8e8ff;
+  font-size: 12px;
+}
+
+.hero-alert {
+  min-width: 190px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(138, 160, 194, 0.18);
+  background: rgba(3, 8, 17, 0.55);
+}
+
+.hero-alert-label {
+  color: #8aa0c2;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hero-alert-value {
+  margin-top: 6px;
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.hero-alert-risk {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(127, 29, 29, 0.22);
+}
+
+.hero-alert-watch {
+  border-color: rgba(245, 166, 35, 0.3);
+  background: rgba(120, 71, 8, 0.22);
+}
+
+.hero-alert-calm {
+  border-color: rgba(34, 197, 94, 0.25);
+  background: rgba(20, 83, 45, 0.2);
+}
+
+.hero-briefing-list {
+  margin: 18px 0 0 18px;
+  padding: 0;
+  color: #d6e3f7;
+}
+
+.hero-briefing-list li {
+  margin-bottom: 6px;
+}
+
 .hero-kicker {
   color: #1890ff;
   font-size: 13px;
@@ -223,6 +288,33 @@ ul[role="listbox"] li {
   font-weight: 700;
   text-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
   margin-top: 6px;
+}
+
+.pulse-card {
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: rgba(10, 25, 49, 0.45);
+}
+
+.pulse-card-up {
+  border-color: rgba(22, 163, 74, 0.22);
+  background: linear-gradient(180deg, rgba(20, 83, 45, 0.25), rgba(10, 25, 49, 0.45));
+}
+
+.pulse-card-down {
+  border-color: rgba(239, 68, 68, 0.22);
+  background: linear-gradient(180deg, rgba(127, 29, 29, 0.24), rgba(10, 25, 49, 0.45));
+}
+
+.pulse-card-watch {
+  border-color: rgba(245, 166, 35, 0.22);
+  background: linear-gradient(180deg, rgba(120, 71, 8, 0.18), rgba(10, 25, 49, 0.45));
+}
+
+.pulse-card-calm {
+  border-color: rgba(77, 166, 255, 0.22);
+  background: linear-gradient(180deg, rgba(24, 144, 255, 0.12), rgba(10, 25, 49, 0.45));
 }
 
 .tag-chip {

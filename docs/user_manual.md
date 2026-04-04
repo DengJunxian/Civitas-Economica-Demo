@@ -60,14 +60,37 @@ When you click the competition material export action, the system generates file
 - `demo_script_10min.md`
 - `figures/index.json`
 
-## 6. Recommended talking points during operation
+## 6. Policy Lab session controls
+
+`政策试验台` uses a session-style simulation flow rather than a one-shot batch run.
+
+- `继续 1 天`: advances the current policy session by 1 simulated trading day.
+- `继续 5 天`: advances by 5 simulated trading days.
+- `运行到结束`: finishes the remaining simulated trading days in the current session.
+- `自动逐日运行`: auto-plays the session day by day inside the page.
+
+Important clarification:
+
+- `自动逐日运行` is simulated business-day playback.
+- It is not an operating-system cron job or a real-world once-per-day scheduler.
+- You can stop the session, switch back to manual stepping, or append a future policy while the same session is still active.
+
+The top area of the page is designed for demonstration:
+
+- Session KPI strip
+- Three-stage transmission cards: policy injection, sentiment diffusion, matching outcome
+- Quote banner and market path chart
+
+This is the recommended speaking order when judges ask how a policy becomes an index move.
+
+## 7. Recommended talking points during operation
 
 - The AI part is not only text generation; it influences structured decisions and simulation outcomes.
 - The order matching path is isolated from the reasoning path.
 - The system can still demonstrate its core value without an internet connection.
 - The exported materials make the project easier to hand off and review.
 
-## 7. What not to do during the defense
+## 8. What not to do during the defense
 
 - Do not use `python main.py` as the primary entry point in front of judges.
 - Do not rely on live API calls for the first showcase.

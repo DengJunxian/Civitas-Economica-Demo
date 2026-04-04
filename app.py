@@ -674,7 +674,7 @@ def main() -> None:
     entry = st.session_state.entry
     if entry == "政策试验台":
         st.session_state.runtime_mode = DEMO_MODE
-        render_policy_lab()
+        render_policy_lab(presentation_mode="standard")
     elif entry == "历史智能回测":
         st.session_state.runtime_mode = LIVE_MODE
         st.session_state["history_replay_entry_mode"] = str(
@@ -686,7 +686,7 @@ def main() -> None:
         render_behavioral_diagnostics()
     elif entry == "政策A/B推演":
         st.session_state.runtime_mode = DEMO_MODE
-        render_policy_lab()
+        render_policy_lab(presentation_mode="defense")
     elif entry == "监管优化":
         st.session_state.runtime_mode = LIVE_MODE
         if _feature_flag_enabled(REGULATOR_OPTIMIZATION_PAGE_FLAG, default=True):

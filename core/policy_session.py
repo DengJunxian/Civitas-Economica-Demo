@@ -104,6 +104,9 @@ class PolicySessionConfig:
     runner_symbol: str = "A_SHARE_IDX"
     steps_per_day: int = 1
     model_priority: Sequence[str] = field(default_factory=lambda: ("deepseek-chat",))
+    hybrid_replay: bool = False
+    exogenous_backdrop: Optional[Sequence[Mapping[str, Any]] | str] = None
+    hybrid_backdrop_weight: float = 0.0
 
 
 class PolicySession:
@@ -158,6 +161,9 @@ class PolicySession:
         runner_symbol: str = "A_SHARE_IDX",
         steps_per_day: int = 1,
         model_priority: Optional[Sequence[str]] = None,
+        hybrid_replay: bool = False,
+        exogenous_backdrop: Optional[Sequence[Mapping[str, Any]] | str] = None,
+        hybrid_backdrop_weight: float = 0.0,
     ) -> "PolicySession":
         config = PolicySessionConfig(
             total_days=int(total_days),
@@ -175,6 +181,9 @@ class PolicySession:
             runner_symbol=str(runner_symbol or "A_SHARE_IDX"),
             steps_per_day=max(1, int(steps_per_day)),
             model_priority=tuple(model_priority or ("deepseek-chat",)),
+            hybrid_replay=bool(hybrid_replay),
+            exogenous_backdrop=exogenous_backdrop,
+            hybrid_backdrop_weight=float(hybrid_backdrop_weight or 0.0),
         )
         return cls(environment=environment, agents=agents, config=config)
 
@@ -191,7 +200,34 @@ class PolicySession:
             runner_symbol=str(self.config.runner_symbol),
             steps_per_day=int(self.config.steps_per_day),
             model_priority=list(self.config.model_priority),
+            hybrid_replay=bool(self.config.hybrid_replay),
+            exogenous_backdrop=self.config.exogenous_backdrop,
+            hybrid_backdrop_weight=float(self.config.hybrid_backdrop_weight or 0.0),
         )
+
+    def _mode_curve_calibration(self) -> Dict[str, float]:
+        mode = str(self.config.simulation_mode or "SMART").strip().upper()
+        if mode == "DEEP":
+            return {
+                "max_daily_move": 0.015,
+                "raw_weight": 0.36,
+                "policy_scale": 0.00065,
+                "flow_scale": 0.00045,
+                "sentiment_scale": 0.00038,
+                "csad_scale": 0.00028,
+                "mean_reversion_scale": 0.18,
+                "backdrop_weight": 0.72,
+            }
+        return {
+            "max_daily_move": 0.0075,
+            "raw_weight": 0.18,
+            "policy_scale": 0.00032,
+            "flow_scale": 0.0002,
+            "sentiment_scale": 0.00022,
+            "csad_scale": 0.00015,
+            "mean_reversion_scale": 0.28,
+            "backdrop_weight": 0.82,
+        }
 
     @property
     def environment(self) -> MarketEnvironment:
@@ -296,7 +332,8 @@ class PolicySession:
         combined_text = "；".join(text_parts)
         if rumor_noise:
             combined_text = f"{combined_text}。市场传出相关谣言扰动，情绪波动加大。"
-        return combined_text, float(_clip(total_strength, 0.0, 3.0)), timeline
+        strength_cap = 2.2 if str(self.config.simulation_mode or "SMART").strip().upper() == "DEEP" else 1.4
+        return combined_text, float(_clip(total_strength, 0.0, strength_cap)), timeline
 
     def _resolve_day_prices(
         self,
@@ -308,8 +345,6 @@ class PolicySession:
         if old_price <= 0.0:
             base_price = close_price if close_price > 0.0 else 100.0
             return float(base_price), float(base_price)
-        if abs(close_price - old_price) > 1e-9:
-            return float(old_price), float(close_price)
         if not active_timeline:
             return float(old_price), float(close_price)
 
@@ -323,17 +358,37 @@ class PolicySession:
         csad = float(diagnostics.get("csad", 0.0) or 0.0)
         flow_imbalance = (buy_volume - sell_volume) / max(abs(buy_volume) + abs(sell_volume), 1.0)
         policy_bias = float(policy_input.get("policy_intensity", 0.0) or 0.0)
-        synthetic_return = (
-            0.0018 * policy_strength
-            + 0.0008 * policy_bias
-            + 0.0012 * sentiment_index
-            + 0.0010 * flow_imbalance
-            - 0.0009 * csad
+        calibration = self._mode_curve_calibration()
+        sentiment_edge = sentiment_index - 0.5
+        raw_return = (close_price - old_price) / old_price if old_price > 0 else 0.0
+        target_return = (
+            0.0002
+            + calibration["policy_scale"] * policy_strength
+            + 0.00018 * policy_bias
+            + calibration["sentiment_scale"] * sentiment_edge
+            + calibration["flow_scale"] * flow_imbalance
+            - calibration["csad_scale"] * csad
         )
-        if abs(synthetic_return) < 1e-6:
-            synthetic_return = 0.0005 * max(policy_strength, 0.2)
-        synthetic_return = _clip(synthetic_return, -0.05, 0.05)
-        close_price = old_price * (1.0 + synthetic_return)
+        if abs(target_return) < 1e-6:
+            target_return = 0.00015 * max(policy_strength, 0.2)
+        target_return -= calibration["mean_reversion_scale"] * raw_return
+        blended_target = (
+            calibration["backdrop_weight"] * raw_return
+            + (1.0 - calibration["backdrop_weight"]) * target_return
+        )
+        if abs(raw_return) > 1e-9:
+            calibrated_return = (
+                calibration["raw_weight"] * raw_return
+                + (1.0 - calibration["raw_weight"]) * blended_target
+            )
+        else:
+            calibrated_return = blended_target
+        calibrated_return = _clip(
+            calibrated_return,
+            -float(calibration["max_daily_move"]),
+            float(calibration["max_daily_move"]),
+        )
+        close_price = old_price * (1.0 + calibrated_return)
         return float(old_price), float(close_price)
 
     def _record_for_day(self, day_index: int, report: Dict[str, Any], active_timeline: List[Dict[str, Any]]) -> Dict[str, Any]:

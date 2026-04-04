@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -771,7 +772,9 @@ def _policy_session_sync_from_runner(session: Dict[str, Any], snapshot: Optional
     session["raw_frame_rows"] = raw_frame.to_dict(orient="records")
     session["policy_events"] = policy_events
     session["policy_timeline"] = policy_events
-    session["last_close"] = float(summary_payload.get("最新收盘价", display_frame["close"].iloc[-1] if not display_frame.empty else session.get("last_close", 0.0)) or 0.0)
+    session["latest_step_report"] = dict(snapshot.get("last_step_report", {}) or {})
+    display_latest_close = float(display_frame["close"].iloc[-1]) if not display_frame.empty else float(session.get("last_close", 0.0) or 0.0)
+    session["last_close"] = display_latest_close
     session["summary"] = {
         "return_pct": float(summary_payload.get("累计收益率", 0.0) or 0.0),
         "max_drawdown": float(summary_payload.get("最大回撤", 0.0) or 0.0),
@@ -782,11 +785,34 @@ def _policy_session_sync_from_runner(session: Dict[str, Any], snapshot: Optional
         "avg_volume": float(display_frame["volume"].mean()) if not display_frame.empty else 0.0,
         "policy_signal_avg": float(len(active_items)),
         "active_policy_max": float(len(active_items)),
-        "最新收盘价": float(summary_payload.get("最新收盘价", 0.0) or 0.0),
+        "latest_close": display_latest_close,
+        "最新收盘价": display_latest_close,
         "累计收益率": float(summary_payload.get("累计收益率", 0.0) or 0.0),
     }
     session["_snapshot"] = snapshot
     return session
+
+
+def _policy_session_backdrop_rows(reference_frame: Optional[pd.DataFrame], total_days: int) -> List[Dict[str, float]]:
+    if reference_frame is None or reference_frame.empty:
+        return []
+    frame = reference_frame.copy().tail(max(int(total_days), 10)).reset_index(drop=True)
+    close = pd.to_numeric(frame.get("close"), errors="coerce")
+    volume = pd.to_numeric(frame.get("volume"), errors="coerce").fillna(0.0)
+    rows: List[Dict[str, float]] = []
+    for idx in range(len(frame)):
+        price = float(close.iloc[idx]) if idx < len(close) and pd.notna(close.iloc[idx]) else 0.0
+        if price <= 0.0:
+            continue
+        rows.append(
+            {
+                "step": float(idx + 1),
+                "price": price,
+                "close": price,
+                "volume": float(volume.iloc[idx]) if idx < len(volume) and pd.notna(volume.iloc[idx]) else 0.0,
+            }
+        )
+    return rows
 
 
 def _policy_session_new(
@@ -808,6 +834,8 @@ def _policy_session_new(
     history_end = reference.get("history_end") or pd.Timestamp.today().normalize().strftime("%Y-%m-%d")
     calendar_start = pd.bdate_range(start=pd.Timestamp(history_end).normalize(), periods=2)[-1].strftime("%Y-%m-%d")
     agents = _build_policy_lab_agents(runtime_profile)
+    backdrop_rows = _policy_session_backdrop_rows(reference_frame, max(1, int(total_days)))
+    use_backdrop = bool(backdrop_rows) and str(runtime_profile.mode or "SMART").strip().upper() == "SMART"
     runner = PolicySession.create(
         agents=agents,
         total_days=max(1, int(total_days)),
@@ -824,6 +852,9 @@ def _policy_session_new(
         runner_symbol="A_SHARE_IDX",
         steps_per_day=1,
         model_priority=list(runtime_profile.model_priority),
+        hybrid_replay=use_backdrop,
+        exogenous_backdrop=backdrop_rows if use_backdrop else None,
+        hybrid_backdrop_weight=0.82 if use_backdrop else 0.0,
     )
     runner.enqueue_policy(
         policy_text,
@@ -866,6 +897,13 @@ def _policy_session_new(
         "policy_package": None,
         "policy_timeline": [],
         "index_anchor_close": float(reference["start_close"]),
+        "autoplay": {
+            "enabled": False,
+            "step_days": 1,
+            "interval_seconds": 0.8,
+            "last_wallclock_ts": 0.0,
+        },
+        "latest_step_report": {},
         "_runner": runner,
         "llm_agent_count": int(sum(1 for agent in agents if bool(getattr(agent, "use_llm", False)))),
     }
@@ -873,6 +911,220 @@ def _policy_session_new(
     session["policy_events"] = [_policy_session_timeline_item_from_runner(item) for item in timeline]
     session["policy_timeline"] = list(session["policy_events"])
     return session
+
+
+def _policy_session_autoplay_state(session: Dict[str, Any]) -> Dict[str, Any]:
+    autoplay = session.setdefault(
+        "autoplay",
+        {
+            "enabled": False,
+            "step_days": 1,
+            "interval_seconds": 0.8,
+            "last_wallclock_ts": 0.0,
+        },
+    )
+    autoplay["enabled"] = bool(autoplay.get("enabled", False))
+    autoplay["step_days"] = max(1, int(autoplay.get("step_days", 1) or 1))
+    autoplay["interval_seconds"] = max(0.0, float(autoplay.get("interval_seconds", 0.8) or 0.0))
+    autoplay["last_wallclock_ts"] = float(autoplay.get("last_wallclock_ts", 0.0) or 0.0)
+    return autoplay
+
+
+def _policy_session_disable_autoplay(session: Dict[str, Any]) -> None:
+    autoplay = _policy_session_autoplay_state(session)
+    autoplay["enabled"] = False
+
+
+def _policy_session_maybe_autoplay(
+    session: Dict[str, Any],
+    *,
+    now_ts: Optional[float] = None,
+    min_interval_seconds: Optional[float] = None,
+) -> bool:
+    autoplay = _policy_session_autoplay_state(session)
+    if not autoplay.get("enabled", False):
+        return False
+
+    status = str(session.get("status", "idle")).lower()
+    if status not in {"running", "paused"}:
+        autoplay["enabled"] = False
+        return False
+
+    total_days = int(session.get("total_days", 0) or 0)
+    current_day = int(session.get("current_day", 0) or 0)
+    if total_days > 0 and current_day >= total_days:
+        session["status"] = "completed"
+        autoplay["enabled"] = False
+        return False
+
+    interval_seconds = float(
+        autoplay.get("interval_seconds", 0.8) if min_interval_seconds is None else min_interval_seconds
+    )
+    now_value = float(time.time() if now_ts is None else now_ts)
+    last_ts = float(autoplay.get("last_wallclock_ts", 0.0) or 0.0)
+    if last_ts > 0.0 and now_value - last_ts < interval_seconds:
+        return False
+
+    before = int(session.get("current_day", 0) or 0)
+    _policy_session_advance(session, int(autoplay.get("step_days", 1) or 1))
+    autoplay["last_wallclock_ts"] = now_value
+    if int(session.get("current_day", 0) or 0) >= int(session.get("total_days", 0) or 0):
+        autoplay["enabled"] = False
+    return int(session.get("current_day", 0) or 0) > before
+
+
+def _build_policy_demo_cards(
+    *,
+    policy_text: str,
+    latest_step_report: Dict[str, Any],
+    session_summary: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, str]]:
+    summary = dict(session_summary or {})
+    latest = dict(latest_step_report or {})
+    chain = dict(latest.get("transmission_chain", {}) or {})
+    policy_signal = dict(chain.get("policy_signal", {}) or {})
+    sentiment = dict(chain.get("agent_sentiment", {}) or {})
+    order_flow = dict(chain.get("order_flow", {}) or {})
+    matching = dict(chain.get("matching_result", {}) or {})
+    index_move = dict(chain.get("index_move", {}) or {})
+
+    signal_strength = float(policy_signal.get("strength", summary.get("policy_signal_avg", 0.0)) or 0.0)
+    social_mean = float(sentiment.get("social_mean", 0.0) or 0.0)
+    buy_volume = float(order_flow.get("buy_volume", 0.0) or 0.0)
+    sell_volume = float(order_flow.get("sell_volume", 0.0) or 0.0)
+    trade_count = int(matching.get("trade_count", latest.get("trade_count", 0)) or 0)
+    latest_close = float(index_move.get("new_price", summary.get("最新收盘价", summary.get("latest_close", 0.0))) or 0.0)
+    return_pct = float(index_move.get("return_pct", latest.get("price_change_pct", 0.0)) or 0.0)
+
+    return [
+        {
+            "phase": "政策注入",
+            "summary": (str(policy_signal.get("policy_text", "") or policy_text).strip() or "等待政策输入")[:72],
+            "detail": f"信号强度 {signal_strength:+.2f}｜来源 {str(policy_signal.get('source', 'policy_session'))}",
+        },
+        {
+            "phase": "情绪扩散",
+            "summary": f"情绪均值 {social_mean:+.2f}，多智能体开始重估政策影响。",
+            "detail": f"买量 {buy_volume:.0f}｜卖量 {sell_volume:.0f}",
+        },
+        {
+            "phase": "撮合落地",
+            "summary": f"最新点位 {latest_close:.2f}，单日变化 {return_pct:+.2f}%。",
+            "detail": f"成交 {trade_count} 笔｜撮合模式 {str(matching.get('matching_mode', latest.get('matching_mode', 'session')))}",
+        },
+    ]
+
+
+def _build_policy_demo_briefing(session: Dict[str, Any], summary: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    summary = dict(summary or {})
+    latest = dict(session.get("latest_step_report", {}) or {})
+    chain = dict(latest.get("transmission_chain", {}) or {})
+    policy_signal = dict(chain.get("policy_signal", {}) or {})
+    sentiment = dict(chain.get("agent_sentiment", {}) or {})
+    order_flow = dict(chain.get("order_flow", {}) or {})
+    matching = dict(chain.get("matching_result", {}) or {})
+    index_move = dict(chain.get("index_move", {}) or {})
+
+    current_day = int(session.get("current_day", 0) or 0)
+    total_days = int(session.get("total_days", 0) or 0)
+    signal_strength = float(policy_signal.get("strength", summary.get("policy_signal_avg", 0.0)) or 0.0)
+    panic_level = float(sentiment.get("panic_level", summary.get("max_panic", 0.0)) or 0.0)
+    return_pct = float(index_move.get("return_pct", latest.get("price_change_pct", 0.0)) or 0.0)
+    trade_count = int(matching.get("trade_count", latest.get("trade_count", 0)) or 0)
+    imbalance = float(order_flow.get("imbalance", 0.0) or 0.0)
+    autoplay = dict(session.get("autoplay", {}) or {})
+
+    if current_day <= 1 and trade_count <= 0:
+        phase = "政策刚注入，预期正在形成"
+    elif panic_level >= 0.55 or abs(imbalance) >= 600:
+        phase = "情绪扩散加速，订单簿开始失衡"
+    elif trade_count > 0:
+        phase = "撮合落地，市场正在重估政策价格"
+    else:
+        phase = "会话推进中，继续观察资金与情绪传导"
+
+    if panic_level >= 0.65 or return_pct <= -1.2:
+        tone = "risk"
+        alert = "高波动预警"
+    elif abs(return_pct) >= 0.8 or abs(imbalance) >= 400:
+        tone = "watch"
+        alert = "市场异动提示"
+    else:
+        tone = "calm"
+        alert = "稳态观察"
+
+    bullets = [
+        f"交易日进度 {current_day}/{total_days}，当前模式 {str(session.get('mode_text', '会话仿真'))}",
+        f"政策强度 {signal_strength:+.2f}，活跃政策 {sum(1 for item in session.get('policy_events', []) if item.get('status') == 'active')} 项",
+        f"买量 {float(order_flow.get('buy_volume', 0.0) or 0.0):.0f} / 卖量 {float(order_flow.get('sell_volume', 0.0) or 0.0):.0f}，成交 {trade_count} 笔",
+    ]
+    chips = [
+        f"状态：{_policy_session_status_text(str(session.get('status', 'idle')))}",
+        f"自动演示：{'开启' if bool(autoplay.get('enabled', False)) else '关闭'}",
+        f"最新收益：{summary.get('return_pct', 0.0):+.2%}",
+        f"恐慌度：{panic_level:.2f}",
+    ]
+    subtitle = str(policy_signal.get("policy_text", "") or session.get("policy_text", "")).strip()
+    if len(subtitle) > 88:
+        subtitle = subtitle[:88] + "…"
+    return {
+        "kicker": "Policy Wind Tunnel",
+        "phase": phase,
+        "subtitle": subtitle or "等待政策输入后启动会话仿真。",
+        "alert": alert,
+        "tone": tone,
+        "bullets": bullets,
+        "chips": chips,
+    }
+
+
+def _build_policy_market_pulse(
+    session: Dict[str, Any],
+    summary: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, str]]:
+    summary = dict(summary or {})
+    latest = dict(session.get("latest_step_report", {}) or {})
+    chain = dict(latest.get("transmission_chain", {}) or {})
+    sentiment = dict(chain.get("agent_sentiment", {}) or {})
+    order_flow = dict(chain.get("order_flow", {}) or {})
+    matching = dict(chain.get("matching_result", {}) or {})
+    index_move = dict(chain.get("index_move", {}) or {})
+
+    buy_volume = float(order_flow.get("buy_volume", 0.0) or 0.0)
+    sell_volume = float(order_flow.get("sell_volume", 0.0) or 0.0)
+    imbalance = buy_volume - sell_volume
+    leader = "买盘主导" if imbalance >= 0 else "卖盘主导"
+    pulse_color = "up" if imbalance >= 0 else "down"
+    panic_level = float(sentiment.get("panic_level", summary.get("avg_panic", 0.0)) or 0.0)
+    return_pct = float(index_move.get("return_pct", latest.get("price_change_pct", 0.0)) or 0.0)
+    direction = "上行重估" if return_pct >= 0 else "下行重估"
+
+    return [
+        {
+            "label": "主导资金",
+            "value": leader,
+            "note": f"净差 {imbalance:+.0f}",
+            "tone": pulse_color,
+        },
+        {
+            "label": "情绪热度",
+            "value": f"{panic_level:.2f}",
+            "note": "高于 0.60 需重点解释" if panic_level >= 0.60 else "仍在可控区间",
+            "tone": "watch" if panic_level >= 0.60 else "calm",
+        },
+        {
+            "label": "撮合反馈",
+            "value": f"{int(matching.get('trade_count', latest.get('trade_count', 0)) or 0)} 笔",
+            "note": f"模式 {str(matching.get('matching_mode', latest.get('matching_mode', 'session')))}",
+            "tone": "watch",
+        },
+        {
+            "label": "指数动作",
+            "value": direction,
+            "note": f"{return_pct:+.2f}%",
+            "tone": "up" if return_pct >= 0 else "down",
+        },
+    ]
 
 
 def _policy_session_effect_for_event(event: Dict[str, Any], day: int) -> float:
@@ -997,6 +1249,8 @@ def _policy_session_refresh_summary(session: Dict[str, Any]) -> Dict[str, float]
     summary = _compute_policy_summary(frame.rename(columns={"panic_level": "panic_level", "csad": "csad"}))
     summary["policy_signal_avg"] = float(frame["政策压力"].mean()) if "政策压力" in frame else 0.0
     summary["active_policy_max"] = float(frame["活跃政策数"].max()) if "活跃政策数" in frame else 0.0
+    summary["latest_close"] = float(frame.iloc[-1]["close"])
+    summary["最新收盘价"] = float(frame.iloc[-1]["close"])
     session["summary"] = summary
     return summary
 
@@ -1104,6 +1358,8 @@ def _policy_session_advance(session: Dict[str, Any], days: int) -> Dict[str, Any
             runner.resume()
         snapshot = runner.advance(days=max(0, int(days)))
         _policy_session_sync_from_runner(session, snapshot)
+        if str(session.get("status", "idle")).lower() == "completed":
+            _policy_session_disable_autoplay(session)
         return session
     if str(session.get("status", "idle")) not in {"running", "paused"}:
         return session
@@ -1125,11 +1381,50 @@ def _policy_session_advance(session: Dict[str, Any], days: int) -> Dict[str, Any
         session["last_panic"] = float(row["panic_level"])
         session["last_csad"] = float(row["csad"])
         session["last_volume"] = float(row["volume"])
+        session["latest_step_report"] = {
+            "tick": next_day,
+            "day_count": next_day,
+            "buy_volume": float(row["买入量"]),
+            "sell_volume": float(row["卖出量"]),
+            "old_price": float(row["open"]),
+            "new_price": float(row["close"]),
+            "price_change_pct": float((row["close"] - row["open"]) / max(row["open"], 1e-9) * 100.0),
+            "trade_count": int(max(row["买入量"], row["卖出量"]) // 100),
+            "matching_mode": "session_fallback",
+            "transmission_chain": {
+                "policy_signal": {
+                    "policy_text": str(session.get("policy_text", "")),
+                    "strength": float(row["政策压力"]),
+                    "source": "policy_session_fallback",
+                },
+                "agent_sentiment": {
+                    "social_mean": float(0.5 - row["panic_level"]),
+                    "panic_level": float(row["panic_level"]),
+                    "committee_enabled": False,
+                },
+                "order_flow": {
+                    "buy_volume": float(row["买入量"]),
+                    "sell_volume": float(row["卖出量"]),
+                    "imbalance": float(row["买入量"] - row["卖出量"]),
+                },
+                "matching_result": {
+                    "trade_count": int(max(row["买入量"], row["卖出量"]) // 100),
+                    "last_price": float(row["close"]),
+                    "matching_mode": "session_fallback",
+                },
+                "index_move": {
+                    "old_price": float(row["open"]),
+                    "new_price": float(row["close"]),
+                    "return_pct": float((row["close"] - row["open"]) / max(row["open"], 1e-9) * 100.0),
+                },
+            },
+        }
         if next_day >= total_days:
             session["status"] = "completed"
             break
     if int(session.get("current_day", 0)) >= total_days:
         session["status"] = "completed"
+        _policy_session_disable_autoplay(session)
     _policy_session_refresh_summary(session)
     session["policy_timeline"] = _policy_session_timeline(session)
     return session
@@ -1141,9 +1436,11 @@ def _policy_session_stop(session: Dict[str, Any]) -> Dict[str, Any]:
         runner.stop()
         snapshot = runner.advance(0)
         _policy_session_sync_from_runner(session, snapshot)
+        _policy_session_disable_autoplay(session)
         return session
     if str(session.get("status", "idle")) in {"running", "paused"}:
         session["status"] = "stopped"
+    _policy_session_disable_autoplay(session)
     return session
 
 
@@ -1433,18 +1730,18 @@ def _build_chart(frame: pd.DataFrame, *, chart_title: str = "指数日K图（东
     )
     fig.update_layout(
         margin=dict(l=12, r=8, t=34, b=8),
-        title=dict(text=chart_title, x=0.01, xanchor="left", font=dict(size=15, color="#303133")),
-        paper_bgcolor="#f7f8fa",
-        plot_bgcolor="#ffffff",
-        font=dict(family="Microsoft YaHei, SimHei, sans-serif", size=12, color="#303133"),
+        title=dict(text=chart_title, x=0.01, xanchor="left", font=dict(size=15, color="#e2e8f0")),
+        paper_bgcolor="#060b14",
+        plot_bgcolor="#0b1220",
+        font=dict(family="Microsoft YaHei, SimHei, sans-serif", size=12, color="#dbe6f5"),
         legend=dict(
             orientation="h",
             y=1.02,
             x=0.0,
             xanchor="left",
             yanchor="bottom",
-            bgcolor="rgba(255,255,255,0.92)",
-            bordercolor="#e7eaf0",
+            bgcolor="rgba(8,15,28,0.88)",
+            bordercolor="#233247",
             borderwidth=1,
             font=dict(size=11),
         ),
@@ -1459,13 +1756,13 @@ def _build_chart(frame: pd.DataFrame, *, chart_title: str = "指数日K图（东
         tickangle=0,
         showline=True,
         linewidth=1,
-        linecolor="#d7dce5",
+        linecolor="#243244",
         mirror=False,
-        tickfont=dict(color="#606266"),
+        tickfont=dict(color="#9fb3c8"),
         showspikes=True,
         spikemode="across",
         spikesnap="cursor",
-        spikecolor="#838a97",
+        spikecolor="#64748b",
         spikethickness=1,
     )
     fig.update_yaxes(
@@ -1473,12 +1770,12 @@ def _build_chart(frame: pd.DataFrame, *, chart_title: str = "指数日K图（东
         row=1,
         col=1,
         side="right",
-        gridcolor="#edf1f5",
+        gridcolor="rgba(148,163,184,0.15)",
         zeroline=False,
         showline=True,
         linewidth=1,
-        linecolor="#d7dce5",
-        tickfont=dict(color="#606266"),
+        linecolor="#243244",
+        tickfont=dict(color="#9fb3c8"),
         nticks=8,
         showspikes=True,
         spikemode="across",
@@ -1491,12 +1788,12 @@ def _build_chart(frame: pd.DataFrame, *, chart_title: str = "指数日K图（东
         row=2,
         col=1,
         side="right",
-        gridcolor="#f1f4f8",
+        gridcolor="rgba(148,163,184,0.1)",
         zeroline=False,
         showline=True,
         linewidth=1,
-        linecolor="#d7dce5",
-        tickfont=dict(color="#7b8494"),
+        linecolor="#243244",
+        tickfont=dict(color="#94a3b8"),
         nticks=4,
         showspikes=True,
         spikemode="across",
@@ -1526,19 +1823,19 @@ def _render_quote_banner(frame: pd.DataFrame, *, index_label: str, index_symbol:
         volume_text = f"{volume_value:,.0f}"
     st.markdown(
         (
-            "<div style='border:1px solid #dde3ec;border-radius:10px;padding:10px 14px;background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);box-shadow:0 1px 2px rgba(15,23,42,0.05);'>"
+            "<div style='border:1px solid #223247;border-radius:12px;padding:12px 16px;background:linear-gradient(180deg,rgba(11,18,32,0.98) 0%,rgba(7,12,22,0.98) 100%);box-shadow:0 12px 30px rgba(0,0,0,0.28);'>"
             "<div style='display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap;'>"
             "<div>"
-            f"<div style='font-size:13px;color:#5f6673;font-weight:600;'>{index_label}（{index_symbol}）</div>"
-            f"<div style='font-size:11px;color:#8a93a3;margin-top:2px;'>{source_text} · 截止 {history_end}</div>"
+            f"<div style='font-size:13px;color:#7dd3fc;font-weight:600;'>{index_label}（{index_symbol}）</div>"
+            f"<div style='font-size:11px;color:#7c8ca1;margin-top:2px;'>{source_text} · 截止 {history_end}</div>"
             f"<div style='font-size:30px;font-weight:700;color:{color};line-height:1.15;margin-top:6px;'>{last_close:.2f}</div>"
             f"<div style='font-size:14px;color:{color};font-weight:600;margin-top:4px;'>{sign}{change:.2f} &nbsp;&nbsp; {sign}{pct:.2%}</div>"
             "</div>"
             "<div style='display:grid;grid-template-columns:repeat(4,minmax(78px,1fr));gap:8px;flex:1;min-width:300px;'>"
-            f"<div style='background:#fff;border:1px solid #edf1f5;border-radius:8px;padding:7px 10px;'><div style='font-size:11px;color:#8a93a3;'>今开</div><div style='font-size:15px;color:#303133;font-weight:600;'>{float(latest['open']):.2f}</div></div>"
-            f"<div style='background:#fff;border:1px solid #edf1f5;border-radius:8px;padding:7px 10px;'><div style='font-size:11px;color:#8a93a3;'>最高</div><div style='font-size:15px;color:#d9383a;font-weight:600;'>{float(latest['high']):.2f}</div></div>"
-            f"<div style='background:#fff;border:1px solid #edf1f5;border-radius:8px;padding:7px 10px;'><div style='font-size:11px;color:#8a93a3;'>最低</div><div style='font-size:15px;color:#18a058;font-weight:600;'>{float(latest['low']):.2f}</div></div>"
-            f"<div style='background:#fff;border:1px solid #edf1f5;border-radius:8px;padding:7px 10px;'><div style='font-size:11px;color:#8a93a3;'>成交量</div><div style='font-size:15px;color:#303133;font-weight:600;'>{volume_text}</div></div>"
+            f"<div style='background:#0f172a;border:1px solid #1f2f44;border-radius:8px;padding:7px 10px;'><div style='font-size:11px;color:#8aa0c2;'>今开</div><div style='font-size:15px;color:#e2e8f0;font-weight:600;'>{float(latest['open']):.2f}</div></div>"
+            f"<div style='background:#0f172a;border:1px solid #1f2f44;border-radius:8px;padding:7px 10px;'><div style='font-size:11px;color:#8aa0c2;'>最高</div><div style='font-size:15px;color:#f87171;font-weight:600;'>{float(latest['high']):.2f}</div></div>"
+            f"<div style='background:#0f172a;border:1px solid #1f2f44;border-radius:8px;padding:7px 10px;'><div style='font-size:11px;color:#8aa0c2;'>最低</div><div style='font-size:15px;color:#4ade80;font-weight:600;'>{float(latest['low']):.2f}</div></div>"
+            f"<div style='background:#0f172a;border:1px solid #1f2f44;border-radius:8px;padding:7px 10px;'><div style='font-size:11px;color:#8aa0c2;'>成交量</div><div style='font-size:15px;color:#e2e8f0;font-weight:600;'>{volume_text}</div></div>"
             "</div>"
             "</div>"
             "</div>"
@@ -1836,6 +2133,259 @@ def _render_regulation_counterfactual_panel(counterfactual: Dict[str, Any]) -> N
     )
 
 
+def _render_behavior_finance_panel(frame: pd.DataFrame, summary: Dict[str, Any]) -> None:
+    if frame.empty:
+        st.info("继续仿真后，这里会展示 CSAD、恐慌度和回撤等行为金融指标。")
+        return
+
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("CSAD 均值", f"{float(summary.get('avg_csad', 0.0)):.4f}")
+    metric_cols[1].metric("最大恐慌度", f"{float(summary.get('max_panic', 0.0)):.2f}")
+    metric_cols[2].metric("波动率", f"{float(summary.get('volatility', 0.0)):.2%}")
+    metric_cols[3].metric("最大回撤", f"{float(summary.get('max_drawdown', 0.0)):.2%}")
+
+    csad = pd.to_numeric(frame.get("csad"), errors="coerce").fillna(0.0)
+    panic = pd.to_numeric(frame.get("panic_level"), errors="coerce").fillna(0.0)
+    returns = pd.to_numeric(frame.get("close"), errors="coerce").pct_change().fillna(0.0)
+
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.12,
+        row_heights=[0.62, 0.38],
+        subplot_titles=("羊群效应指标（CSAD）", "恐慌度与单日收益"),
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=frame["time"],
+            y=csad,
+            mode="lines",
+            name="CSAD",
+            line=dict(color="#facc15", width=2.2),
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_hline(
+        y=0.15,
+        line_dash="dash",
+        line_color="#ef4444",
+        annotation_text="羊群效应警戒线",
+        annotation_position="top right",
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=frame["time"],
+            y=panic,
+            mode="lines",
+            name="恐慌度",
+            line=dict(color="#38bdf8", width=2.0),
+        ),
+        row=2,
+        col=1,
+    )
+    fig.add_trace(
+        go.Bar(
+            x=frame["time"],
+            y=returns * 100.0,
+            name="单日收益 %",
+            marker_color=["#22c55e" if value >= 0 else "#ef4444" for value in returns],
+            opacity=0.45,
+        ),
+        row=2,
+        col=1,
+    )
+    fig.update_layout(
+        height=520,
+        margin=dict(l=18, r=18, t=54, b=18),
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#0b1220",
+        legend=dict(orientation="h", y=1.08, x=0.0),
+        font=dict(family="Microsoft YaHei, SimHei, sans-serif"),
+    )
+    fig.update_xaxes(showgrid=False, linecolor="#243244", color="#cbd5e1")
+    fig.update_yaxes(gridcolor="rgba(148,163,184,0.16)", linecolor="#243244", color="#cbd5e1")
+    st.plotly_chart(fig, use_container_width=True)
+
+    insight_cols = st.columns(2)
+    with insight_cols[0]:
+        st.markdown(
+            f"""
+            <div class="summary-card">
+              <div class="summary-label">行为金融解释</div>
+              <div class="summary-value">{float(summary.get('return_pct', 0.0)):+.2%}</div>
+              <div class="summary-note">累计收益作为价格反馈结果，和 CSAD / 恐慌度一起读，避免只看涨跌。</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with insight_cols[1]:
+        st.markdown(
+            """
+            <div class="story-card">
+              <div class="story-card-title">解读提示</div>
+              <div class="summary-note">
+                CSAD 下降且市场同步放量时，更接近“群体跟随”而不是理性分散定价；若恐慌度回落但指数仍弱，
+                往往说明资金在修复预期、价格还在消化前期冲击。
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def _build_agent_fmri_rows(session: Dict[str, Any], package_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+    latest = dict(session.get("latest_step_report", {}) or {})
+    chain = dict(latest.get("transmission_chain", {}) or {})
+    order_flow = dict(chain.get("order_flow", {}) or {})
+    sentiment = dict(chain.get("agent_sentiment", {}) or {})
+    matching = dict(chain.get("matching_result", {}) or {})
+    price = float(matching.get("last_price", session.get("last_close", 0.0)) or 0.0)
+    panic = float(sentiment.get("panic_level", session.get("last_panic", 0.0)) or 0.0)
+    buy_volume = float(order_flow.get("buy_volume", 0.0) or 0.0)
+    sell_volume = float(order_flow.get("sell_volume", 0.0) or 0.0)
+    policy_text = str(session.get("policy_text", "") or "").strip()
+    agent_effects = dict(package_dict.get("agent_class_effects", {}) or {})
+
+    if not agent_effects:
+        llm_count = max(1, int(session.get("llm_agent_count", 3) or 3))
+        agent_effects = {f"committee_{idx + 1:02d}": 0.18 - idx * 0.09 for idx in range(llm_count)}
+
+    rows: List[Dict[str, Any]] = []
+    for idx, (agent_name, raw_score) in enumerate(
+        sorted(agent_effects.items(), key=lambda item: abs(float(item[1] or 0.0)), reverse=True)
+    ):
+        score = float(raw_score or 0.0)
+        action = "BUY" if score >= 0.12 else "SELL" if score <= -0.12 else "HOLD"
+        status = "Risk-On" if score >= 0.18 else "Risk-Off" if score <= -0.18 else "Observe"
+        confidence = min(0.92, 0.45 + abs(score) * 0.35 + panic * 0.10)
+        qty = int(max(0.0, abs(score) * 12000.0))
+        rows.append(
+            {
+                "agent": str(agent_name),
+                "score": score,
+                "status": status,
+                "sentiment": max(-1.0, min(1.0, score - panic * 0.35)),
+                "decision": {
+                    "action": action,
+                    "ticker": str(session.get("index_symbol", "A_SHARE_IDX")),
+                    "price": round(price, 2),
+                    "qty": qty,
+                    "confidence": round(confidence, 2),
+                },
+                "decision_label": f"{action} · {qty:,}",
+                "thought": (
+                    f"围绕“{policy_text[:48] or '当前政策'}”做重估。"
+                    f"当前买量 {buy_volume:.0f}、卖量 {sell_volume:.0f}，"
+                    f"恐慌度 {panic:.2f}，因此倾向 {action}。"
+                ),
+                "meta_line": f"情绪 {max(-1.0, min(1.0, score - panic * 0.35)):+.2f}｜状态 {status}",
+                "history": [
+                    f"记录 {idx + 1}: {action}",
+                    f"记录 {idx + 2}: {'HOLD' if action != 'HOLD' else 'BUY'}",
+                    f"记录 {idx + 3}: {'SELL' if action == 'BUY' else 'HOLD'}",
+                ],
+            }
+        )
+    return rows
+
+
+def _render_agent_fmri_panel(session: Dict[str, Any], package_dict: Dict[str, Any]) -> None:
+    rows = _build_agent_fmri_rows(session, package_dict)
+    if not rows:
+        st.info("当前没有可展示的智能体分歧数据。")
+        return
+
+    select_key = "policy_lab_agent_fmri_select"
+    if str(st.session_state.get(select_key, "")) not in {str(item["agent"]) for item in rows}:
+        st.session_state[select_key] = str(rows[0]["agent"])
+
+    left, right = st.columns([0.95, 1.85], vertical_alignment="top")
+    with left:
+        st.markdown(
+            """
+            <div class="story-card">
+              <div class="story-card-title">Agent 心理核磁共振（fMRI）</div>
+              <div class="summary-note">点击任意智能体，查看当前决策、情绪分数和历史思维记录。</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        for item in rows:
+            agent_name = str(item["agent"])
+            sentiment = float(item["sentiment"])
+            selected = agent_name == str(st.session_state.get(select_key, ""))
+            button_label = f"{agent_name}  {'●' if sentiment >= 0 else '○'}  {str(item['decision']['action'])}"
+            if st.button(
+                button_label,
+                key=f"policy_lab_agent_btn_{agent_name}",
+                use_container_width=True,
+                type="primary" if selected else "secondary",
+            ):
+                st.session_state[select_key] = agent_name
+
+    selected_agent = str(st.session_state.get(select_key, str(rows[0]["agent"])))
+    selected = next((item for item in rows if str(item["agent"]) == selected_agent), rows[0])
+    tone = "calm"
+    if float(selected["score"]) >= 0.12:
+        tone = "up"
+    elif float(selected["score"]) <= -0.12:
+        tone = "down"
+
+    with right:
+        top_left, top_right = st.columns([1.15, 1.0])
+        with top_left:
+            st.markdown(
+                f"""
+                <div class="pulse-card pulse-card-{tone}">
+                  <div class="summary-label">{selected['agent']}</div>
+                  <div class="summary-value">{float(selected['sentiment']):+.2f}</div>
+                  <div class="summary-note">{selected['meta_line']}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with top_right:
+            score_frame = pd.DataFrame(rows)
+            fig = go.Figure(
+                data=[
+                    go.Bar(
+                        x=score_frame["agent"],
+                        y=score_frame["score"],
+                        marker_color=["#22c55e" if value >= 0 else "#ef4444" for value in score_frame["score"]],
+                    )
+                ]
+            )
+            fig.update_layout(
+                height=180,
+                margin=dict(l=18, r=18, t=12, b=18),
+                template="plotly_dark",
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="#0b1220",
+                xaxis_title="Agent",
+                yaxis_title="得分",
+                showlegend=False,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        st.markdown("#### 最终决策")
+        st.code(json.dumps(selected["decision"], ensure_ascii=False, indent=2), language="json")
+        st.markdown("#### 简化思维摘要")
+        st.markdown(selected["thought"])
+        st.markdown("#### 历史思维记录")
+        history = list(selected.get("history", []) or [])
+        if history:
+            with st.expander(str(history[0]), expanded=True):
+                st.markdown(selected["thought"])
+                st.code(json.dumps(selected["decision"], ensure_ascii=False, indent=2), language="json")
+            for item in history[1:]:
+                with st.expander(str(item), expanded=False):
+                    st.markdown(selected["thought"])
+
+
 def _policy_session_status_text(status: str) -> str:
     return POLICY_SESSION_STATUS_LABELS.get(str(status or "").strip().lower(), "未知状态")
 
@@ -1864,11 +2414,23 @@ def _session_frame_to_market_frame(session_frame: pd.DataFrame, *, anchor_close:
     base_close = float(frame.iloc[0]["收盘价"]) if float(frame.iloc[0]["收盘价"]) > 0 else 1.0
     anchor = float(anchor_close) if float(anchor_close or 0.0) > 0 else base_close
     scale = anchor / max(base_close, 1e-9)
-    scaled_close = frame["收盘价"].astype(float) * scale
+    raw_close = frame["收盘价"].astype(float) * scale
+    raw_returns = raw_close.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    damped_returns = raw_returns.clip(-0.0075, 0.0075).ewm(alpha=0.38, adjust=False).mean()
+    scaled_close = [anchor]
+    for value in damped_returns.iloc[1:]:
+        scaled_close.append(scaled_close[-1] * (1.0 + float(value)))
+    scaled_close = pd.Series(scaled_close, index=frame.index, dtype=float)
     scaled_open = scaled_close.shift(1).fillna(anchor)
-    scaled_high = pd.concat([scaled_open, scaled_close], axis=1).max(axis=1) * 1.0015
-    scaled_low = pd.concat([scaled_open, scaled_close], axis=1).min(axis=1) * 0.9985
-    volume = frame["总买量"].astype(float) + frame["总卖量"].astype(float)
+    intraday_span = raw_returns.abs().clip(lower=0.0012, upper=0.0085)
+    scaled_high = pd.concat([scaled_open, scaled_close], axis=1).max(axis=1) * (1.0 + intraday_span * 0.42)
+    scaled_low = pd.concat([scaled_open, scaled_close], axis=1).min(axis=1) * (1.0 - intraday_span * 0.42)
+    raw_volume = frame["总买量"].astype(float) + frame["总卖量"].astype(float)
+    volume = raw_volume.ewm(alpha=0.35, adjust=False).mean()
+    if not volume.empty:
+        median_volume = float(volume.median() or 0.0)
+        if median_volume > 0.0:
+            volume = volume.clip(lower=median_volume * 0.55, upper=median_volume * 1.75)
     market = pd.DataFrame(
         {
             "step": frame["交易日序号"].astype(int),
@@ -1999,11 +2561,14 @@ def _build_policy_session_report_bundle(
     return bundle
 
 
-def render_policy_lab() -> None:
+def render_policy_lab(*, presentation_mode: str = "standard") -> None:
     st.subheader("政策实验台")
     st.caption("仅供教学科研与仿真，不构成投资建议。")
     runtime_profile = _resolve_runtime_profile()
+    presentation_mode = str(presentation_mode or "standard").strip().lower()
     st.caption(f"当前模式：{_runtime_mode_text(runtime_profile)}")
+    if presentation_mode == "defense":
+        st.info("当前页面采用答辩风洞视图，适合讲解政策链路和市场传导；默认“政策试验台”页则更偏稳健评估。")
 
     templates = _load_policy_templates()
     template_map = {str(item.get("title", f"template-{idx}")): item for idx, item in enumerate(templates)}
@@ -2155,6 +2720,43 @@ def render_policy_lab() -> None:
         st.info("请先配置政策并点击“开始仿真”。")
         return
 
+    autoplay = _policy_session_autoplay_state(session)
+    st.markdown("### 自动演示")
+    autoplay_cols = st.columns([1.2, 1.0, 1.2, 2.0])
+    autoplay["enabled"] = autoplay_cols[0].toggle(
+        "自动逐日运行",
+        value=bool(autoplay.get("enabled", False)),
+        key="policy_lab_autoplay_toggle",
+        help="按模拟交易日自动推进当前会话，不会创建系统级定时任务。",
+    )
+    autoplay["step_days"] = int(
+        autoplay_cols[1].selectbox(
+            "每次推进",
+            options=[1, 2, 5],
+            index=[1, 2, 5].index(int(autoplay.get("step_days", 1))) if int(autoplay.get("step_days", 1)) in [1, 2, 5] else 0,
+            key="policy_lab_autoplay_step_days",
+        )
+    )
+    autoplay["interval_seconds"] = float(
+        autoplay_cols[2].slider(
+            "播放间隔（秒）",
+            min_value=0.4,
+            max_value=2.0,
+            value=float(min(max(float(autoplay.get("interval_seconds", 0.8) or 0.8), 0.4), 2.0)),
+            step=0.2,
+            key="policy_lab_autoplay_interval",
+        )
+    )
+    autoplay_cols[3].caption("自动逐日运行指的是仿真里的交易日回放，不是现实时间的每日定时任务。")
+    if not autoplay["enabled"]:
+        autoplay["last_wallclock_ts"] = 0.0
+    _store_session(session)
+
+    if autoplay["enabled"] and str(session.get("status", "")).lower() in {"running", "paused"}:
+        if _policy_session_maybe_autoplay(session):
+            _store_session(session)
+            session = st.session_state.get("policy_lab_session")
+
     session_frame = _policy_session_frame(session)
     summary = _policy_session_refresh_summary(session)
     current_day = int(session.get("current_day", 0))
@@ -2162,6 +2764,50 @@ def render_policy_lab() -> None:
     active_policies = sum(1 for item in session.get("policy_events", []) if item.get("status") == "active")
     queued_policies = sum(1 for item in session.get("policy_events", []) if item.get("status") == "queued")
     policy_status = _policy_session_status_text(str(session.get("status", "idle")))
+    briefing = _build_policy_demo_briefing(session, summary)
+    pulse_cards = _build_policy_market_pulse(session, summary)
+
+    chip_html = "".join(
+        f"<span class='hero-chip'>{chip}</span>"
+        for chip in briefing.get("chips", [])
+    )
+    bullet_html = "".join(
+        f"<li>{item}</li>"
+        for item in briefing.get("bullets", [])
+    )
+    st.markdown(
+        f"""
+        <div class="hero-panel">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:320px;">
+              <div class="hero-kicker">{briefing['kicker']}</div>
+              <h1>{briefing['phase']}</h1>
+              <p style="max-width:760px;margin-top:10px;">{briefing['subtitle']}</p>
+              <div class="hero-chip-row">{chip_html}</div>
+            </div>
+            <div class="hero-alert hero-alert-{briefing['tone']}">
+              <div class="hero-alert-label">演示提示</div>
+              <div class="hero-alert-value">{briefing['alert']}</div>
+            </div>
+          </div>
+          <ul class="hero-briefing-list">{bullet_html}</ul>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    pulse_cols = st.columns(len(pulse_cards))
+    for col, item in zip(pulse_cols, pulse_cards):
+        col.markdown(
+            f"""
+            <div class="pulse-card pulse-card-{item['tone']}">
+              <div class="summary-label">{item['label']}</div>
+              <div class="summary-value">{item['value']}</div>
+              <div class="summary-note">{item['note']}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("### 会话仪表盘")
     metric_cols = st.columns(6)
@@ -2173,188 +2819,239 @@ def render_policy_lab() -> None:
     metric_cols[5].metric("总收益", f"{summary.get('return_pct', 0.0):.2%}")
     st.progress(min(1.0, current_day / max(total_days, 1)))
 
-    chart_mode = st.radio("图表模式", options=CHART_MODE_OPTIONS, horizontal=True, index=0, key="policy_lab_chart_mode")
-    if not session_frame.empty:
-        st.caption(f"区间：{session_frame.iloc[0]['time']} 至 {session_frame.iloc[-1]['time']}")
-        _render_quote_banner(
-            session_frame,
-            index_label=str(session.get("index_label", "指数基准")),
-            index_symbol=str(session.get("index_symbol", "")),
-            source_text="会话式多智能体仿真",
-            history_end=str(session_frame.iloc[-1]["time"]),
-        )
-        st.plotly_chart(
-            _build_chart(session_frame, chart_title=f"{session.get('policy_name', '政策仿真')} - 市场路径", mode=chart_mode),
-            use_container_width=True,
-        )
-    else:
-        st.info("尚未生成交易路径，请点击“继续 1 天”或“运行到结束”。")
-
-    package_dict = _policy_session_policy_package(session)
-    if package_dict and not session_frame.empty:
-        st.markdown("### 政策传导与交易者响应")
-        left, right = st.columns(2)
-        with left:
-            _render_agent_disagreement_chart(package_dict)
-        with right:
-            _render_role_orderflow_waterfall(session_frame, package_dict)
-        _render_sector_rotation_heatmap(package_dict)
-        st.markdown("#### 政策评估解读")
-        st.markdown(
-            _get_policy_narrative(
-                str(session.get("policy_text", "")),
-                summary,
-                package_dict,
-                runtime_profile,
-            )
-        )
-
-    st.markdown("### 政策时间轴")
-    timeline_df = pd.DataFrame(session.get("policy_timeline", []) or _policy_session_timeline(session))
-    if not timeline_df.empty:
-        st.dataframe(timeline_df, use_container_width=True, hide_index=True)
-    else:
-        st.info("当前还没有追加政策。")
-
-    st.markdown("### 追加政策")
-    can_append = str(session.get("status", "")).lower() in {"running", "paused"}
-    append_cols = st.columns(2)
-    with append_cols[0]:
-        with st.form("policy_lab_append_form"):
-            append_policy_name = st.text_input(
-                "追加政策名称",
-                value=f"追加政策 {len(session.get('policy_events', [])) + 1}",
-                key="policy_lab_append_policy_name",
-            )
-            append_policy_text = st.text_area(
-                "追加政策文本",
-                value="",
-                height=110,
-                key="policy_lab_append_policy_text",
-                placeholder="请输入希望在未来交易日追加生效的政策文本。",
-            )
-            append_policy_type_options = list(POLICY_TYPE_OPTIONS.keys())
-            append_policy_type = st.selectbox(
-                "政策类型",
-                options=append_policy_type_options,
-                index=0,
-                key="policy_lab_append_policy_type",
-            )
-            append_effective_day = st.number_input(
-                "生效交易日",
-                min_value=current_day + 1,
-                max_value=max(total_days, current_day + 1),
-                value=min(max(current_day + 1, 1), max(total_days, current_day + 1)),
-                step=1,
-                key="policy_lab_append_effective_day",
-            )
-            append_intensity = st.slider(
-                "追加强度",
-                min_value=0.2,
-                max_value=2.0,
-                value=1.0,
-                step=0.1,
-                key="policy_lab_append_intensity",
-            )
-            append_half_life = st.slider(
-                "追加政策半衰期（交易日）",
-                min_value=1,
-                max_value=120,
-                value=30,
-                step=1,
-                key="policy_lab_append_half_life",
-            )
-            append_rumor_noise = st.checkbox(
-                "追加政策包含传言噪声",
-                value=False,
-                key="policy_lab_append_rumor_noise",
-            )
-            append_submitted = st.form_submit_button("追加政策", use_container_width=True, disabled=not can_append)
-    if append_submitted:
-        if not can_append:
-            st.warning("请先开始仿真，再追加政策。")
-        elif not str(append_policy_text).strip():
-            st.warning("追加政策文本不能为空。")
-        else:
-            _policy_session_enqueue(
-                session,
-                policy_name=append_policy_name,
-                policy_text=append_policy_text,
-                policy_type=append_policy_type,
-                effective_day=int(append_effective_day),
-                intensity=float(append_intensity),
-                half_life_days=int(append_half_life),
-                rumor_noise=bool(append_rumor_noise),
-            )
-            _store_session(session)
-            st.success("政策已加入会话队列。")
-
-    st.markdown("### 会话明细")
-    display_frame = _policy_session_display_frame(session_frame)
-    if not display_frame.empty:
-        tail_rows = display_frame.tail(60)
-        st.dataframe(tail_rows, use_container_width=True, hide_index=True)
-    else:
-        st.info("继续仿真后，这里会展示逐日市场路径与交易明细。")
-
-    st.markdown("### 政策评估报告")
-    report_bundle = session.get("report_bundle")
-    report_ready = not session_frame.empty
-    if st.button("生成政策评估报告", use_container_width=True, disabled=not report_ready, key="policy_lab_generate_report"):
-        with st.spinner("正在生成政策评估报告..."):
-            payload = _policy_session_generate_report(session, runtime_profile)
-            _store_session(session)
-            st.success("政策评估报告已生成。")
-            report_bundle = session.get("report_bundle")
-            st.session_state["policy_lab_report"] = payload
-
-    if report_bundle:
-        report_meta = report_bundle.get("report_meta", {})
-        st.markdown(
+    latest_step_report = dict(session.get("latest_step_report", {}) or {})
+    demo_cards = _build_policy_demo_cards(
+        policy_text=str(session.get("policy_text", "")),
+        latest_step_report=latest_step_report,
+        session_summary=summary,
+    )
+    st.markdown("### 传导快照")
+    card_cols = st.columns(len(demo_cards))
+    for col, card in zip(card_cols, demo_cards):
+        col.markdown(
             f"""
-            <div class="summary-card">
-              <div class="summary-label">报告已生成</div>
-              <div class="summary-value">{report_meta.get('title', report_bundle.get('stem', '政策评估报告'))}</div>
-              <div class="summary-note">编号：{report_meta.get('report_no', '')}</div>
-              <div class="summary-note">收件对象：{report_meta.get('recipient', '')}</div>
+            <div class="story-card">
+              <div class="summary-label">{card['phase']}</div>
+              <div class="story-card-title" style="margin: 6px 0 10px 0;">{card['summary']}</div>
+              <div class="summary-note">{card['detail']}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        download_cols = st.columns(4)
-        with download_cols[0]:
-            st.download_button(
-                "下载文档版",
-                data=report_bundle["docx_bytes"],
-                file_name=f"{report_bundle['stem']}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
-                key=f"policy_lab_report_docx_{report_bundle['stem']}",
+
+    package_dict = _policy_session_policy_package(session)
+    market_tab, behavior_tab, agent_tab, timeline_tab, report_tab = st.tabs(
+        ["市场走势", "行为金融", "Agent fMRI", "政策时间轴", "政策报告"]
+    )
+
+    with market_tab:
+        chart_mode = st.radio(
+            "图表模式",
+            options=CHART_MODE_OPTIONS,
+            horizontal=True,
+            index=0,
+            key=f"policy_lab_chart_mode_{presentation_mode}",
+        )
+        if not session_frame.empty:
+            st.caption(f"区间：{session_frame.iloc[0]['time']} 至 {session_frame.iloc[-1]['time']}")
+            _render_quote_banner(
+                session_frame,
+                index_label=str(session.get("index_label", "指数基准")),
+                index_symbol=str(session.get("index_symbol", "")),
+                source_text="会话式多智能体仿真",
+                history_end=str(session_frame.iloc[-1]["time"]),
             )
-        with download_cols[1]:
-            st.download_button(
-                "下载版式版",
-                data=report_bundle["pdf_bytes"],
-                file_name=f"{report_bundle['stem']}.pdf",
-                mime="application/pdf",
+            st.plotly_chart(
+                _build_chart(
+                    session_frame,
+                    chart_title=f"{session.get('policy_name', '政策仿真')} - 市场路径",
+                    mode=chart_mode,
+                ),
                 use_container_width=True,
-                key=f"policy_lab_report_pdf_{report_bundle['stem']}",
             )
-        with download_cols[2]:
-            st.download_button(
-                "下载文本版",
-                data=report_bundle["markdown_text"],
-                file_name=f"{report_bundle['stem']}.md",
-                mime="text/markdown",
-                use_container_width=True,
-                key=f"policy_lab_report_md_{report_bundle['stem']}",
+        else:
+            st.info("尚未生成交易路径，请点击“继续 1 天”或“运行到结束”。")
+
+        if package_dict and not session_frame.empty:
+            left, right = st.columns(2)
+            with left:
+                _render_agent_disagreement_chart(package_dict)
+            with right:
+                _render_role_orderflow_waterfall(session_frame, package_dict)
+            _render_sector_rotation_heatmap(package_dict)
+            st.markdown("#### 政策评估解读")
+            st.markdown(
+                _get_policy_narrative(
+                    str(session.get("policy_text", "")),
+                    summary,
+                    package_dict,
+                    runtime_profile,
+                )
             )
-        with download_cols[3]:
-            st.download_button(
-                "下载数据版",
-                data=report_bundle["json_text"],
-                file_name=f"{report_bundle['stem']}.json",
-                mime="application/json",
-                use_container_width=True,
-                key=f"policy_lab_report_json_{report_bundle['stem']}",
+
+    with behavior_tab:
+        _render_behavior_finance_panel(session_frame, summary)
+
+    with agent_tab:
+        _render_agent_fmri_panel(session, package_dict)
+
+    with timeline_tab:
+        st.markdown("### 政策时间轴")
+        timeline_df = pd.DataFrame(session.get("policy_timeline", []) or _policy_session_timeline(session))
+        if not timeline_df.empty:
+            st.dataframe(timeline_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("当前还没有追加政策。")
+
+        st.markdown("### 追加政策")
+        can_append = str(session.get("status", "")).lower() in {"running", "paused"}
+        append_cols = st.columns(2)
+        with append_cols[0]:
+            with st.form(f"policy_lab_append_form_{presentation_mode}"):
+                append_policy_name = st.text_input(
+                    "追加政策名称",
+                    value=f"追加政策 {len(session.get('policy_events', [])) + 1}",
+                    key=f"policy_lab_append_policy_name_{presentation_mode}",
+                )
+                append_policy_text = st.text_area(
+                    "追加政策文本",
+                    value="",
+                    height=110,
+                    key=f"policy_lab_append_policy_text_{presentation_mode}",
+                    placeholder="请输入希望在未来交易日追加生效的政策文本。",
+                )
+                append_policy_type_options = list(POLICY_TYPE_OPTIONS.keys())
+                append_policy_type = st.selectbox(
+                    "政策类型",
+                    options=append_policy_type_options,
+                    index=0,
+                    key=f"policy_lab_append_policy_type_{presentation_mode}",
+                )
+                append_effective_day = st.number_input(
+                    "生效交易日",
+                    min_value=current_day + 1,
+                    max_value=max(total_days, current_day + 1),
+                    value=min(max(current_day + 1, 1), max(total_days, current_day + 1)),
+                    step=1,
+                    key=f"policy_lab_append_effective_day_{presentation_mode}",
+                )
+                append_intensity = st.slider(
+                    "追加强度",
+                    min_value=0.2,
+                    max_value=2.0,
+                    value=1.0,
+                    step=0.1,
+                    key=f"policy_lab_append_intensity_{presentation_mode}",
+                )
+                append_half_life = st.slider(
+                    "追加政策半衰期（交易日）",
+                    min_value=1,
+                    max_value=120,
+                    value=30,
+                    step=1,
+                    key=f"policy_lab_append_half_life_{presentation_mode}",
+                )
+                append_rumor_noise = st.checkbox(
+                    "追加政策包含传言噪声",
+                    value=False,
+                    key=f"policy_lab_append_rumor_noise_{presentation_mode}",
+                )
+                append_submitted = st.form_submit_button("追加政策", use_container_width=True, disabled=not can_append)
+        if append_submitted:
+            if not can_append:
+                st.warning("请先开始仿真，再追加政策。")
+            elif not str(append_policy_text).strip():
+                st.warning("追加政策文本不能为空。")
+            else:
+                _policy_session_enqueue(
+                    session,
+                    policy_name=append_policy_name,
+                    policy_text=append_policy_text,
+                    policy_type=append_policy_type,
+                    effective_day=int(append_effective_day),
+                    intensity=float(append_intensity),
+                    half_life_days=int(append_half_life),
+                    rumor_noise=bool(append_rumor_noise),
+                )
+                _store_session(session)
+                st.success("政策已加入会话队列。")
+
+        st.markdown("### 会话明细")
+        display_frame = _policy_session_display_frame(session_frame)
+        if not display_frame.empty:
+            st.dataframe(display_frame.tail(60), use_container_width=True, hide_index=True)
+        else:
+            st.info("继续仿真后，这里会展示逐日市场路径与交易明细。")
+
+    with report_tab:
+        st.markdown("### 政策评估报告")
+        report_bundle = session.get("report_bundle")
+        report_ready = not session_frame.empty
+        if st.button(
+            "生成政策评估报告",
+            use_container_width=True,
+            disabled=not report_ready,
+            key=f"policy_lab_generate_report_{presentation_mode}",
+        ):
+            with st.spinner("正在生成政策评估报告..."):
+                payload = _policy_session_generate_report(session, runtime_profile)
+                _store_session(session)
+                st.success("政策评估报告已生成。")
+                report_bundle = session.get("report_bundle")
+                st.session_state["policy_lab_report"] = payload
+
+        if report_bundle:
+            report_meta = report_bundle.get("report_meta", {})
+            st.markdown(
+                f"""
+                <div class="summary-card">
+                  <div class="summary-label">报告已生成</div>
+                  <div class="summary-value">{report_meta.get('title', report_bundle.get('stem', '政策评估报告'))}</div>
+                  <div class="summary-note">编号：{report_meta.get('report_no', '')}</div>
+                  <div class="summary-note">收件对象：{report_meta.get('recipient', '')}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
+            download_cols = st.columns(4)
+            with download_cols[0]:
+                st.download_button(
+                    "下载文档版",
+                    data=report_bundle["docx_bytes"],
+                    file_name=f"{report_bundle['stem']}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                    key=f"policy_lab_report_docx_{presentation_mode}_{report_bundle['stem']}",
+                )
+            with download_cols[1]:
+                st.download_button(
+                    "下载版式版",
+                    data=report_bundle["pdf_bytes"],
+                    file_name=f"{report_bundle['stem']}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key=f"policy_lab_report_pdf_{presentation_mode}_{report_bundle['stem']}",
+                )
+            with download_cols[2]:
+                st.download_button(
+                    "下载文本版",
+                    data=report_bundle["markdown_text"],
+                    file_name=f"{report_bundle['stem']}.md",
+                    mime="text/markdown",
+                    use_container_width=True,
+                    key=f"policy_lab_report_md_{presentation_mode}_{report_bundle['stem']}",
+                )
+            with download_cols[3]:
+                st.download_button(
+                    "下载数据版",
+                    data=report_bundle["json_text"],
+                    file_name=f"{report_bundle['stem']}.json",
+                    mime="application/json",
+                    use_container_width=True,
+                    key=f"policy_lab_report_json_{presentation_mode}_{report_bundle['stem']}",
+                )
+
+    autoplay = _policy_session_autoplay_state(session)
+    if autoplay.get("enabled", False) and str(session.get("status", "")).lower() in {"running", "paused"}:
+        time.sleep(float(autoplay.get("interval_seconds", 0.8) or 0.0))
+        st.rerun()

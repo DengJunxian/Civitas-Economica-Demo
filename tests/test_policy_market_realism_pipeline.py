@@ -107,6 +107,12 @@ async def test_market_environment_emits_policy_realism_diagnostics() -> None:
     assert diagnostics["policy_pass_through_ratio"] > 0.0
     assert "microstructure_score" in diagnostics
     assert "execution_friction_score" in diagnostics
+    chain = report["transmission_chain"]
+    assert chain["policy_signal"]["policy_text"]
+    assert "agent_sentiment" in chain
+    assert "order_flow" in chain
+    assert "matching_result" in chain
+    assert "index_move" in chain
 
 
 @pytest.mark.asyncio

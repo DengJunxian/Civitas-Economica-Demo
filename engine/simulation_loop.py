@@ -1300,6 +1300,38 @@ class MarketEnvironment:
             price_change,
         )
 
+        transmission_chain = {
+            "policy_signal": {
+                "policy_id": policy_id,
+                "policy_text": policy_text or "",
+                "strength": float(policy_intensity),
+                "source": policy_source,
+            },
+            "agent_sentiment": {
+                "social_mean": float(contagion.mean_sentiment),
+                "sentiment_index": float(self.macro_state.sentiment_index),
+                "panic_level": float(max(0.0, 1.0 - self.macro_state.sentiment_index)),
+                "committee_enabled": bool(self.enable_policy_committee),
+            },
+            "order_flow": {
+                "buy_volume": float(buy_volume),
+                "sell_volume": float(sell_volume),
+                "imbalance": float(buy_volume - sell_volume),
+                "buffered_intents": int(buffered_intents),
+            },
+            "matching_result": {
+                "trade_count": int(trade_count),
+                "matching_mode": matching_mode,
+                "last_price": float(self.current_price),
+                "microstructure_score": float(realism_diagnostics.get("microstructure_score", 0.0) or 0.0),
+            },
+            "index_move": {
+                "old_price": float(old_price),
+                "new_price": float(self.current_price),
+                "return_pct": float(price_change),
+            },
+        }
+
         self.last_step_report = {
             "tick": self.simulation_time,
             "day_count": self._day_count,
@@ -1337,6 +1369,7 @@ class MarketEnvironment:
                 "loss_aversion_intensity": float(loss_intensity),
                 "all_time_high": bool(is_all_time_high),
             },
+            "transmission_chain": transmission_chain,
             "ecology_metrics": ecology_metrics,
             "abuse_detection": abuse_detection,
             "hybrid_replay": {

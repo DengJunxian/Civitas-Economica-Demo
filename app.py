@@ -82,6 +82,15 @@ THEME_PATH = Path("theme") / "competition_dark.css"
 MATERIALS_ROOT = Path("outputs") / "competition_materials"
 
 
+def _render_policy_lab_compatible(presentation_mode: str) -> None:
+    """Call policy lab in a backward-compatible way across mixed deployments."""
+    try:
+        render_policy_lab(presentation_mode=presentation_mode)
+    except TypeError:
+        # Fallback for older deployments where render_policy_lab() has no kwargs.
+        render_policy_lab()
+
+
 def _normalize_entry(entry: str) -> str:
     key = str(entry or "")
     return ENTRY_ALIASES.get(key, key)
@@ -674,7 +683,7 @@ def main() -> None:
     entry = st.session_state.entry
     if entry == "政策试验台":
         st.session_state.runtime_mode = DEMO_MODE
-        render_policy_lab(presentation_mode="standard")
+        _render_policy_lab_compatible("standard")
     elif entry == "历史智能回测":
         st.session_state.runtime_mode = LIVE_MODE
         st.session_state["history_replay_entry_mode"] = str(
@@ -686,7 +695,7 @@ def main() -> None:
         render_behavioral_diagnostics()
     elif entry == "政策A/B推演":
         st.session_state.runtime_mode = DEMO_MODE
-        render_policy_lab(presentation_mode="defense")
+        _render_policy_lab_compatible("defense")
     elif entry == "监管优化":
         st.session_state.runtime_mode = LIVE_MODE
         if _feature_flag_enabled(REGULATOR_OPTIMIZATION_PAGE_FLAG, default=True):

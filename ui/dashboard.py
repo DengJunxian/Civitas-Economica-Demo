@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, time
+from decimal import Decimal
 import json
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.utils import PlotlyJSONEncoder
 import streamlit as st
 
 from core.ui_text import display_risk_alert, translate_display_text, translate_ui_payload
@@ -31,9 +35,31 @@ def _json_default(value: Any) -> Any:
         return value.tolist()
     if isinstance(value, np.generic):
         return value.item()
+    if isinstance(value, (pd.Series, pd.Index)):
+        return value.tolist()
+    if isinstance(value, pd.DataFrame):
+        return value.to_dict(orient="records")
     if isinstance(value, (pd.Timestamp, pd.Timedelta)):
         return str(value)
-    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (set, tuple)):
+        return list(value)
+    if hasattr(value, "to_dict") and callable(getattr(value, "to_dict")):
+        try:
+            return value.to_dict()
+        except Exception:
+            pass
+    if hasattr(value, "__dict__"):
+        try:
+            return dict(value.__dict__)
+        except Exception:
+            pass
+    return str(value)
 
 
 def metric_value_text(value: float, as_percent: bool = False) -> str:
@@ -83,9 +109,25 @@ def export_plot_bundle(
 
     with c3:
         payload = fig_json if fig_json is not None else fig.to_dict()
+        try:
+            # Prefer Plotly's encoder for figure payloads that include typed arrays/internal wrappers.
+            json_text = json.dumps(payload, ensure_ascii=False, indent=2, cls=PlotlyJSONEncoder)
+        except Exception:
+            try:
+                json_text = json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default)
+            except Exception as exc:
+                json_text = json.dumps(
+                    {
+                        "export_error": str(exc),
+                        "payload_type": type(payload).__name__,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                    default=_json_default,
+                )
         st.download_button(
             "导出 JSON",
-            data=json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default),
+            data=json_text,
             file_name=f"{title_prefix}.json",
             mime="application/json",
             key=f"{key_prefix}_json",

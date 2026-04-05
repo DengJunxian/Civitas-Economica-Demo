@@ -1,7 +1,7 @@
 {
   "csad": {
-    "mean": 0.0,
-    "std": 0.0,
+    "mean": 9.979954333564393,
+    "std": 9.819713991477062,
     "herding_regression": {
       "gamma1": 0.0,
       "gamma2": 0.0,
@@ -31,14 +31,14 @@
   },
   "all_time_high_effect": {
     "ath_hit_rate": 1.0,
-    "mean_return_on_ath": 0.0,
+    "mean_return_on_ath": 9.979954333564393,
     "mean_return_off_ath": 0.0,
-    "ath_outperformance": 0.0
+    "ath_outperformance": 9.979954333564393
   },
   "loss_aversion_intensity": {
-    "mean": 2.64,
-    "p90": 2.64,
-    "n_obs": 3
+    "mean": 2.0338666666666665,
+    "p90": 2.2582933333333335,
+    "n_obs": 2
   },
   "volatility clustering": {
     "abs_return_lag1_autocorr": 0.0,
@@ -54,8 +54,8 @@
   },
   "all_time_high effect": {
     "ath_hit_rate": 1.0,
-    "mean_return_on_ath": 0.0,
+    "mean_return_on_ath": 9.979954333564393,
     "mean_return_off_ath": 0.0,
-    "ath_outperformance": 0.0
+    "ath_outperformance": 9.979954333564393
   }
 }

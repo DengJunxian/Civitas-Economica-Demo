@@ -2,8 +2,8 @@
   "intervention_active": false,
   "intervention_tick": null,
   "before": {
-    "volatility": 0.0,
-    "mean_abs_return": 0.0,
+    "volatility": 9.819713991477062,
+    "mean_abs_return": 9.979954333564393,
     "abuse_event_rate": 0.0
   },
   "after": {
@@ -12,8 +12,8 @@
     "abuse_event_rate": 0.0
   },
   "delta": {
-    "volatility": 0.0,
-    "mean_abs_return": 0.0,
+    "volatility": -9.819713991477062,
+    "mean_abs_return": -9.979954333564393,
     "abuse_event_rate": 0.0
   }
 }

@@ -20,4 +20,8 @@ nest_asyncio==1.6.0
 pybind11==3.0.1
 setuptools==75.9.1
 pyzmq==27.1.0
-kaleido==1.2.0
+# Keep kaleido pinned to the same major line as requirements.txt for reproducible image export.
+kaleido==0.2.1
+python-docx==1.2.0
+reportlab==4.4.4
+feedparser==6.0.11

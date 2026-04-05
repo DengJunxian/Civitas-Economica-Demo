@@ -482,8 +482,123 @@ class PolicySession:
         frame = pd.DataFrame(self._daily_rows)
         return frame.drop(columns=["原始报告"], errors="ignore").reset_index(drop=True)
 
+    def _structured_report_sections(self) -> Dict[str, Any]:
+        summary = self._summary_payload()
+        frame = self.to_frame()
+        timeline = self._timeline_payload()
+        total_return = float(summary.get("累计收益率", 0.0) or 0.0)
+        max_drawdown = float(summary.get("最大回撤", 0.0) or 0.0)
+        avg_vol = float(summary.get("日均波动率", 0.0) or 0.0)
+        avg_active_policy = (
+            float(frame["活跃政策数"].astype(float).mean()) if (not frame.empty and "活跃政策数" in frame.columns) else 0.0
+        )
+        avg_panic = float(frame["恐慌度"].astype(float).mean()) if (not frame.empty and "恐慌度" in frame.columns) else 0.0
+        start_panic = float(frame["恐慌度"].astype(float).iloc[0]) if (not frame.empty and "恐慌度" in frame.columns) else 0.0
+        end_panic = float(frame["恐慌度"].astype(float).iloc[-1]) if (not frame.empty and "恐慌度" in frame.columns) else 0.0
+        direction = "正向" if total_return > 0.005 else ("负向" if total_return < -0.005 else "中性")
+
+        amplitude = abs(total_return)
+        if amplitude >= 0.08:
+            impact_level = "高"
+        elif amplitude >= 0.03:
+            impact_level = "中"
+        else:
+            impact_level = "低"
+
+        one_line = (
+            f"本轮政策组合对市场形成{direction}影响，累计收益率 {total_return:.2%}，"
+            f"最大回撤 {max_drawdown:.2%}，整体影响等级为{impact_level}。"
+        )
+        market_feedback = (
+            f"样本期内平均活跃政策数 {avg_active_policy:.2f}，平均恐慌度 {avg_panic:.4f}，"
+            f"日均波动率 {avg_vol:.4f}，反映市场在政策冲击下的再定价过程。"
+        )
+        transmission_evidence = [
+            f"政策时序证据：当前共记录 {len(timeline)} 条政策，已完成 {summary.get('已完成交易日', 0)} 个交易日观察。",
+            (
+                f"情绪传导证据：恐慌度由 {start_panic:.4f} 变动至 {end_panic:.4f}，"
+                f"变化 {end_panic - start_panic:+.4f}。"
+            ),
+            f"价格反馈证据：累计收益率 {total_return:.2%}，最大回撤 {max_drawdown:.2%}。",
+        ]
+        key_risks = [
+            "政策预期透支后可能触发估值回吐。",
+            "外部冲击（地缘、流动性、监管）可能改变既有路径。",
+            "政策叠加过密时，传导链条可能出现边际递减。",
+        ]
+        side_effects = [
+            "短期成交放大可能伴随波动率抬升。",
+            "板块分化可能导致指数表现与微观体感不一致。",
+            "情绪修复不均衡时，可能出现阶段性拥挤交易。",
+        ]
+        risk_level = "高" if max_drawdown >= 0.15 else ("中" if max_drawdown >= 0.08 else "低")
+        recommendations = {
+            "short_term": [
+                "维持政策沟通连续性，稳定关键预期变量。",
+                "对高波动时段设置流动性与风险监测阈值。",
+            ],
+            "mid_term": [
+                "滚动评估政策组合的边际效应，及时做强度校准。",
+                "跟踪跨市场传导，防止单一指标误判政策效果。",
+            ],
+            "long_term": [
+                "建立政策-市场反馈闭环，沉淀可复用干预模板。",
+                "将宏观、行业与情绪指标纳入统一评估基线。",
+            ],
+        }
+        monitoring_kpis = [
+            {
+                "name": "累计收益率",
+                "value": round(total_return, 6),
+                "display": f"{total_return:.2%}",
+                "signal": "positive" if total_return > 0 else ("negative" if total_return < 0 else "neutral"),
+            },
+            {
+                "name": "最大回撤",
+                "value": round(max_drawdown, 6),
+                "display": f"{max_drawdown:.2%}",
+                "signal": "negative" if max_drawdown >= 0.1 else "neutral",
+            },
+            {
+                "name": "日均波动率",
+                "value": round(avg_vol, 6),
+                "display": f"{avg_vol:.4f}",
+                "signal": "warning" if avg_vol >= 0.02 else "stable",
+            },
+            {
+                "name": "平均恐慌度",
+                "value": round(avg_panic, 6),
+                "display": f"{avg_panic:.4f}",
+                "signal": "warning" if avg_panic >= 0.55 else "stable",
+            },
+            {
+                "name": "平均活跃政策数",
+                "value": round(avg_active_policy, 4),
+                "display": f"{avg_active_policy:.2f}",
+                "signal": "dense" if avg_active_policy >= 2.0 else "normal",
+            },
+        ]
+        return {
+            "one_line_conclusion": one_line,
+            "impact_evaluation": {
+                "overall_verdict": one_line,
+                "impact_direction": direction,
+                "impact_level": impact_level,
+                "transmission_mechanism_evidence": transmission_evidence,
+                "market_feedback": market_feedback,
+            },
+            "risk_assessment": {
+                "risk_level": risk_level,
+                "key_risks": key_risks,
+                "side_effects": side_effects,
+            },
+            "action_recommendations": recommendations,
+            "monitoring_kpis": monitoring_kpis,
+        }
+
     def build_report_payload(self) -> Dict[str, Any]:
         frame = self.to_frame()
+        sections = self._structured_report_sections()
         return {
             "标题": "政策试验台会话报告",
             "会话摘要": self._summary_payload(),
@@ -493,12 +608,22 @@ class PolicySession:
             "当前交易日": int(self._current_day),
             "总交易日": int(self.config.total_days),
             "自动随机政策事件": bool(self.config.enable_random_policy_events),
+            "一句话结论": sections["one_line_conclusion"],
+            "impact_evaluation": sections["impact_evaluation"],
+            "risk_assessment": sections["risk_assessment"],
+            "action_recommendations": sections["action_recommendations"],
+            "monitoring_kpis": sections["monitoring_kpis"],
         }
 
     def _fallback_report_markdown(self) -> str:
-        summary = self._summary_payload()
-        timeline = self._timeline_payload()
+        payload = self.build_report_payload()
+        summary = payload["会话摘要"]
+        timeline = payload["政策时间轴"]
         frame = self.to_frame()
+        impact = dict(payload.get("impact_evaluation", {}) or {})
+        risk = dict(payload.get("risk_assessment", {}) or {})
+        recommendations = dict(payload.get("action_recommendations", {}) or {})
+        kpis = list(payload.get("monitoring_kpis", []) or [])
         top_policies = timeline[:8]
         lines = [
             "# 政策试验台会话报告",
@@ -512,6 +637,9 @@ class PolicySession:
             f"- 最新收盘价：{summary['最新收盘价']:.2f}",
             f"- 政策数量：{summary['政策数量']}",
             f"- 自动随机政策事件：{'关闭' if not summary['自动随机政策事件'] else '开启'}",
+            "",
+            "## 一句话结论",
+            f"- {payload.get('一句话结论', '')}",
             "",
             "## 政策时间轴",
         ]
@@ -535,6 +663,44 @@ class PolicySession:
                 lines.append(
                     f"- {row['交易日']} | 收盘价 {float(row['收盘价']):.2f} | 涨跌幅 {float(row['涨跌幅']):+.2%} | 活跃政策 {int(row['活跃政策数'])}"
                 )
+        lines.extend(
+            [
+                "",
+                "## 政策影响评价",
+                f"- 影响方向：{impact.get('impact_direction', '中性')}",
+                f"- 影响等级：{impact.get('impact_level', '中')}",
+                f"- 市场反馈：{impact.get('market_feedback', '')}",
+                "",
+                "## 传导机制证据",
+            ]
+        )
+        for evidence in impact.get("transmission_mechanism_evidence", []) or []:
+            lines.append(f"- {evidence}")
+        lines.extend(
+            [
+                "",
+                "## 风险与副作用",
+                f"- 风险等级：{risk.get('risk_level', '中')}",
+                "- 关键风险：",
+            ]
+        )
+        for item in risk.get("key_risks", []) or []:
+            lines.append(f"  - {item}")
+        lines.append("- 潜在副作用：")
+        for item in risk.get("side_effects", []) or []:
+            lines.append(f"  - {item}")
+        lines.extend(["", "## 分阶段建议", "- 短期建议："])
+        for item in recommendations.get("short_term", []) or []:
+            lines.append(f"  - {item}")
+        lines.append("- 中期建议：")
+        for item in recommendations.get("mid_term", []) or []:
+            lines.append(f"  - {item}")
+        lines.append("- 长期建议：")
+        for item in recommendations.get("long_term", []) or []:
+            lines.append(f"  - {item}")
+        lines.extend(["", "## 关键监测指标"])
+        for item in kpis:
+            lines.append(f"- {item.get('name', '指标')}：{item.get('display', item.get('value', ''))}（{item.get('signal', 'neutral')}）")
         return "\n".join(lines)
 
     def _llm_report(self) -> Optional[str]:
@@ -546,9 +712,16 @@ class PolicySession:
         payload = self.build_report_payload()
         prompt = "\n".join(
             [
-                "请根据下面的政策试验台会话结果，生成一份面向评委的中文评估报告。",
+                "请根据下面的政策试验台会话结果，生成一份面向评委展示的中文 Markdown 报告。",
                 "要求：必须是自然语言 Markdown，不要输出 JSON，不要输出代码块。",
-                "需要包含：一句话结论、政策时间轴解读、市场行为解读、风险提示、下一步建议。",
+                "报告必须包含以下章节：",
+                "1) 一句话结论",
+                "2) 政策影响评价",
+                "3) 传导机制证据",
+                "4) 市场反馈",
+                "5) 风险与副作用",
+                "6) 分阶段建议（短期/中期/长期）",
+                "7) 关键监测指标",
                 "请强调政策影响会随时间衰减，且支持中途追加政策后的市场变化。",
                 f"数据：{json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)}",
             ]

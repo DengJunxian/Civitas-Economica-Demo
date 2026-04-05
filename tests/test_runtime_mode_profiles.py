@@ -8,8 +8,8 @@ def test_smart_mode_profile_defaults_to_competition_safe() -> None:
     assert profile.mode == "SMART"
     assert profile.competition_safe_mode is True
     assert profile.market_pipeline_v2 is True
-    assert profile.llm_primary is False
-    assert profile.use_live_api is False
+    assert profile.llm_primary is True
+    assert profile.use_live_api is True
 
 
 def test_deep_mode_profile_enables_api_and_committee() -> None:

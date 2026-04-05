@@ -9,6 +9,7 @@ This manual is written for competition reviewers, instructors, and new team memb
 - Main UI: `app.py`
 - Recommended launch command: `python -m streamlit run app.py --server.port 8501`
 - Recommended shortcut: `scripts\start_competition_demo.bat`
+- Runtime default: online API first, per-request fallback to offline when API fails
 
 ## 3. Main pages
 

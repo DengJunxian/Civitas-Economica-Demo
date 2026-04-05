@@ -30,7 +30,7 @@ The repository contains complete code, tests, scenario files, deployment scripts
 
 ## 8. How do you validate correctness?
 
-The repository includes automated tests across the simulation, diagnostics, backtesting, policy chain, and demo mode. The latest verification run passed 227 tests.
+The repository includes automated tests across simulation, diagnostics, backtesting, policy chain, and demo mode. We report the latest pass count from `scripts/check_competition_delivery.ps1 -FullTest -ReportPath ...` instead of hard-coding a fixed number.
 
 ## 9. Why does the project include a C++ matching engine?
 

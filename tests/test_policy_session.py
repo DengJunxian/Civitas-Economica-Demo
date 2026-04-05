@@ -59,10 +59,21 @@ async def test_policy_session_supports_base_policy_enqueue_decay_and_report_payl
     assert "政策时间轴" in payload
     assert "会话摘要" in payload
     assert payload["会话摘要"]["当前交易日"] == 3
+    assert "impact_evaluation" in payload
+    assert "risk_assessment" in payload
+    assert "action_recommendations" in payload
+    assert "monitoring_kpis" in payload
+    assert payload["impact_evaluation"]["impact_direction"] in {"正向", "中性", "负向"}
+    assert isinstance(payload["monitoring_kpis"], list) and payload["monitoring_kpis"]
 
     report = session.generate_report(use_llm=False)
     assert "政策试验台会话报告" in report["报告正文"]
     assert "会话摘要" in report["报告数据"]
+    assert "政策影响评价" in report["报告正文"]
+    assert "传导机制证据" in report["报告正文"]
+    assert "风险与副作用" in report["报告正文"]
+    assert "分阶段建议" in report["报告正文"]
+    assert "关键监测指标" in report["报告正文"]
     assert report["是否使用大模型"] is False
 
     session.stop()
@@ -88,3 +99,54 @@ async def test_policy_session_can_disable_random_policy_events() -> None:
     assert len(frame) == 5
     assert all(str(text) == "" for text in frame["政策文本"].tolist())
     assert result["summary"]["自动随机政策事件"] is False
+
+
+@pytest.mark.asyncio
+async def test_policy_session_generate_report_llm_success_and_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = PolicySession.create(
+        agents=[_SessionHoldAgent("r1"), _SessionHoldAgent("r2")],
+        total_days=3,
+        base_policy="降准降息并强化流动性管理",
+        enable_random_policy_events=False,
+        use_isolated_matching=False,
+        steps_per_day=1,
+    )
+    await session.advance_async(3)
+
+    from core.inference import api_backend as api_backend_module
+
+    def _fake_success(self, prompt, system_prompt=None, timeout_budget=0.0, fallback_response=""):
+        _ = self, prompt, system_prompt, timeout_budget, fallback_response
+        return "\n".join(
+            [
+                "## 一句话结论",
+                "- 测试结论",
+                "## 政策影响评价",
+                "- 测试影响",
+                "## 传导机制证据",
+                "- 测试证据",
+                "## 市场反馈",
+                "- 测试反馈",
+                "## 风险与副作用",
+                "- 测试风险",
+                "## 分阶段建议",
+                "- 测试建议",
+                "## 关键监测指标",
+                "- 测试指标",
+            ]
+        )
+
+    monkeypatch.setattr(api_backend_module.APIBackend, "generate", _fake_success)
+    report_success = session.generate_report(use_llm=True)
+    assert report_success["是否使用大模型"] is True
+    assert "测试结论" in report_success["报告正文"]
+
+    def _fake_error(self, prompt, system_prompt=None, timeout_budget=0.0, fallback_response=""):
+        _ = self, prompt, system_prompt, timeout_budget, fallback_response
+        return "[API Error] timeout"
+
+    monkeypatch.setattr(api_backend_module.APIBackend, "generate", _fake_error)
+    report_fallback = session.generate_report(use_llm=True)
+    assert report_fallback["是否使用大模型"] is False
+    assert "政策影响评价" in report_fallback["报告正文"]
+    assert "分阶段建议" in report_fallback["报告正文"]

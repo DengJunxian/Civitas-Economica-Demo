@@ -43,13 +43,13 @@ _SMART_PROFILE = RuntimeModeProfile(
     label="智能模式",
     competition_safe_mode=True,
     market_pipeline_v2=True,
-    llm_primary=False,
-    use_live_api=False,
+    llm_primary=True,
+    use_live_api=True,
     enable_policy_committee=False,
     fast_slow_trigger=True,
-    pause_for_llm_seconds=0.0,
-    model_priority=("glm-4-flashx", "deepseek-chat"),
-    summary="默认离线稳定演示链路，保留比赛模式可复现与导出能力。",
+    pause_for_llm_seconds=0.1,
+    model_priority=("deepseek-chat", "glm-4-flashx"),
+    summary="默认在线 API 优先，单次调用失败时自动回退离线兜底链路。",
 )
 
 _DEEP_PROFILE = RuntimeModeProfile(
@@ -87,4 +87,3 @@ def merge_mode_feature_flags(
     flags["runtime_policy_committee_v1"] = bool(profile.enable_policy_committee)
     flags["runtime_fast_slow_trigger_v1"] = bool(profile.fast_slow_trigger)
     return flags
-

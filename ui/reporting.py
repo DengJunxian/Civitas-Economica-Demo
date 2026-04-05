@@ -10,20 +10,48 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from docx import Document
-from docx.enum.section import WD_SECTION
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-from docx.shared import Mm, Pt, RGBColor
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import mm
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from reportlab.pdfbase.pdfmetrics import registerFont
-from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+try:
+    from docx import Document
+    from docx.enum.section import WD_SECTION
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Mm, Pt, RGBColor
+
+    DOCX_EXPORT_AVAILABLE = True
+except Exception:
+    Document = Any  # type: ignore[assignment]
+    WD_SECTION = None  # type: ignore[assignment]
+    WD_ALIGN_PARAGRAPH = None  # type: ignore[assignment]
+    OxmlElement = None  # type: ignore[assignment]
+    qn = None  # type: ignore[assignment]
+    Mm = None  # type: ignore[assignment]
+    Pt = None  # type: ignore[assignment]
+    RGBColor = None  # type: ignore[assignment]
+    DOCX_EXPORT_AVAILABLE = False
+
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.pdfbase.pdfmetrics import registerFont
+    from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    PDF_EXPORT_AVAILABLE = True
+except Exception:
+    colors = None  # type: ignore[assignment]
+    TA_CENTER = TA_JUSTIFY = TA_LEFT = None  # type: ignore[assignment]
+    A4 = None  # type: ignore[assignment]
+    ParagraphStyle = None  # type: ignore[assignment]
+    getSampleStyleSheet = None  # type: ignore[assignment]
+    mm = None  # type: ignore[assignment]
+    UnicodeCIDFont = None  # type: ignore[assignment]
+    registerFont = None  # type: ignore[assignment]
+    PageBreak = Paragraph = SimpleDocTemplate = Spacer = Table = TableStyle = None  # type: ignore[assignment]
+    PDF_EXPORT_AVAILABLE = False
 
 
 def safe_slug(text: str, fallback: str = "report", max_length: int = 36) -> str:
@@ -34,6 +62,19 @@ def safe_slug(text: str, fallback: str = "report", max_length: int = 36) -> str:
 
 def serializable_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     return json.loads(json.dumps(payload, ensure_ascii=False, default=str))
+
+
+def export_capabilities() -> Dict[str, Any]:
+    missing: List[str] = []
+    if not DOCX_EXPORT_AVAILABLE:
+        missing.append("python-docx")
+    if not PDF_EXPORT_AVAILABLE:
+        missing.append("reportlab")
+    return {
+        "docx": DOCX_EXPORT_AVAILABLE,
+        "pdf": PDF_EXPORT_AVAILABLE,
+        "missing_dependencies": missing,
+    }
 
 
 def official_report_meta(report_type: str, title: str) -> Dict[str, str]:
@@ -208,6 +249,8 @@ def _build_docx_body(document: Document, markdown_text: str, report_meta: Dict[s
 
 
 def _build_docx_bytes(markdown_text: str, report_meta: Dict[str, str]) -> bytes:
+    if not DOCX_EXPORT_AVAILABLE:
+        raise RuntimeError("python-docx is not available")
     document = Document()
     _build_docx_body(document, markdown_text, report_meta)
     output = BytesIO()
@@ -216,6 +259,8 @@ def _build_docx_bytes(markdown_text: str, report_meta: Dict[str, str]) -> bytes:
 
 
 def _pdf_styles():
+    if not PDF_EXPORT_AVAILABLE:
+        raise RuntimeError("reportlab is not available")
     registerFont(UnicodeCIDFont("STSong-Light"))
     styles = getSampleStyleSheet()
     return {
@@ -315,6 +360,8 @@ def _draw_pdf_header_footer(canvas, doc, report_meta: Dict[str, str]) -> None:
 
 
 def _build_pdf_bytes(markdown_text: str, report_meta: Dict[str, str]) -> bytes:
+    if not PDF_EXPORT_AVAILABLE:
+        raise RuntimeError("reportlab is not available")
     styles = _pdf_styles()
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -407,11 +454,22 @@ def write_report_artifacts(
     json_text = json.dumps(clean_payload, ensure_ascii=False, indent=2)
     json_path.write_text(json_text, encoding="utf-8")
 
-    docx_bytes = _build_docx_bytes(markdown_text, report_meta)
-    docx_path.write_bytes(docx_bytes)
+    capabilities = export_capabilities()
+    disabled_reasons: Dict[str, str] = {}
+    docx_bytes: Optional[bytes] = None
+    pdf_bytes: Optional[bytes] = None
 
-    pdf_bytes = _build_pdf_bytes(markdown_text, report_meta)
-    pdf_path.write_bytes(pdf_bytes)
+    if capabilities["docx"]:
+        docx_bytes = _build_docx_bytes(markdown_text, report_meta)
+        docx_path.write_bytes(docx_bytes)
+    else:
+        disabled_reasons["docx"] = "python-docx is not installed"
+
+    if capabilities["pdf"]:
+        pdf_bytes = _build_pdf_bytes(markdown_text, report_meta)
+        pdf_path.write_bytes(pdf_bytes)
+    else:
+        disabled_reasons["pdf"] = "reportlab is not installed"
 
     return {
         "stem": stem,
@@ -419,12 +477,14 @@ def write_report_artifacts(
         "report_meta": report_meta,
         "markdown_path": markdown_path,
         "json_path": json_path,
-        "docx_path": docx_path,
-        "pdf_path": pdf_path,
+        "docx_path": docx_path if docx_bytes is not None else None,
+        "pdf_path": pdf_path if pdf_bytes is not None else None,
         "markdown_text": markdown_text,
         "json_text": json_text,
         "docx_bytes": docx_bytes,
         "pdf_bytes": pdf_bytes,
+        "export_capabilities": capabilities,
+        "disabled_reasons": disabled_reasons,
     }
 
 
@@ -636,14 +696,18 @@ def export_defense_bundle(
             "design_chapter_draft": str(design_path),
             "realism_markdown": str(realism_bundle["markdown_path"]),
             "realism_json": str(realism_bundle["json_path"]),
-            "realism_docx": str(realism_bundle["docx_path"]),
-            "realism_pdf": str(realism_bundle["pdf_path"]),
             "policy_ab_report": str(policy_ab_path),
             "architecture_graph": str(architecture_path),
             "causal_chain_graph": str(causal_chain_path),
             "defense_outline": str(outline_path),
         },
     }
+    if realism_bundle.get("docx_path") is not None:
+        manifest["files"]["realism_docx"] = str(realism_bundle["docx_path"])
+    if realism_bundle.get("pdf_path") is not None:
+        manifest["files"]["realism_pdf"] = str(realism_bundle["pdf_path"])
+    if realism_bundle.get("disabled_reasons"):
+        manifest["export_disabled_reasons"] = serializable_payload(realism_bundle["disabled_reasons"])
     if social_propagation_artifacts:
         manifest["files"]["social_propagation_report"] = str(social_path)
     if agent_taxonomy_markdown:

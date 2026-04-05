@@ -54,8 +54,14 @@ class BacktestConfig:
     market_impact: float = 0.05
 
     policy_shock: float = 0.0
+    policy_text: str = ""
     sentiment_weight: float = 0.5
     civitas_factor_weight: float = 0.5
+    news_source_strategy: str = "mixed"  # mixed | online | local
+    news_scope: str = "macro_index"
+    news_topk_per_day: int = 8
+    persist_news_events: bool = True
+    auth_score_mode: str = "demo_first"
 
     tick_per_day: int = 4
     export_qlib_bundle: bool = False

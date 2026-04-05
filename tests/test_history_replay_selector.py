@@ -1,5 +1,5 @@
-from core.agent_replay import AgentReplayEngine
 from core.backtester import BacktestConfig, FactorBacktestEngine, HistoricalBacktester
+from core.news_policy_replay import NewsDrivenPolicyReplayEngine
 from ui.history_replay import _resolve_history_workspace, _select_replay_engine
 
 
@@ -16,7 +16,7 @@ def test_history_replay_selector_uses_agent_engine_when_enabled():
     cfg = BacktestConfig(feature_flags={"agent_replay": True})
     engine, resolved_mode, reason = _select_replay_engine(cfg, "agent", cfg.feature_flags)
 
-    assert isinstance(engine, AgentReplayEngine)
+    assert isinstance(engine, NewsDrivenPolicyReplayEngine)
     assert resolved_mode == "agent"
     assert reason == ""
 

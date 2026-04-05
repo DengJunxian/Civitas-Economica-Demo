@@ -1470,6 +1470,10 @@ def _policy_session_report_payload(session: Dict[str, Any], runtime_profile: Run
             "runtime_mode": runtime_profile.mode,
             "runtime_profile": runtime_profile.to_dict(),
             "narrative": narrative,
+            "impact_evaluation": payload.get("impact_evaluation", {}),
+            "risk_assessment": payload.get("risk_assessment", {}),
+            "action_recommendations": payload.get("action_recommendations", {}),
+            "monitoring_kpis": payload.get("monitoring_kpis", []),
             "session": {
                 "session_id": session.get("session_id", ""),
                 "status": session.get("status", "idle"),
@@ -1513,6 +1517,34 @@ def _policy_session_report_payload(session: Dict[str, Any], runtime_profile: Run
         "runtime_mode": runtime_profile.mode,
         "runtime_profile": runtime_profile.to_dict(),
         "narrative": narrative,
+        "impact_evaluation": {
+            "overall_verdict": f"会话累计收益率 {summary.get('return_pct', 0.0):.2%}，最大回撤 {summary.get('max_drawdown', 0.0):.2%}。",
+            "impact_direction": "正向"
+            if float(summary.get("return_pct", 0.0) or 0.0) > 0
+            else ("负向" if float(summary.get("return_pct", 0.0) or 0.0) < 0 else "中性"),
+            "impact_level": "中",
+            "transmission_mechanism_evidence": [
+                "观察政策事件时间轴与指数路径同向/反向变化。",
+                "结合恐慌度、政策压力等行为指标进行传导验证。",
+            ],
+            "market_feedback": "请结合会话日度轨迹与政策时间轴复核。",
+        },
+        "risk_assessment": {
+            "risk_level": "中",
+            "key_risks": ["政策预期偏差风险", "外部冲击扰动风险"],
+            "side_effects": ["阶段性波动抬升", "结构性分化加剧"],
+        },
+        "action_recommendations": {
+            "short_term": ["维持政策沟通连续性并滚动校准强度。"],
+            "mid_term": ["跟踪跨市场传导指标，降低单指标误判。"],
+            "long_term": ["建立政策-市场反馈闭环并持续迭代机制。"],
+        },
+        "monitoring_kpis": [
+            {"name": "累计收益率", "value": float(summary.get("return_pct", 0.0) or 0.0)},
+            {"name": "最大回撤", "value": float(summary.get("max_drawdown", 0.0) or 0.0)},
+            {"name": "波动率", "value": float(summary.get("volatility", 0.0) or 0.0)},
+            {"name": "平均恐慌度", "value": float(summary.get("avg_panic", 0.0) or 0.0)},
+        ],
         "session": {
             "session_id": session.get("session_id", ""),
             "status": session.get("status", "idle"),
@@ -1563,6 +1595,9 @@ def _policy_session_generate_report(session: Dict[str, Any], runtime_profile: Ru
         f"- 波动率：{payload['summary'].get('volatility', 0.0):.4f}",
         f"- 平均政策压力：{payload['summary'].get('policy_signal_avg', 0.0):.4f}",
         "",
+        "## 一句话结论",
+        f"- {payload.get('impact_evaluation', {}).get('overall_verdict', '会话已完成，请结合指标评估政策效果。')}",
+        "",
         "## 政策时间轴",
     ]
     for item in payload["timeline"]:
@@ -1571,6 +1606,43 @@ def _policy_session_generate_report(session: Dict[str, Any], runtime_profile: Ru
         )
     if payload["narrative"]:
         markdown_lines.extend(["", "## 大模型评估", payload["narrative"]])
+    impact = dict(payload.get("impact_evaluation", {}) or {})
+    risk = dict(payload.get("risk_assessment", {}) or {})
+    recommendations = dict(payload.get("action_recommendations", {}) or {})
+    kpis = list(payload.get("monitoring_kpis", []) or [])
+    markdown_lines.extend(
+        [
+            "",
+            "## 政策影响评价",
+            f"- 影响方向：{impact.get('impact_direction', '中性')}",
+            f"- 影响等级：{impact.get('impact_level', '中')}",
+            f"- 市场反馈：{impact.get('market_feedback', '')}",
+            "",
+            "## 传导机制证据",
+        ]
+    )
+    for item in impact.get("transmission_mechanism_evidence", []) or []:
+        markdown_lines.append(f"- {item}")
+    markdown_lines.extend(["", "## 风险与副作用", f"- 风险等级：{risk.get('risk_level', '中')}", "- 关键风险："])
+    for item in risk.get("key_risks", []) or []:
+        markdown_lines.append(f"  - {item}")
+    markdown_lines.append("- 潜在副作用：")
+    for item in risk.get("side_effects", []) or []:
+        markdown_lines.append(f"  - {item}")
+    markdown_lines.extend(["", "## 分阶段建议", "- 短期建议："])
+    for item in recommendations.get("short_term", []) or []:
+        markdown_lines.append(f"  - {item}")
+    markdown_lines.append("- 中期建议：")
+    for item in recommendations.get("mid_term", []) or []:
+        markdown_lines.append(f"  - {item}")
+    markdown_lines.append("- 长期建议：")
+    for item in recommendations.get("long_term", []) or []:
+        markdown_lines.append(f"  - {item}")
+    markdown_lines.extend(["", "## 关键监测指标"])
+    for item in kpis:
+        if isinstance(item, dict):
+            display = item.get("display", item.get("value", ""))
+            markdown_lines.append(f"- {item.get('name', '指标')}：{display}")
     markdown_lines.extend(
         [
             "",
@@ -3002,6 +3074,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
 
         if report_bundle:
             report_meta = report_bundle.get("report_meta", {})
+            disabled_reasons = dict(report_bundle.get("disabled_reasons", {}) or {})
             st.markdown(
                 f"""
                 <div class="summary-card">
@@ -3013,23 +3086,28 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                 """,
                 unsafe_allow_html=True,
             )
+            if disabled_reasons:
+                reason_text = "；".join(f"{k}: {v}" for k, v in disabled_reasons.items())
+                st.info(f"部分导出能力降级：{reason_text}")
             download_cols = st.columns(4)
             with download_cols[0]:
                 st.download_button(
                     "下载文档版",
-                    data=report_bundle["docx_bytes"],
+                    data=report_bundle.get("docx_bytes") or b"",
                     file_name=f"{report_bundle['stem']}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True,
+                    disabled=report_bundle.get("docx_bytes") is None,
                     key=f"policy_lab_report_docx_{presentation_mode}_{report_bundle['stem']}",
                 )
             with download_cols[1]:
                 st.download_button(
                     "下载版式版",
-                    data=report_bundle["pdf_bytes"],
+                    data=report_bundle.get("pdf_bytes") or b"",
                     file_name=f"{report_bundle['stem']}.pdf",
                     mime="application/pdf",
                     use_container_width=True,
+                    disabled=report_bundle.get("pdf_bytes") is None,
                     key=f"policy_lab_report_pdf_{presentation_mode}_{report_bundle['stem']}",
                 )
             with download_cols[2]:

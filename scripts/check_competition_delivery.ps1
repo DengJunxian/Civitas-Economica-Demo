@@ -1,5 +1,7 @@
 param(
-    [switch]$FullTest
+    [switch]$FullTest,
+    [switch]$Strict,
+    [string]$ReportPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,6 +42,25 @@ function Add-Check {
     }
 }
 
+function Invoke-CheckedCommand {
+    param(
+        [string]$Name,
+        [string]$Detail,
+        [scriptblock]$Command
+    )
+
+    & $Command
+    $exitCode = $LASTEXITCODE
+    if ($null -eq $exitCode) {
+        $exitCode = 0
+    }
+    if ($exitCode -eq 0) {
+        Add-Check -Name $Name -Status "PASS" -Detail $Detail
+    } else {
+        Add-Check -Name $Name -Status "FAIL" -Detail "$Detail (exit=$exitCode)"
+    }
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 $pythonExe = Resolve-PythonExe -RepoRoot $repoRoot
@@ -75,6 +96,11 @@ $requiredFiles = @(
     "docs\data_model_thirdparty.md",
     "docs\defense_qa.md",
     "docs\demo_script.md",
+    "docs\ai_track_clause_evidence_matrix.md",
+    "docs\reviewer_assessment_ai_track.md",
+    "docs\redundancy_value_triage.md",
+    "docs\verification_report_latest.md",
+    "scripts\build_submission_package.ps1",
     "scripts\start_competition_demo.ps1"
 )
 
@@ -111,18 +137,12 @@ Get-ChildItem $scenarioRoot -Directory | ForEach-Object {
     }
 }
 
-try {
+Invoke-CheckedCommand -Name "pip check" -Detail "no broken requirements" -Command {
     & $pythonExe -m pip check | Out-Host
-    Add-Check -Name "pip check" -Status "PASS" -Detail "no broken requirements"
-} catch {
-    Add-Check -Name "pip check" -Status "FAIL" -Detail $_.Exception.Message
 }
 
-try {
+Invoke-CheckedCommand -Name "compileall" -Detail (($compileTargets -join ", ") + " compile") -Command {
     & $pythonExe -m compileall -q @compileTargets | Out-Host
-    Add-Check -Name "compileall" -Status "PASS" -Detail (($compileTargets -join ", ") + " compile")
-} catch {
-    Add-Check -Name "compileall" -Status "FAIL" -Detail $_.Exception.Message
 }
 
 $testArgs = if ($FullTest) {
@@ -138,11 +158,8 @@ $testArgs = if ($FullTest) {
     )
 }
 
-try {
+Invoke-CheckedCommand -Name "tests" -Detail ($testArgs -join " ") -Command {
     & $pythonExe @testArgs | Out-Host
-    Add-Check -Name "tests" -Status "PASS" -Detail ($testArgs -join " ")
-} catch {
-    Add-Check -Name "tests" -Status "FAIL" -Detail ($testArgs -join " ")
 }
 
 if ([string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) {
@@ -159,7 +176,33 @@ if ([string]::IsNullOrWhiteSpace($env:ZHIPU_API_KEY)) {
 
 $checks | Format-Table -AutoSize | Out-Host
 
+$reportPayload = [pscustomobject]@{
+    generated_at = (Get-Date).ToString("s")
+    repo_root = $repoRoot
+    python = $pythonExe
+    strict_mode = [bool]$Strict
+    full_test = [bool]$FullTest
+    checks = $checks
+}
+
+if (-not [string]::IsNullOrWhiteSpace($ReportPath)) {
+    $reportTarget = $ReportPath
+    if (-not [System.IO.Path]::IsPathRooted($reportTarget)) {
+        $reportTarget = Join-Path $repoRoot $reportTarget
+    }
+    $reportDir = Split-Path -Parent $reportTarget
+    if ($reportDir) {
+        New-Item -ItemType Directory -Path $reportDir -Force | Out-Null
+    }
+    $reportPayload | ConvertTo-Json -Depth 6 | Set-Content -Path $reportTarget -Encoding utf8
+    Write-Host "[Civitas] Machine report written to: $reportTarget"
+}
+
 $hasFailure = $checks.Status -contains "FAIL"
+if ($Strict -and ($checks.Status -contains "WARN")) {
+    Write-Error "[Civitas] Competition delivery check failed (WARN treated as FAIL in -Strict mode)."
+    exit 1
+}
 if ($hasFailure) {
     Write-Error "[Civitas] Competition delivery check failed."
     exit 1

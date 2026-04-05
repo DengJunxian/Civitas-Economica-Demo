@@ -9,6 +9,7 @@ import json
 import re
 import threading
 import time
+from collections import Counter
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -54,6 +55,12 @@ class ModelStats:
 
 class ModelRouter:
     """Multi-provider router for all LLM calls in Civitas."""
+
+    _runtime_lock = threading.Lock()
+    _runtime_recent_events: List[Dict[str, Any]] = []
+    _runtime_counters: Counter[str] = Counter()
+    _runtime_last_error: Optional[str] = None
+    _runtime_last_fallback_reason: Optional[str] = None
 
     MODEL_REGISTRY: Dict[str, ModelInfo] = {
         "deepseek-reasoner": ModelInfo(
@@ -131,6 +138,49 @@ class ModelRouter:
         if self.zhipu_key:
             available.extend(["glm-4-flashx", "glm-4-flashx-250414"])
         return available
+
+    @classmethod
+    def _record_runtime_event(cls, event_type: str, **payload: Any) -> None:
+        event = {"timestamp": time.time(), "type": str(event_type)}
+        event.update({k: v for k, v in payload.items() if v is not None})
+        with cls._runtime_lock:
+            cls._runtime_counters[event_type] += 1
+            if event_type.startswith("fallback"):
+                cls._runtime_counters["fallback_total"] += 1
+                cls._runtime_last_fallback_reason = str(payload.get("reason", "") or cls._runtime_last_fallback_reason)
+            if event_type.startswith("online_success"):
+                cls._runtime_counters["online_success_total"] += 1
+            error_text = payload.get("error")
+            if error_text:
+                cls._runtime_last_error = str(error_text)
+            cls._runtime_recent_events.append(event)
+            if len(cls._runtime_recent_events) > 120:
+                cls._runtime_recent_events = cls._runtime_recent_events[-120:]
+
+    @classmethod
+    def runtime_observability_summary(cls) -> Dict[str, Any]:
+        with cls._runtime_lock:
+            counters = dict(cls._runtime_counters)
+            recent = list(cls._runtime_recent_events[-20:])
+            fallback_total = int(counters.get("fallback_total", 0))
+            online_total = int(counters.get("online_success_total", 0))
+            attempts = max(online_total + fallback_total, 1)
+            online_success_rate = online_total / attempts
+            status = "offline_fallback"
+            if online_total > 0 and fallback_total == 0:
+                status = "online_ok"
+            elif online_total > 0 and fallback_total > 0:
+                status = "degraded_with_fallback"
+            return {
+                "status": status,
+                "online_success_total": online_total,
+                "fallback_total": fallback_total,
+                "online_success_rate": online_success_rate,
+                "last_error": cls._runtime_last_error,
+                "last_fallback_reason": cls._runtime_last_fallback_reason,
+                "recent_events": recent,
+                "counters": counters,
+            }
 
     def _build_cache_key(self, messages: List[Dict], priority_models: List[str]) -> str:
         payload = {"messages": messages, "priority_models": priority_models}
@@ -214,20 +264,40 @@ class ModelRouter:
         }
         return json.dumps(payload, ensure_ascii=False)
 
+    def _classify_exception(self, exc: BaseException) -> str:
+        if isinstance(exc, RateLimitError):
+            return "rate_limited"
+        if isinstance(exc, APITimeoutError):
+            return "api_timeout"
+        if isinstance(exc, APIConnectionError):
+            return "network_error"
+        if isinstance(exc, asyncio.TimeoutError):
+            return "client_timeout"
+        message = str(exc).lower()
+        if "429" in message or "rate" in message and "limit" in message:
+            return "rate_limited"
+        if "timeout" in message:
+            return "api_timeout"
+        if "5xx" in message or "server error" in message or "internal error" in message:
+            return "upstream_5xx"
+        if "connection" in message or "network" in message:
+            return "network_error"
+        return "unknown_error"
+
     def get_model_priority(self, mode: str) -> List[str]:
         """
         根据仿真模式获取模型优先级。
         
-        SMART (智能模式): GLM (flashx) -> DeepSeek Chat (回退)
+        SMART (智能模式): DeepSeek Chat -> GLM (回退)
         DEEP (深度模式): DeepSeek Reasoner -> DeepSeek Chat (超时/失败回退)
-        FAST (快速模式): 同智能模式
+        FAST (快速模式): DeepSeek Chat -> GLM (回退)
         """
         if mode == "DEEP":
-            base_priority = ["deepseek-reasoner", "deepseek-chat"]
+            base_priority = ["deepseek-reasoner", "deepseek-chat", "glm-4-flashx"]
         elif mode == "SMART" or mode == "FAST":
-            base_priority = ["glm-4-flashx", "deepseek-chat"]
+            base_priority = ["deepseek-chat", "glm-4-flashx", "glm-4-flashx-250414"]
         else:
-            base_priority = ["deepseek-chat", "glm-4-flashx"]
+            base_priority = ["deepseek-chat", "glm-4-flashx", "glm-4-flashx-250414"]
             
         return [m for m in base_priority if m in self.available_models]
 
@@ -248,6 +318,7 @@ class ModelRouter:
             self.fallback_events.append(
                 {"type": "cache_hit", "timestamp": time.time(), "message": "local cache hit"}
             )
+            self._record_runtime_event("cache_hit", reason="local_cache")
             return cached
 
         start_time = time.time()
@@ -272,18 +343,37 @@ class ModelRouter:
                 content, reasoning = await self._call_model(client, model_name, messages, call_timeout)
                 self._update_stats(model_name, time.time() - start_time, success=True)
                 self._write_local_cache(resolved_cache_key, content, reasoning, model_name)
+                self._record_runtime_event("online_success", model=model_name)
                 return content, reasoning, model_name
             except asyncio.TimeoutError:
                 last_error = f"{model_name}: timeout"
                 self._update_stats(model_name, 0, success=False, error="timeout")
+                self._record_runtime_event(
+                    "online_error",
+                    model=model_name,
+                    reason=self._classify_exception(asyncio.TimeoutError()),
+                    error=last_error,
+                )
                 continue
             except (APIConnectionError, APITimeoutError, RateLimitError) as e:
                 last_error = f"{model_name}: {type(e).__name__}"
                 self._update_stats(model_name, 0, success=False, error=str(e))
+                self._record_runtime_event(
+                    "online_error",
+                    model=model_name,
+                    reason=self._classify_exception(e),
+                    error=last_error,
+                )
                 continue
             except Exception as e:
                 last_error = f"{model_name}: {str(e)}"
                 self._update_stats(model_name, 0, success=False, error=str(e))
+                self._record_runtime_event(
+                    "online_error",
+                    model=model_name,
+                    reason=self._classify_exception(e),
+                    error=last_error,
+                )
                 continue
 
         return self._fallback_response(
@@ -302,7 +392,7 @@ class ModelRouter:
         cache_key: Optional[str] = None,
     ) -> Tuple[str, Optional[str], str]:
         if not priority_models:
-            priority_models = ["deepseek-chat", "glm-4-flashx"]
+            priority_models = self.get_model_priority("SMART") or ["deepseek-chat", "glm-4-flashx"]
         return self._run_coro_sync(
             self.call_with_fallback(
                 messages=messages,
@@ -493,6 +583,16 @@ class ModelRouter:
         messages: Optional[List[Dict]] = None,
         cache_key: Optional[str] = None,
     ) -> Tuple[str, Optional[str], str]:
+        reason = "all_models_unavailable"
+        if error:
+            if "rate" in error.lower() and "limit" in error.lower():
+                reason = "rate_limited"
+            elif "timeout" in error.lower():
+                reason = "timeout"
+            elif "connection" in error.lower() or "network" in error.lower():
+                reason = "network_error"
+            elif "5" in error and "error" in error.lower():
+                reason = "upstream_5xx"
         self.fallback_events.append(
             {
                 "type": "fallback",
@@ -500,13 +600,13 @@ class ModelRouter:
                 "message": f"model fallback engaged: {error or 'all models unavailable'}",
             }
         )
+        self._record_runtime_event("fallback_invoked", reason=reason, error=error)
         if fallback_content is not None:
             content = fallback_content
             model_used = "fallback"
         else:
             content = self._build_deterministic_stub(messages or [], error)
             model_used = "deterministic_stub"
-        self._write_local_cache(cache_key, content, f"fallback: {error}" if error else "fallback", model_used)
         return (
             content,
             f"all model calls failed: {error}" if error else "all models unavailable",
@@ -514,7 +614,7 @@ class ModelRouter:
         )
 
     def get_stats_summary(self) -> Dict[str, Any]:
-        return {
+        model_stats = {
             model: {
                 "calls": stats.call_count,
                 "avg_time": f"{stats.avg_time:.2f}s",
@@ -524,6 +624,8 @@ class ModelRouter:
             for model, stats in self.stats.items()
             if stats.call_count > 0
         }
+        model_stats["runtime_observability"] = self.runtime_observability_summary()
+        return model_stats
 
     def get_recommended_model(self, time_budget: float) -> str:
         candidates: List[Tuple[str, float]] = []

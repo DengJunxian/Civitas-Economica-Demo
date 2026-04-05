@@ -128,7 +128,7 @@ pip install -r requirements-lock.txt
 
 ### 4. 运行时可选配置
 
-项目支持离线演示。以下环境变量均为可选，仅在接入在线模型时需要：
+项目支持在线优先 + 自动离线回退。以下环境变量在接入在线模型时建议配置（未配置也可离线演示）：
 
 ```powershell
 $env:DEEPSEEK_API_KEY="你的 DeepSeek Key"
@@ -170,7 +170,8 @@ python main.py
 
 - `app.py` 是比赛展示推荐入口。
 - `main.py` 更适合开发调试，不建议作为评委首选入口。
-- 离线演示模式不依赖 API Key。
+- 默认策略为“在线 API 优先，单次调用失败自动回退离线”。
+- 无 API Key 时会自动进入离线兜底模式。
 
 ### 6. 浏览器访问
 
@@ -193,6 +194,16 @@ python setup.py build_ext --inplace
 ```
 
 如需编译，请先安装 Visual Studio Build Tools 2022（含 MSVC v143）。
+
+### 8. 比赛提交包自动命名
+
+为避免提交命名错误，可使用：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_submission_package.ps1 -School "你的学校" -ContestId "参赛编号"
+```
+
+输出目录默认为 `outputs/submission_packages/`，并自动生成提交包清单 JSON。
 
 ## 六、项目目录说明
 
@@ -252,7 +263,7 @@ requirements-lock.txt         锁定依赖
 python -m pip check
 python -m compileall -q app.py main.py config.py simulation_ipc.py simulation_runner.py regulator_agent.py agents core engine policy ui tests
 pytest -q
-powershell -ExecutionPolicy Bypass -File scripts\check_competition_delivery.ps1
+powershell -ExecutionPolicy Bypass -File scripts\check_competition_delivery.ps1 -FullTest -ReportPath outputs/competition_materials/latest_check.json
 ```
 
 本次复核结果：

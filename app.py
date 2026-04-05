@@ -25,13 +25,14 @@ from core.competition_compliance import (
     competition_mode_enabled,
     write_competition_compliance_artifacts,
 )
+from core.model_router import ModelRouter
 from core.runtime_mode import merge_mode_feature_flags, resolve_runtime_mode_profile
 from core.ui_text import display_runtime_mode, display_scenario_name
 from ui.backtest_panel import render_backtest_panel
 from ui.behavioral_diagnostics import render_behavioral_diagnostics
 from ui.demo_wind_tunnel import render_demo_tab
 from ui.history_replay import render_history_replay
-from ui.policy_lab import render_policy_lab
+from ui.policy_lab import _build_regulation_counterfactual_worlds, render_policy_lab
 from ui.regulator_optimization import REGULATOR_OPTIMIZATION_PAGE_FLAG, render_regulator_optimization
 from ui.reporting import export_defense_bundle
 from ui import dashboard as dashboard_ui
@@ -127,6 +128,125 @@ def _load_theme() -> None:
         .kpi-note { font-size: 12px; color: #7995bc; }
         """
     st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+
+
+def _runtime_router_summary() -> Dict[str, Any]:
+    summary = ModelRouter.runtime_observability_summary()
+    if isinstance(summary, dict):
+        return summary
+    return {}
+
+
+def _load_data_flywheel_summary(max_records: int = 500) -> Dict[str, Any]:
+    seed_path = Path("data") / "seed_events.jsonl"
+    if not seed_path.exists():
+        return {"available": False, "reason": f"{seed_path} not found"}
+
+    total = 0
+    impact_counter: Dict[str, int] = {}
+    topic_counter: Dict[str, int] = {}
+    source_counter: Dict[str, int] = {}
+    recent: List[Dict[str, Any]] = []
+    for raw in seed_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if not raw.strip():
+            continue
+        try:
+            item = json.loads(raw)
+        except Exception:
+            continue
+        total += 1
+        impact = str(item.get("impact_level", "unknown"))
+        impact_counter[impact] = impact_counter.get(impact, 0) + 1
+        source = str(item.get("source", item.get("source_name", "unknown")))
+        source_counter[source] = source_counter.get(source, 0) + 1
+        topic = str(item.get("topic", item.get("event_type", "unknown")))
+        topic_counter[topic] = topic_counter.get(topic, 0) + 1
+        if len(recent) < 5:
+            recent.append(
+                {
+                    "time": item.get("published_at", item.get("created_at", "")),
+                    "topic": topic,
+                    "impact": impact,
+                    "source": source,
+                }
+            )
+        if total >= max_records:
+            break
+
+    top_topics = sorted(topic_counter.items(), key=lambda kv: kv[1], reverse=True)[:5]
+    top_sources = sorted(source_counter.items(), key=lambda kv: kv[1], reverse=True)[:5]
+    return {
+        "available": True,
+        "total_events": total,
+        "impact_counter": impact_counter,
+        "top_topics": top_topics,
+        "top_sources": top_sources,
+        "recent_events": recent,
+    }
+
+
+def _render_value_bridge_tab() -> None:
+    st.markdown("### 数据飞轮与反事实价值卡")
+    flywheel = _load_data_flywheel_summary()
+    if not flywheel.get("available", False):
+        st.info(f"数据飞轮暂不可用：{flywheel.get('reason', 'unknown')}")
+    else:
+        a, b, c = st.columns(3)
+        a.metric("已采集事件", int(flywheel.get("total_events", 0)))
+        high_impact = int(dict(flywheel.get("impact_counter", {})).get("high", 0))
+        b.metric("高影响事件", high_impact)
+        c.metric("TOP来源数", len(list(flywheel.get("top_sources", []))))
+        st.markdown("#### 事件来源与主题摘要")
+        left, right = st.columns(2)
+        with left:
+            st.dataframe(pd.DataFrame(flywheel.get("top_sources", []), columns=["source", "count"]), hide_index=True, use_container_width=True)
+        with right:
+            st.dataframe(pd.DataFrame(flywheel.get("top_topics", []), columns=["topic", "count"]), hide_index=True, use_container_width=True)
+
+    _ensure_demo_loaded()
+    scenario = st.session_state.get("demo_scenario")
+    if scenario is None:
+        st.warning("当前未加载答辩场景，无法生成反事实对照。")
+        return
+    metrics = scenario.metrics if hasattr(scenario, "metrics") else pd.DataFrame()
+    if metrics.empty:
+        st.warning("当前场景缺少指标数据。")
+        return
+
+    try:
+        counterfactual = _build_regulation_counterfactual_worlds(metrics, intensity=1.0)
+    except Exception as exc:
+        st.warning(f"反事实计算失败：{exc}")
+        return
+
+    st.markdown("#### 监管反事实 A/B 差异")
+    worlds = dict(counterfactual.get("worlds", {}) or {})
+    scorecards = dict(counterfactual.get("scorecards", {}) or {})
+    rec = str(counterfactual.get("recommended_timing", ""))
+    if rec:
+        st.caption(f"推荐干预时机：{rec}")
+    cards_df = pd.DataFrame(
+        [
+            {"world": key, **(value if isinstance(value, dict) else {})}
+            for key, value in scorecards.items()
+        ]
+    )
+    if not cards_df.empty:
+        st.dataframe(cards_df, use_container_width=True, hide_index=True)
+    world_keys = list(worlds.keys())
+    if len(world_keys) >= 2:
+        base = pd.DataFrame(worlds[world_keys[0]])
+        alt = pd.DataFrame(worlds[world_keys[1]])
+        if not base.empty and not alt.empty and "step" in base.columns and "close" in base.columns:
+            merged = base[["step", "close"]].merge(
+                alt[["step", "close"]],
+                on="step",
+                suffixes=("_base", "_alt"),
+                how="inner",
+            )
+            if not merged.empty:
+                merged["delta_close"] = merged["close_alt"] - merged["close_base"]
+                st.line_chart(merged.set_index("step")[["delta_close"]], use_container_width=True)
 
 
 def _init_state() -> None:
@@ -241,6 +361,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
 
     metrics = scenario.metrics
     stat = _material_summary_from_metrics(metrics)
+    runtime_summary = _runtime_router_summary()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     competition_summary = f"""# competition_summary
@@ -253,6 +374,12 @@ def _generate_competition_materials() -> Dict[str, Path]:
 - 波动率：{stat['volatility']:.2%}
 - 最大风险热度：{stat['panic_max']:.2f}
 - 平均羊群度（CSAD）：{stat['herding_avg']:.3f}
+
+## 运行模式证据
+- 在线调用成功次数：{int(runtime_summary.get('online_success_total', 0))}
+- 自动回退次数：{int(runtime_summary.get('fallback_total', 0))}
+- 在线成功率：{float(runtime_summary.get('online_success_rate', 0.0)):.1%}
+- 最近回退原因：{str(runtime_summary.get('last_fallback_reason', '') or '-')}
 
 ## 结论摘要
 1. 系统能够围绕政策冲击、市场反应和风险扩散形成闭环推演。
@@ -297,11 +424,16 @@ def _generate_competition_materials() -> Dict[str, Path]:
         "design_outline.md": MATERIALS_ROOT / "design_outline.md",
         "demo_script_10min.md": MATERIALS_ROOT / "demo_script_10min.md",
         "figures/index.json": figures_dir / "index.json",
+        "runtime_mode_evidence.json": MATERIALS_ROOT / "runtime_mode_evidence.json",
     }
     file_map["competition_summary.md"].write_text(competition_summary, encoding="utf-8")
     file_map["design_outline.md"].write_text(design_outline, encoding="utf-8")
     file_map["demo_script_10min.md"].write_text(demo_script_10min, encoding="utf-8")
     file_map["figures/index.json"].write_text(json.dumps(figures_index, ensure_ascii=False, indent=2), encoding="utf-8")
+    file_map["runtime_mode_evidence.json"].write_text(
+        json.dumps(runtime_summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
     if _competition_mode_active():
         feature_flags = dict(st.session_state.get("feature_flags", {}))
@@ -367,6 +499,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
             "seed": 42,
             "config_hash": json.dumps(feature_flags, sort_keys=True, ensure_ascii=False),
             "dataset_snapshot_id": f"demo:{scenario.name}",
+            "runtime_mode_evidence": runtime_summary,
         }
         bundle = export_defense_bundle(
             root_dir=MATERIALS_ROOT,
@@ -412,13 +545,13 @@ def _render_sidebar_global() -> None:
         
         st.markdown("---")
         st.markdown("### 仿真模式设置")
-        sim_mode_display = {"SMART": "智能模式 (GLM-4 + Chat)", "DEEP": "深度模式 (Reasoner + Chat)"}
+        sim_mode_display = {"SMART": "智能模式 (API优先 + 自动回退)", "DEEP": "深度模式 (Reasoner + Chat)"}
         selected_mode_key = st.radio(
             "选择 LLM 调度策略",
             options=["SMART", "DEEP"],
             index=0 if st.session_state.simulation_mode == "SMART" else 1,
             format_func=lambda x: sim_mode_display.get(x, x),
-            help="智能模式优先使用 GLM；深度模式优先使用 DeepSeek Reasoner 推理模型。"
+            help="智能模式默认在线 API 优先，单次失败自动回退离线；深度模式优先 DeepSeek Reasoner。"
         )
         if selected_mode_key != st.session_state.simulation_mode:
             st.session_state.simulation_mode = selected_mode_key
@@ -432,6 +565,23 @@ def _render_sidebar_global() -> None:
             summary = str(runtime_profile.get("summary", ""))
             pause_seconds = float(runtime_profile.get("pause_for_llm_seconds", 0.0) or 0.0)
             st.caption(f"模式摘要：{summary} | LLM暂停={pause_seconds:.2f}s")
+
+        runtime_summary = _runtime_router_summary()
+        if runtime_summary:
+            online_success = int(runtime_summary.get("online_success_total", 0))
+            fallback_total = int(runtime_summary.get("fallback_total", 0))
+            success_rate = float(runtime_summary.get("online_success_rate", 0.0))
+            last_reason = str(runtime_summary.get("last_fallback_reason", "") or "-")
+            status_map = {
+                "online_ok": "在线稳定",
+                "degraded_with_fallback": "在线降级中",
+                "offline_fallback": "离线兜底",
+            }
+            status = status_map.get(str(runtime_summary.get("status", "")), "状态未知")
+            st.markdown("### 运行态监控")
+            st.caption(
+                f"{status} | 在线成功={online_success} | 回退={fallback_total} | 成功率={success_rate:.0%} | 最近回退原因={last_reason}"
+            )
 
         st.markdown("---")
         st.caption("建议先看“系统说明”建立整体认知，再进入政策试验台和历史回放，最后用“高级分析”回答追问。")
@@ -545,7 +695,7 @@ def _render_advanced_analysis() -> None:
     st.session_state.runtime_mode = DEMO_MODE
     st.markdown("## 高级分析")
     st.caption("这里保留专家追问、答辩演示、行为金融诊断和研究参数面板。")
-    tab1, tab2, tab3, tab4 = st.tabs(["智能决策解读", "市场行为分析", "答辩演示", "研究参数"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["智能决策解读", "市场行为分析", "答辩演示", "研究参数", "价值接线"])
 
     with tab1:
         _render_ai_decision_tab()
@@ -557,6 +707,8 @@ def _render_advanced_analysis() -> None:
     with tab4:
         st.session_state.runtime_mode = LIVE_MODE
         render_backtest_panel(ctrl=st.session_state.get("controller"))
+    with tab5:
+        _render_value_bridge_tab()
 
 
 def _render_system_guide() -> None:

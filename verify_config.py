@@ -1,5 +1,6 @@
 
 import asyncio
+import sys
 from core.scheduler import SimulationController, SimulationMode
 
 def verify_agent_configuration(mode_name="FAST"):
@@ -45,16 +46,8 @@ def verify_agent_configuration(mode_name="FAST"):
             elif mode_name == "DEEP":
                 assert "deepseek-reasoner" in priority, f"DEEP mode should use reasoner, got {priority}"
             elif mode_name == "SMART":
-                # Agent 0 (or 1) uses Reasoner, others Chat
-                # In CivitasModel, idx=0 gets Reasoner.
-                # Based on previous output, Agent 1 corresponds to idx=0.
-                uid = str(agent.unique_id)
-                is_first_agent = uid == "1" or uid == "0" or uid.endswith("_0")
-                
-                if is_first_agent:
-                    assert "deepseek-reasoner" in priority, f"Agent {agent.unique_id} missing reasoner in SMART mode. Got: {priority}"
-                else:
-                    assert "deepseek-chat" in priority, f"SMART mode others should use chat, got {priority}"
+                # SMART mode is online-first but should remain chat-priority for stability.
+                assert "deepseek-chat" in priority, f"SMART mode should include chat fallback, got {priority}"
                     
         print(f"Mode {mode_name} Verified Successfully!")
         return True
@@ -67,5 +60,8 @@ def verify_agent_configuration(mode_name="FAST"):
 
 if __name__ == "__main__":
     modes = ["FAST", "SMART", "DEEP"]
+    all_ok = True
     for m in modes:
-        verify_agent_configuration(m)
+        all_ok = verify_agent_configuration(m) and all_ok
+    if not all_ok:
+        sys.exit(1)

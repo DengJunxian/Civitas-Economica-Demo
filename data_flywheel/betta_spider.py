@@ -14,6 +14,7 @@ from data_flywheel.event_graph_store import EventGraphStore
 from data_flywheel.seed_store import SeedStore
 
 logger = logging.getLogger(__name__)
+_RSS_IMPORT_WARNED = False
 
 
 class BettaSpider:
@@ -55,6 +56,7 @@ class BettaSpider:
 
     def _init_sources(self, config: dict):
         """根据配置初始化数据源列表"""
+        global _RSS_IMPORT_WARNED
         if not config:
             config = {
                 "enable_mock_source": True,
@@ -75,7 +77,9 @@ class BettaSpider:
                 import feedparser
                 self.sources.append(RssSource(feed_urls=rss_feeds))
             except ImportError:
-                logger.warning("feedparser not installed, skipping RSS sources. Run `pip install feedparser`")
+                if not _RSS_IMPORT_WARNED:
+                    logger.warning("feedparser not installed, skipping RSS sources. Run `pip install feedparser`")
+                    _RSS_IMPORT_WARNED = True
 
     def run_once(self, max_articles: int = 5) -> List[SeedEvent]:
         """

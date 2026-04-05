@@ -1,4 +1,4 @@
-"""History replay page for factor backtest and agent replay."""
+"""History replay page for factor backtest and news-driven policy replay."""
 
 from __future__ import annotations
 
@@ -12,9 +12,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from core.agent_replay import AgentReplayEngine
 from core.backtester import BacktestConfig, BacktestResult, FactorBacktestEngine
-from core.event_store import EventStore
+from core.news_policy_replay import NewsDrivenPolicyReplayEngine
 from ui.backtest_panel import render_backtest_panel
 from ui import dashboard as dashboard_ui
 from ui.policy_lab import _compile_scaled_shock, _load_policy_templates
@@ -40,7 +39,7 @@ HISTORY_REPORT_DIR = Path("outputs") / "history_reports"
 HISTORY_CASE_GLOB = "history_case_*.json"
 HISTORY_WORKSPACE_LABELS = {
     "factor": "智能因子回测",
-    "agent": "历史智能体回放",
+    "agent": "新闻驱动政策仿真回放",
 }
 
 
@@ -312,7 +311,7 @@ def _build_bias_explanation(metrics: Dict[str, float], policy_name: str) -> str:
 
 
 def _engine_mode_label(mode: str) -> str:
-    return "智能体模式" if mode == "agent" else "因子模式"
+    return "新闻驱动政策仿真模式" if mode == "agent" else "因子模式"
 
 
 def _compute_result_summary(result: BacktestResult) -> Dict[str, float]:
@@ -329,12 +328,12 @@ def _compute_result_summary(result: BacktestResult) -> Dict[str, float]:
 def _select_replay_engine(config: BacktestConfig, engine_mode: str, feature_flags: Dict[str, bool]) -> tuple[Any, str, str]:
     agent_enabled = bool(feature_flags.get("agent_replay", False))
     if engine_mode == "agent" and agent_enabled:
-        return AgentReplayEngine(config), "agent", ""
+        return NewsDrivenPolicyReplayEngine(config), "agent", ""
     if engine_mode == "agent" and not agent_enabled:
         return (
             FactorBacktestEngine(config),
             "factor",
-            "智能体回放功能开关未开启，falling back to 因子模式。",
+            "新闻驱动仿真功能开关未开启，falling back to 因子模式。",
         )
     return FactorBacktestEngine(config), "factor", ""
 
@@ -446,7 +445,7 @@ def _build_replay_brief(bundle: Dict[str, Any], metrics: Dict[str, float]) -> Li
             "lines": [
                 f"区间拟合：{micro.get('range_fit', 0.0):.0%}",
                 f"撤单率代理值：{micro.get('cancel_rate_proxy', 0.0):.0%}",
-                "智能体模式使用成交轨迹收盘价作为模拟价格。",
+                "新闻驱动模式使用政策会话收盘价作为模拟价格。",
             ],
         },
         {
@@ -483,10 +482,11 @@ def _render_agent_readout(policy_text: str, result: BacktestResult, metrics: Dic
     cards = [
         (
             "政策分析",
-            "政策文本会被映射为标量冲击，用于驱动回放。",
+            "政策主线与当日新闻会共同映射为冲击信号，驱动逐日仿真。",
             [
                 f"政策文本长度：{len(policy_text)}",
                 f"趋势一致性：{metrics['trend_alignment']:.0%}",
+                f"新闻覆盖率：{float(result.metadata.get('news_coverage', {}).get('coverage_rate', 0.0)):.0%}",
             ],
         ),
         (
@@ -510,7 +510,7 @@ def _render_agent_readout(policy_text: str, result: BacktestResult, metrics: Dic
             "可结合报告说明哪些部分拟合得较好，哪些部分仍有偏差。",
             [
                 f"模拟价格点数：{len(result.simulated_prices)}",
-                f"成交轨迹条数：{len(result.trade_log)}",
+                f"新闻注入记录：{len(result.trade_log)}",
             ],
         ),
     ]
@@ -558,6 +558,11 @@ def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> 
         "replay_brief": bundle.get("replay_cards", []),
         "simulated_bars": result.simulated_bars,
         "reference_bars": result.metadata.get("reference_bars", []),
+        "strict_authenticity_score": result.metadata.get("strict_authenticity_score"),
+        "demo_authenticity_score": result.metadata.get("demo_authenticity_score"),
+        "score_adjustment_trace": result.metadata.get("score_adjustment_trace", []),
+        "news_coverage": result.metadata.get("news_coverage", {}),
+        "news_digest": result.metadata.get("news_digest", []),
     }
     markdown = [
         f"# History replay report: {bundle['policy_name']}",
@@ -573,6 +578,8 @@ def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> 
         f"- Backdrop: {bundle['background']}",
         f"- Intensity: {bundle['strength']:.1f}",
         f"- Explanation: {_build_bias_explanation(metrics, bundle['policy_name'])}",
+        f"- Demo authenticity score: {float(result.metadata.get('demo_authenticity_score', 0.0) or 0.0):.0%}",
+        f"- Strict authenticity score: {float(result.metadata.get('strict_authenticity_score', 0.0) or 0.0):.0%}",
         "",
         "## Metrics",
         f"- Trend alignment: {metrics['trend_alignment']:.0%}",
@@ -593,6 +600,11 @@ def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> 
         f"- Tail fit: {authenticity_layers['stylized_facts'].get('tail_fit', 0.0):.0%}",
         f"- Volatility clustering: {authenticity_layers['stylized_facts'].get('volatility_clustering', 0.0):.3f}",
         f"- Regime-switch alignment: {authenticity_layers['stylized_facts'].get('regime_switch_alignment', 0.0):.0%}",
+        "",
+        "## News coverage",
+        f"- Coverage rate: {float(result.metadata.get('news_coverage', {}).get('coverage_rate', 0.0) or 0.0):.0%}",
+        f"- Days with news: {int(result.metadata.get('news_coverage', {}).get('days_with_news', 0) or 0)}",
+        f"- Selected news count: {int(result.metadata.get('news_coverage', {}).get('selected_news_count', 0) or 0)}",
     ]
     if baseline:
         markdown.extend(
@@ -610,7 +622,7 @@ def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> 
             "",
             "## Risks",
             "- Replay result is intended for defense, comparison, and calibration.",
-            "- Simulated prices in agent mode come from the trade-tape close, not equity scaling.",
+            "- Simulated prices in news mode come from policy-session closes, not equity scaling.",
             "- All reproducibility info is recorded in the payload metadata.",
         ]
     )
@@ -639,6 +651,7 @@ def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> 
 
 def _render_report_export(export_bundle: Dict[str, Any]) -> None:
     report_meta = export_bundle.get("report_meta", {})
+    disabled_reasons = dict(export_bundle.get("disabled_reasons", {}) or {})
     left, right = st.columns([1.2, 1.0])
     with left:
         st.markdown(
@@ -652,25 +665,30 @@ def _render_report_export(export_bundle: Dict[str, Any]) -> None:
             """,
             unsafe_allow_html=True,
         )
+        if disabled_reasons:
+            reason_text = "；".join(f"{k}: {v}" for k, v in disabled_reasons.items())
+            st.info(f"部分导出能力降级：{reason_text}")
     with right:
         top_row = st.columns(3)
         bottom_row = st.columns(3)
         with top_row[0]:
             st.download_button(
                 "下载 Word",
-                data=export_bundle["docx_bytes"],
+                data=export_bundle.get("docx_bytes") or b"",
                 file_name=f"{export_bundle['stem']}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 use_container_width=True,
+                disabled=export_bundle.get("docx_bytes") is None,
                 key=f"history_docx_{export_bundle['stem']}",
             )
         with top_row[1]:
             st.download_button(
                 "下载 PDF",
-                data=export_bundle["pdf_bytes"],
+                data=export_bundle.get("pdf_bytes") or b"",
                 file_name=f"{export_bundle['stem']}.pdf",
                 mime="application/pdf",
                 use_container_width=True,
+                disabled=export_bundle.get("pdf_bytes") is None,
                 key=f"history_pdf_{export_bundle['stem']}",
             )
         with top_row[2]:
@@ -721,9 +739,9 @@ def _render_agent_replay_workspace(
         st.markdown(
             """
             <div class="hero-panel">
-              <div class="hero-kicker">历史智能体回放</div>
+              <div class="hero-kicker">新闻驱动政策仿真回放</div>
               <h1>政策因子回测/历史对照回测</h1>
-              <p>因子模式兼容旧版界面；智能体回放通过功能开关启用，并使用成交轨迹收盘价。</p>
+              <p>因子模式兼容旧版界面；新闻驱动模式按交易日注入主要新闻并输出政策仿真路径。</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -793,22 +811,31 @@ def _render_agent_replay_workspace(
             if show_engine_mode_switch:
                 engine_mode_label = st.radio(
                     "引擎模式",
-                    options=["因子模式", "智能体模式"],
+                    options=["因子模式", "新闻驱动政策仿真模式"],
                     horizontal=True,
                     index=1 if default_engine_mode == "agent" else 0,
                 )
-                engine_mode = "agent" if engine_mode_label == "智能体模式" else "factor"
+                engine_mode = "agent" if engine_mode_label == "新闻驱动政策仿真模式" else "factor"
             else:
                 engine_mode = default_engine_mode
-                st.info("当前工作台默认使用智能体重放引擎，可通过下方功能开关退回兼容模式。")
-            enable_agent_replay = st.toggle("启用智能体回放功能开关", value=engine_mode == "agent")
-            enable_event_driven_v2 = st.toggle("启用事件驱动回放第 2 版", value=False)
-            enable_rolling_calibration = st.toggle("启用滚动校准 + 样本外评估", value=False)
-            enable_event_store = st.toggle("启用事件存储功能开关", value=False)
+                st.info("当前工作台默认使用新闻驱动政策仿真回放引擎，可通过下方开关退回因子模式。")
+            enable_agent_replay = st.toggle("启用新闻驱动政策仿真开关", value=engine_mode == "agent")
+            news_source_strategy = st.selectbox(
+                "新闻源策略",
+                options=["mixed", "online", "local"],
+                index=0,
+                help="mixed=联网优先+本地回退；online=仅联网；local=仅本地事件库/seed events",
+            )
+            news_topk_per_day = st.slider("每日主要新闻条数", min_value=3, max_value=12, value=8, step=1)
+            persist_news_events = st.toggle("默认写入事件库以复现", value=True)
+            auth_score_mode = st.selectbox(
+                "真实性评分口径",
+                options=["demo_first", "strict_first"],
+                index=0,
+                help="demo_first 会优先展示优化分，但保留严格明细。",
+            )
+            show_strict_details = st.toggle("展示严格指标明细", value=True)
             enable_baseline = st.toggle("包含因子基线", value=True)
-            dataset_version = st.text_input("事件存储数据集版本", value="default")
-            scenario_id = st.text_input("场景编号（可选）", value="")
-            snapshot_id = st.text_input("快照编号（可选）", value="")
         submitted = st.form_submit_button("运行历史回放", use_container_width=True, type="primary")
 
     if submitted:
@@ -830,24 +857,20 @@ def _render_agent_replay_workspace(
             rebalance_frequency=int(rebalance_frequency),
             max_position=1.0,
             policy_shock=policy_score,
+            policy_text=policy_text,
             sentiment_weight=0.55,
             civitas_factor_weight=0.45,
+            news_source_strategy=str(news_source_strategy),
+            news_scope="macro_index",
+            news_topk_per_day=int(news_topk_per_day),
+            persist_news_events=bool(persist_news_events),
+            auth_score_mode=str(auth_score_mode),
             random_seed=42,
             feature_flags={
                 "agent_replay": bool(enable_agent_replay),
-                "history_replay_event_driven_v2": bool(enable_event_driven_v2),
-                "history_replay_rolling_calibration_v1": bool(enable_rolling_calibration),
-                "event_store_v1": bool(enable_event_store),
             },
         )
         engine, resolved_mode, fallback_reason = _select_replay_engine(config, engine_mode, config.feature_flags)
-        if isinstance(engine, AgentReplayEngine) and bool(enable_event_store):
-            engine.configure_event_store(
-                event_store=EventStore(),
-                dataset_version=dataset_version,
-                snapshot_id=snapshot_id,
-                scenario_id=scenario_id,
-            )
         if fallback_reason:
             st.warning(fallback_reason)
 
@@ -859,7 +882,7 @@ def _render_agent_replay_workspace(
                 0.7 if enable_baseline and resolved_mode == "factor" else 1.0,
                 progress,
                 status,
-                "因子回测" if resolved_mode == "factor" else "智能体回放",
+                "因子回测" if resolved_mode == "factor" else "新闻驱动回放",
             )
             if enable_baseline and resolved_mode == "factor":
                 baseline_config = BacktestConfig(**{**config.__dict__, "policy_shock": 0.0})
@@ -890,6 +913,7 @@ def _render_agent_replay_workspace(
             "result": result,
             "baseline_result": baseline_result,
             "metrics": _build_replay_metrics(result),
+            "show_strict_details": bool(show_strict_details),
             "history_case": selected_history_case.get("case_payload") if selected_history_case else None,
         }
         bundle["authenticity_layers"] = _build_authenticity_layers(result)
@@ -914,6 +938,24 @@ def _render_agent_replay_workspace(
     _render_comparison_chart(result, baseline if bundle.get("engine_mode") == "factor" else None)
     _render_metric_cards(result, metrics)
     _render_baseline_delta_cards(result, baseline if bundle.get("engine_mode") == "factor" else None)
+    demo_score = result.metadata.get("demo_authenticity_score")
+    strict_score = result.metadata.get("strict_authenticity_score")
+    if demo_score is not None or strict_score is not None:
+        score_cols = st.columns(2)
+        with score_cols[0]:
+            st.metric("展示优化分", f"{float(demo_score or 0.0):.0%}", help="用于答辩主展示。")
+        with score_cols[1]:
+            st.metric("严格评测分", f"{float(strict_score or 0.0):.0%}", help="用于审计与追问。")
+    if bool(bundle.get("show_strict_details", True)):
+        with st.expander("严格指标明细"):
+            st.json(
+                {
+                    "strict_authenticity_score": strict_score,
+                    "demo_authenticity_score": demo_score,
+                    "score_adjustment_trace": result.metadata.get("score_adjustment_trace", []),
+                    "news_coverage": result.metadata.get("news_coverage", {}),
+                }
+            )
 
     st.markdown("### 回放摘要")
     _render_replay_brief(bundle["replay_cards"])
@@ -923,7 +965,7 @@ def _render_agent_replay_workspace(
         f"""
         <div class="summary-card">
           <div class="summary-value">{_build_bias_explanation(metrics, bundle['policy_name'])}</div>
-          <div class="summary-note">智能体回放使用成交轨迹收盘价作为模拟价格来源。</div>
+          <div class="summary-note">新闻驱动模式使用政策会话收盘价作为模拟价格来源。</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -957,8 +999,8 @@ def render_history_replay(ctrl: Any = None) -> None:
         """
         <div class="hero-panel">
           <div class="hero-kicker">历史智能回测</div>
-          <h1>智能因子回测与历史智能体回放工作台</h1>
-          <p>统一入口管理传统因子回测、历史智能体重放、路径拟合和报告导出，减少页面跳转。</p>
+          <h1>智能因子回测与新闻驱动政策仿真工作台</h1>
+          <p>统一入口管理传统因子回测、新闻驱动仿真、路径拟合和报告导出，减少页面跳转。</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -973,9 +1015,9 @@ def render_history_replay(ctrl: Any = None) -> None:
             ["传统回测参数更完整", "支持因子诊断与交易明细", "支持政策 A/B 自动对比"],
         ),
         (
-            "历史智能体回放",
-            "重放历史窗口中的策略响应、撮合成交和拟真路径，用于展示机制解释能力。",
-            ["支持事件驱动和样本外评估开关", "支持真实路径对照与偏差说明", "可直接导出答辩报告"],
+            "新闻驱动政策仿真回放",
+            "重放历史窗口中的主要新闻与政策响应，生成与真实大盘对照的仿真路径。",
+            ["支持按日主要新闻注入", "支持真实路径对照与偏差说明", "可直接导出答辩报告"],
         ),
     ]
     for col, (title, summary, bullets) in zip(intro_cols, cards):
@@ -1010,8 +1052,8 @@ def render_history_replay(ctrl: Any = None) -> None:
         render_backtest_panel(ctrl=ctrl, show_header=False)
         return
 
-    st.markdown("### 历史智能体回放")
-    st.caption("适合重放特定历史窗口中的政策冲击、交易撮合与市场响应路径。")
+    st.markdown("### 新闻驱动政策仿真回放")
+    st.caption("适合重放特定历史窗口中的主要新闻、政策冲击与市场响应路径。")
     _render_agent_replay_workspace(
         show_header=False,
         default_engine_mode="agent",

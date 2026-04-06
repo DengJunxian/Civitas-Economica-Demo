@@ -81,8 +81,6 @@ class APIBackend:
         Returns:
             生成的文本
         """
-        client = self._get_client()
-        
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -107,6 +105,7 @@ class APIBackend:
                 pass
         
         try:
+            client = self._get_client()
             response = client.chat.completions.create(
                 model=self.model,
                 messages=cast(Any, messages),
@@ -115,6 +114,9 @@ class APIBackend:
             )
             return response.choices[0].message.content or ""
         except Exception as e:
+            fallback = kwargs.get("fallback_response")
+            if fallback is not None:
+                return str(fallback)
             return f"[API Error] {e}"
     
     def generate_batch(

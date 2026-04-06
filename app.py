@@ -294,12 +294,14 @@ def _init_state() -> None:
 def _render_top_entry_selector() -> None:
     st.markdown(
         """
-        <div style="margin-bottom: 2rem;">
-            <h1 style="font-size: 2.4rem; font-weight: 700; color: #e2e8f0; margin-bottom: 0.5rem; letter-spacing: 2px; text-shadow: 0 0 20px rgba(24,144,255,0.4);">
-                数治观澜 <span style="font-size: 1.4rem; font-weight: 400; color: #8aa0c2; text-shadow: none;">—— 基于大模型多智能体的金融政策风动推演沙箱</span>
+        <div style="margin-bottom: 2rem; position: relative;">
+            <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle at 10% 20%, rgba(24, 144, 255, 0.15), transparent 60%); pointer-events: none;"></div>
+            <h1 style="font-size: 2.8rem; font-weight: 800; color: #ffffff; margin-bottom: 0.2rem; letter-spacing: 2px; text-shadow: 0 0 24px rgba(24,144,255,0.6); display: flex; align-items: center; gap: 12px;">
+                <span style="background: linear-gradient(90deg, #4da6ff, #1890ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">数治观澜</span> 
+                <span style="font-size: 1.5rem; font-weight: 500; color: #8aa0c2; text-shadow: none;">金融政策风动推演沙箱</span>
             </h1>
-            <div style="font-size: 15px; color: #4da6ff; letter-spacing: 1.5px; font-weight: 600;">
-                Civitas 政策沙箱
+            <div style="font-size: 16px; color: #4da6ff; letter-spacing: 2px; font-weight: 600; text-transform: uppercase;">
+                Civitas Sandbox System
             </div>
         </div>
         """,
@@ -308,7 +310,11 @@ def _render_top_entry_selector() -> None:
 
     st.markdown(
         f"""
-        <div class='mode-pill'>当前页面：{st.session_state.entry} | 用途：{ENTRY_PURPOSE.get(st.session_state.entry, "")}</div>
+        <div class='mode-pill' style='box-shadow: 0 0 15px rgba(24, 144, 255, 0.2) inset; padding: 6px 16px; font-weight: 600;'>
+            <span style='color: #fff;'>📍 模块枢纽：</span>{st.session_state.entry} 
+            <span style='margin: 0 12px; color: #1f365c;'>|</span> 
+            <span style='color: #8aa0c2;'>🎯 核心职能：</span>{ENTRY_PURPOSE.get(st.session_state.entry, "")}
+        </div>
         """,
         unsafe_allow_html=True,
     )
@@ -533,25 +539,39 @@ def _generate_competition_materials() -> Dict[str, Path]:
 
 def _render_sidebar_global() -> None:
     with st.sidebar:
-        st.markdown("### 导航菜单")
-        for entry in ENTRY_POINTS:
-            if st.button(
-                entry,
-                key=f"entry_{entry}",
-                use_container_width=True,
-                type="primary" if st.session_state.entry == entry else "secondary",
-            ):
-                st.session_state.entry = entry
-            st.caption(ENTRY_DESCRIPTIONS[entry])
+        st.markdown(
+            "### 🧭 导航菜单",
+            help="在这里切换沙箱的不同功能模块。从上到下按展示逻辑排列。"
+        )
+        
+        menu_groups = {
+            "🚀 入门指导 (Onboarding)": ["系统说明"],
+            "⚙️ 核心推演 (Simulation)": ["政策试验台", "政策A/B推演"],
+            "📊 深度复盘 (Analytics)": ["新闻驱动历史回测", "监管优化", "真实性报告", "高级分析"]
+        }
+
+        for group, entries in menu_groups.items():
+            st.markdown(f"<div style='margin-top: 16px; margin-bottom: 8px; font-size: 13px; color: #8aa0c2; letter-spacing: 1px;'>{group}</div>", unsafe_allow_html=True)
+            for entry in entries:
+                if entry in ENTRY_POINTS:
+                    if st.button(
+                        entry,
+                        key=f"entry_{entry}",
+                        use_container_width=True,
+                        type="primary" if st.session_state.entry == entry else "secondary",
+                        help=ENTRY_DESCRIPTIONS.get(entry, "")
+                    ):
+                        st.session_state.entry = entry
         
         st.markdown("---")
-        st.markdown("### 仿真模式设置")
+        st.markdown("### ⚡ 仿真模式设置")
         sim_mode_display = {"SMART": "智能模式 (API优先 + 自动回退)", "DEEP": "深度模式 (Reasoner + Chat)"}
         selected_mode_key = st.radio(
             "选择 LLM 调度策略",
             options=["SMART", "DEEP"],
             index=0 if st.session_state.simulation_mode == "SMART" else 1,
             format_func=lambda x: sim_mode_display.get(x, x),
+            label_visibility="collapsed",
             help="智能模式默认在线 API 优先，单次失败自动回退离线；深度模式优先 DeepSeek Reasoner。"
         )
         if selected_mode_key != st.session_state.simulation_mode:
@@ -565,24 +585,20 @@ def _render_sidebar_global() -> None:
         if isinstance(runtime_profile, MutableMapping):
             summary = str(runtime_profile.get("summary", ""))
             pause_seconds = float(runtime_profile.get("pause_for_llm_seconds", 0.0) or 0.0)
-            st.caption(f"模式摘要：{summary} | LLM暂停={pause_seconds:.2f}s")
+            st.caption(f"🛡️ 模式摘要：{summary}")
 
         runtime_summary = _runtime_router_summary()
         if runtime_summary:
             online_success = int(runtime_summary.get("online_success_total", 0))
             fallback_total = int(runtime_summary.get("fallback_total", 0))
             success_rate = float(runtime_summary.get("online_success_rate", 0.0))
-            last_reason = str(runtime_summary.get("last_fallback_reason", "") or "-")
             status_map = {
-                "online_ok": "在线稳定",
-                "degraded_with_fallback": "在线降级中",
-                "offline_fallback": "离线兜底",
+                "online_ok": "🟢 在线稳定",
+                "degraded_with_fallback": "🟡 降级兜底",
+                "offline_fallback": "🔴 离线兜底",
             }
-            status = status_map.get(str(runtime_summary.get("status", "")), "状态未知")
-            st.markdown("### 运行态监控")
-            st.caption(
-                f"{status} | 在线成功={online_success} | 回退={fallback_total} | 成功率={success_rate:.0%} | 最近回退原因={last_reason}"
-            )
+            status = status_map.get(str(runtime_summary.get("status", "")), "⚪ 状态未知")
+            st.markdown(f"<div style='font-size: 12px; margin-top: 10px; color: #8aa0c2;'>{status} | 在线成功={online_success} | 降级={fallback_total} | 成功率={success_rate:.0%}</div>", unsafe_allow_html=True)
 
         st.markdown("---")
         st.caption("建议先看“系统说明”建立整体认知，再进入政策试验台和历史回放，最后用“高级分析”回答追问。")

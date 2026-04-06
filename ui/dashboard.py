@@ -683,3 +683,88 @@ def render_orderflow_microstructure_panel(
     c3.metric("DepthImb", f"{depth_imbalance:+.3f}")
     c4.metric("Impact", f"{impact:.4f}")
     c5.metric("Herding", f"{herding_proxy:.3f}")
+
+def render_financial_health_dashboard(metrics_dict: Dict[str, Any], key_prefix: str = "health") -> None:
+    st.markdown("### 📊 实时金融异常指标监测", help="通过速度表盘直观反应市场在恐慌、羊群效应、流动性枯竭方面的风险情况。")
+    
+    panic = float(metrics_dict.get("panic_level", 0.0))
+    csad = float(metrics_dict.get("csad", 0.0))
+    imb = float(metrics_dict.get("depth_imbalance", 0.0))
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Indicator(
+        mode="gauge+number",
+        value=panic,
+        title={'text': "恐慌指数 (Panic)", 'font': {'size': 14, 'color': '#8aa0c2'}},
+        gauge={'axis': {'range': [0, 1]},
+               'bar': {'color': "rgba(250, 140, 22, 0.8)", 'line': {'width': 0}},
+               'steps': [
+                   {'range': [0, 0.35], 'color': "rgba(34, 197, 94, 0.2)"},
+                   {'range': [0.35, 0.7], 'color': "rgba(250, 140, 22, 0.2)"},
+                   {'range': [0.7, 1.0], 'color': "rgba(245, 34, 45, 0.3)"}],
+               'threshold': {'line': {'color': "#f5222d", 'width': 3}, 'thickness': 0.75, 'value': 0.8}},
+        domain={'row': 0, 'column': 0}
+    ))
+    
+    fig.add_trace(go.Indicator(
+        mode="gauge+number",
+        value=csad,
+        number={'valueformat': '.3f'},
+        title={'text': "羊群效应 (CSAD)", 'font': {'size': 14, 'color': '#8aa0c2'}},
+        gauge={'axis': {'range': [0, 0.15]},
+               'bar': {'color': "rgba(138, 43, 226, 0.8)", 'line': {'width': 0}},
+               'steps': [
+                   {'range': [0, 0.05], 'color': "rgba(34, 197, 94, 0.2)"},
+                   {'range': [0.05, 0.1], 'color': "rgba(250, 140, 22, 0.2)"},
+                   {'range': [0.1, 0.15], 'color': "rgba(245, 34, 45, 0.3)"}],
+               },
+        domain={'row': 0, 'column': 1}
+    ))
+    
+    fig.add_trace(go.Indicator(
+        mode="gauge+number",
+        value=imb,
+        number={'valueformat': '+.2f'},
+        title={'text': "深度失衡 (Imbalance)", 'font': {'size': 14, 'color': '#8aa0c2'}},
+        gauge={'axis': {'range': [-1, 1]},
+               'bar': {'color': "#1890ff", 'line': {'width': 0}},
+               'steps': [
+                   {'range': [-1, -0.4], 'color': "rgba(245, 34, 45, 0.2)"},
+                   {'range': [-0.4, 0.4], 'color': "rgba(34, 197, 94, 0.2)"},
+                   {'range': [0.4, 1.0], 'color': "rgba(24, 144, 255, 0.2)"}],
+               },
+        domain={'row': 0, 'column': 2}
+    ))
+    
+    fig.update_layout(
+        **PLOTLY_DARK_LAYOUT,
+        grid={'rows': 1, 'columns': 3, 'pattern': "independent"},
+        height=220,
+        margin=dict(l=10, r=10, t=30, b=10)
+    )
+    
+    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_health_gauges")
+
+def render_ai_insight_card(text: str) -> None:
+    st.markdown(
+        f"""
+        <div style="background: linear-gradient(135deg, rgba(15, 30, 55, 0.6), rgba(10, 20, 40, 0.9)); 
+                    border-left: 5px solid #1890ff; 
+                    border-radius: 8px; 
+                    padding: 16px 20px; 
+                    margin: 12px 0 24px 0;
+                    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+                    backdrop-filter: blur(8px);
+                    animation: insight-pulse 3.5s infinite;">
+            <div style="color: #4da6ff; font-weight: 700; font-size: 14px; margin-bottom: 8px; letter-spacing: 1.5px; display: flex; align-items: center; justify-content: space-between;">
+                <span>🧠 AI 专家前瞻与状态点评</span>
+                <span style="font-size: 11px; font-weight: normal; background: rgba(24, 144, 255, 0.2); padding: 2px 8px; border-radius: 4px;">由 ModelRouter 实时驱动</span>
+            </div>
+            <div style="color: #e2e8f0; font-size: 15px; line-height: 1.6;">
+                {text}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )

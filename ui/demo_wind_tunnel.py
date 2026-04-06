@@ -1,4 +1,4 @@
-﻿"""Defense-mode wind tunnel page for competition demo."""
+"""Defense-mode wind tunnel page for competition demo."""
 
 from __future__ import annotations
 
@@ -17,11 +17,31 @@ from core.competition_demo import (
     replay_next_narration,
 )
 from core.ui_text import display_scenario_name, translate_display_text, translate_ui_payload
+from core.model_router import ModelRouter
+from config import GLOBAL_CONFIG
+import json
 from ui import dashboard as dashboard_ui
 from ui.narrative import narrate_payload
 
 
-AUTO_PLAY_INTERVAL_SECONDS = 0.7
+AUTO_PLAY_INTERVAL_SECONDS = 2.5
+
+def generate_daily_llm_insight(metrics_dict: dict) -> str:
+    router = ModelRouter(
+        deepseek_key=GLOBAL_CONFIG.DEEPSEEK_API_KEY,
+        zhipu_key=GLOBAL_CONFIG.ZHIPU_API_KEY
+    )
+    prompt = [
+        {"role": "system", "content": "你是一位资深量化风控专家。请分析当前市场的微观结构指标（包括恐慌程度、羊群效应、流动性深度），用专业且警示性的全选中文语言进行短评（限60个字内）。揭示当前隐藏的系统性风险或者流动性转机。"},
+        {"role": "user", "content": f"实时切片指标: {json.dumps(metrics_dict, ensure_ascii=False)}"}
+    ]
+    content, _, _ = router.sync_call_with_fallback(
+        messages=prompt,
+        priority_models=["glm-4-flashx", "deepseek-chat"],
+        timeout_budget=5.0,
+        fallback_response="当前市场承压，微观结构波动加大，系统性风险有所上升，建议开启防守姿态。"
+    )
+    return content
 
 
 def _counterfactual_world(metrics: pd.DataFrame) -> pd.DataFrame:
@@ -190,11 +210,11 @@ def render_demo_tab(ctrl: Optional[Any] = None) -> None:
     with control_cols[0]:
         load_clicked = st.button("一键载入场景", use_container_width=True, type="primary")
     with control_cols[1]:
-        play_clicked = st.button("自动播放", use_container_width=True)
+        play_clicked = st.button("自动逐日推演", use_container_width=True)
     with control_cols[2]:
-        pause_clicked = st.button("暂停", use_container_width=True)
+        pause_clicked = st.button("暂停推演", use_container_width=True)
     with control_cols[3]:
-        step_clicked = st.button("下一步", use_container_width=True)
+        step_clicked = st.button("单日推演 (Day+1)", use_container_width=True)
     with control_cols[4]:
         reset_clicked = st.button("重置", use_container_width=True)
 
@@ -263,9 +283,29 @@ def render_demo_tab(ctrl: Optional[Any] = None) -> None:
 
     regulation_hint = "干预中" if upto.iloc[-1]["panic_level"] > 0.45 else "观察"
     kpi = dashboard_ui.build_kpi_snapshot(metrics, current_step, regulation_hint=regulation_hint)
+    
+    # --- UI Component Integration ---
     dashboard_ui.render_kpi_cards(kpi)
+    
+    # Generate snapshot dict for charts and LLM
+    last_row = upto.iloc[-1]
+    metrics_snapshot = {
+        "panic_level": float(last_row.get("panic_level", 0.0)),
+        "csad": float(last_row.get("csad", 0.0)),
+        "depth_imbalance": float(last_row.get("depth_imbalance", -0.5 * float(last_row.get("panic_level", 0.0))))
+    }
+    
+    # Financial Health Gauges
+    dashboard_ui.render_financial_health_dashboard(metrics_snapshot, key_prefix="defense")
+    
+    # LLM daily insights
+    if st.session_state.is_running or current_step > 0:
+        insight_cache_key = f"demo_insight_step_{current_step}"
+        if insight_cache_key not in st.session_state:
+            st.session_state[insight_cache_key] = generate_daily_llm_insight(metrics_snapshot)
+        dashboard_ui.render_ai_insight_card(st.session_state[insight_cache_key])
 
-    st.info(f"自动讲解：{_current_narration_text()}")
+    st.info(f"**Day {current_step}** | 自动讲解：{_current_narration_text()}")
     st.progress(min(1.0, current_step / max(1, len(metrics))))
 
     _render_three_stage_story(scenario, current_step)

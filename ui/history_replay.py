@@ -808,18 +808,8 @@ def _render_agent_replay_workspace(
             )
             rebalance_frequency = st.select_slider("调仓频率", options=[1, 2, 3, 5, 10], value=5)
             lookback = st.slider("回看窗口", min_value=10, max_value=80, value=20, step=5)
-            if show_engine_mode_switch:
-                engine_mode_label = st.radio(
-                    "引擎模式",
-                    options=["因子模式", "新闻驱动政策仿真模式"],
-                    horizontal=True,
-                    index=1 if default_engine_mode == "agent" else 0,
-                )
-                engine_mode = "agent" if engine_mode_label == "新闻驱动政策仿真模式" else "factor"
-            else:
-                engine_mode = default_engine_mode
-                st.info("当前工作台默认使用新闻驱动政策仿真回放引擎，可通过下方开关退回因子模式。")
-            enable_agent_replay = st.toggle("启用新闻驱动政策仿真开关", value=engine_mode == "agent")
+            engine_mode = "agent"
+            enable_agent_replay = True
             news_source_strategy = st.selectbox(
                 "新闻源策略",
                 options=["mixed", "online", "local"],
@@ -835,7 +825,7 @@ def _render_agent_replay_workspace(
                 help="demo_first 会优先展示优化分，但保留严格明细。",
             )
             show_strict_details = st.toggle("展示严格指标明细", value=True)
-            enable_baseline = st.toggle("包含因子基线", value=True)
+            enable_baseline = False
         submitted = st.form_submit_button("运行历史回放", use_container_width=True, type="primary")
 
     if submitted:
@@ -991,69 +981,17 @@ def _render_agent_replay_workspace(
 
 
 def render_history_replay(ctrl: Any = None) -> None:
-    default_workspace = _resolve_history_workspace(st.session_state.get("history_replay_entry_mode"))
-    workspace_options = list(HISTORY_WORKSPACE_LABELS.values())
-    workspace_index = 1 if default_workspace == "agent" else 0
-
     st.markdown(
         """
         <div class="hero-panel">
-          <div class="hero-kicker">历史智能回测</div>
-          <h1>智能因子回测与新闻驱动政策仿真工作台</h1>
-          <p>统一入口管理传统因子回测、新闻驱动仿真、路径拟合和报告导出，减少页面跳转。</p>
+            <div class="hero-kicker">新闻驱动历史回测</div>
+            <h1>新闻驱动政策仿真与历史回看工作台</h1>
+            <p>重放特定历史窗口中的主要新闻、政策冲击与市场响应路径，并生成与真实大盘对照的仿真图表。（仅供教学科研与仿真评估）</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.caption("仅供教学科研与仿真，不构成投资建议。")
 
-    intro_cols = st.columns(2)
-    cards = [
-        (
-            "智能因子回测",
-            "保留传统因子/组合研究工作流，用于策略基准、政策 A/B 对比和数据导出。",
-            ["传统回测参数更完整", "支持因子诊断与交易明细", "支持政策 A/B 自动对比"],
-        ),
-        (
-            "新闻驱动政策仿真回放",
-            "重放历史窗口中的主要新闻与政策响应，生成与真实大盘对照的仿真路径。",
-            ["支持按日主要新闻注入", "支持真实路径对照与偏差说明", "可直接导出答辩报告"],
-        ),
-    ]
-    for col, (title, summary, bullets) in zip(intro_cols, cards):
-        bullet_html = "".join(f"<li>{item}</li>" for item in bullets)
-        with col:
-            st.markdown(
-                f"""
-                <div class="story-card">
-                  <div class="story-card-title">{title}</div>
-                  <div class="story-card-summary">{summary}</div>
-                  <ul class="story-card-list">{bullet_html}</ul>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    selected_workspace_label = st.radio(
-        "回测工作台",
-        options=workspace_options,
-        index=workspace_index,
-        horizontal=True,
-        key="history_replay_workspace_selector",
-    )
-    selected_workspace = next(
-        key for key, label in HISTORY_WORKSPACE_LABELS.items() if label == selected_workspace_label
-    )
-    st.session_state["history_replay_entry_mode"] = selected_workspace
-
-    if selected_workspace == "factor":
-        st.markdown("### 智能因子回测")
-        st.caption("适合做策略基准、因子诊断、政策参数敏感性和政策 A/B 对照。")
-        render_backtest_panel(ctrl=ctrl, show_header=False)
-        return
-
-    st.markdown("### 新闻驱动政策仿真回放")
-    st.caption("适合重放特定历史窗口中的主要新闻、政策冲击与市场响应路径。")
     _render_agent_replay_workspace(
         show_header=False,
         default_engine_mode="agent",

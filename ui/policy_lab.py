@@ -2509,19 +2509,21 @@ def _render_agent_fmri_panel(session: Dict[str, Any], package_dict: Dict[str, An
                 showlegend=False,
             )
             st.plotly_chart(fig, use_container_width=True)
-        st.markdown("#### 最终决策")
-        st.code(json.dumps(selected["decision"], ensure_ascii=False, indent=2), language="json")
-        st.markdown("#### 简化思维摘要")
-        st.markdown(selected["thought"])
-        st.markdown("#### 历史思维记录")
+        st.markdown("#### 最终决策解读")
+        action_cn = {"BUY": "买入", "SELL": "卖出", "HOLD": "观望"}.get(selected["decision"]["action"], selected["decision"]["action"])
+        st.info(f"**操作**: {action_cn} | **信心度**: {selected['decision']['confidence']*100:.0f}% | **预期交易量**: {selected['decision']['qty']} 份")
+        st.markdown("#### 核心思维逻辑")
+        st.markdown(f"> {selected['thought']}")
+        
+        st.markdown("#### 历史轨迹评估")
         history = list(selected.get("history", []) or [])
         if history:
-            with st.expander(str(history[0]), expanded=True):
-                st.markdown(selected["thought"])
-                st.code(json.dumps(selected["decision"], ensure_ascii=False, indent=2), language="json")
+            with st.expander("展开最近记录", expanded=True):
+                st.markdown(f"**记录点**: {history[0]}")
+                st.info(f"该阶段策略倾向：{action_cn}。")
             for item in history[1:]:
                 with st.expander(str(item), expanded=False):
-                    st.markdown(selected["thought"])
+                    st.markdown("在当前市场环境下的惯性跟随或反转预期。")
 
 
 def _policy_session_status_text(status: str) -> str:
@@ -2708,21 +2710,14 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
     if presentation_mode == "defense":
         st.info("当前页面采用答辩风洞视图，适合讲解政策链路和市场传导；默认“政策试验台”页则更偏稳健评估。")
 
-    templates = _load_policy_templates()
-    template_map = {str(item.get("title", f"template-{idx}")): item for idx, item in enumerate(templates)}
-    selected_title = st.selectbox("政策模板", options=list(template_map.keys()), index=0, key="policy_lab_template_select")
-    selected = template_map[selected_title]
-
     session: Optional[Dict[str, Any]] = st.session_state.get("policy_lab_session")
     current_defaults = dict(session or {})
-    default_policy_name = str(current_defaults.get("policy_name", f"{selected_title} 仿真"))
-    default_policy_text = str(current_defaults.get("policy_text", selected.get("policy_text", "")))
-    default_policy_type = str(current_defaults.get("policy_type", selected.get("policy_type", "市场稳定")))
-    default_intensity = float(current_defaults.get("intensity", selected.get("recommended_intensity", 1.0)))
+    default_policy_text = str(current_defaults.get("policy_text", "请输入您想要测试的政策文本，例如：'央行宣布降息降准...'"))
+    default_intensity = float(current_defaults.get("intensity", 1.0))
     default_total_days = int(current_defaults.get("total_days", 100))
     default_effective_day = int(current_defaults.get("effective_day", 1))
     default_half_life_days = int(current_defaults.get("half_life_days", 30))
-    default_rumor_noise = bool(current_defaults.get("rumor_noise", selected.get("default_rumor_noise", False)))
+    default_rumor_noise = bool(current_defaults.get("rumor_noise", False))
     index_label_default = str(current_defaults.get("index_label", list(INDEX_BENCHMARK_OPTIONS.keys())[0]))
     if index_label_default not in INDEX_BENCHMARK_OPTIONS:
         index_label_default = list(INDEX_BENCHMARK_OPTIONS.keys())[0]
@@ -2731,18 +2726,9 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
     with setup_cols[0]:
         st.markdown("### 仿真设置")
         with st.form("policy_lab_start_form"):
-            policy_name = st.text_input("政策名称", value=default_policy_name, key="policy_lab_policy_name_input")
-            policy_text = st.text_area("政策文本", value=default_policy_text, height=120, key="policy_lab_policy_text_input")
-            policy_type_options = list(POLICY_TYPE_OPTIONS.keys())
-            policy_type_index = policy_type_options.index(default_policy_type) if default_policy_type in policy_type_options else 0
-            policy_type = st.selectbox(
-                "政策类型",
-                options=policy_type_options,
-                index=policy_type_index,
-                key="policy_lab_policy_type_input",
-            )
+            policy_text = st.text_area("政策文本", value=default_policy_text, height=180, key="policy_lab_policy_text_input")
             intensity = st.slider(
-                "政策强度",
+                "政策基础强度",
                 min_value=0.2,
                 max_value=2.0,
                 value=float(default_intensity),
@@ -2758,7 +2744,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                 key="policy_lab_total_days_input",
             )
             effective_day = st.number_input(
-                "初始政策生效日",
+                "政策生效日",
                 min_value=1,
                 max_value=max(1, int(total_days)),
                 value=max(1, min(int(total_days), int(default_effective_day))),
@@ -2774,12 +2760,12 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                 key="policy_lab_half_life_input",
             )
             rumor_noise = st.checkbox(
-                "注入传言噪声",
+                "包含传言噪声",
                 value=bool(default_rumor_noise),
                 key="policy_lab_rumor_noise_input",
             )
             index_label = st.selectbox(
-                "指数基准",
+                "对比指数基准",
                 options=list(INDEX_BENCHMARK_OPTIONS.keys()),
                 index=list(INDEX_BENCHMARK_OPTIONS.keys()).index(index_label_default),
                 key="policy_lab_index_label_input",
@@ -2792,7 +2778,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                 step=20,
                 key="policy_lab_history_window_input",
             )
-            start_clicked = st.form_submit_button("开始仿真", type="primary", use_container_width=True)
+            start_clicked = st.form_submit_button("开始推演", type="primary", use_container_width=True)
 
     def _store_session(updated_session: Optional[Dict[str, Any]]) -> None:
         st.session_state["policy_lab_session"] = updated_session
@@ -2806,9 +2792,9 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
             if real_history.empty:
                 st.info("未获取到真实指数数据，已切换到仿真基准。")
             session = _policy_session_new(
-                policy_name=policy_name,
+                policy_name="自定义政策仿真",
                 policy_text=policy_text,
-                policy_type=policy_type,
+                policy_type="综合政策",
                 total_days=int(total_days),
                 intensity=float(intensity),
                 effective_day=int(effective_day),
@@ -3079,11 +3065,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
         append_cols = st.columns(2)
         with append_cols[0]:
             with st.form(f"policy_lab_append_form_{presentation_mode}"):
-                append_policy_name = st.text_input(
-                    "追加政策名称",
-                    value=f"追加政策 {len(session.get('policy_events', [])) + 1}",
-                    key=f"policy_lab_append_policy_name_{presentation_mode}",
-                )
+                append_policy_name = "追加政策"
                 append_policy_text = st.text_area(
                     "追加政策文本",
                     value="",
@@ -3091,13 +3073,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                     key=f"policy_lab_append_policy_text_{presentation_mode}",
                     placeholder="请输入希望在未来交易日追加生效的政策文本。",
                 )
-                append_policy_type_options = list(POLICY_TYPE_OPTIONS.keys())
-                append_policy_type = st.selectbox(
-                    "政策类型",
-                    options=append_policy_type_options,
-                    index=0,
-                    key=f"policy_lab_append_policy_type_{presentation_mode}",
-                )
+                append_policy_type = "综合政策"
                 append_effective_day = st.number_input(
                     "生效交易日",
                     min_value=current_day + 1,

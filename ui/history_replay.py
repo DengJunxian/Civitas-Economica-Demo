@@ -777,9 +777,9 @@ def _render_agent_replay_workspace(
         st.markdown(
             """
             <div class="hero-panel">
-              <div class="hero-kicker">新闻驱动政策仿真回放</div>
-              <h1>政策因子回测/历史对照回测</h1>
-              <p>因子模式兼容旧版界面；新闻驱动模式按交易日注入主要新闻并输出政策仿真路径。</p>
+              <div class="hero-kicker">历史回测</div>
+              <h1>自动化历史重演与验证</h1>
+              <p>系统由大模型自动抓取回测时间段里的主要经济政策与重大新闻，自动作为“被测试的政策”输入，并在同一张图中与真实大盘走势进行比较，验证仿真效果。</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -789,63 +789,35 @@ def _render_agent_replay_workspace(
     if "history_replay_result" not in st.session_state:
         st.session_state.history_replay_result = None
 
-    template_map = {item["title"]: item for item in _load_policy_templates()}
-    history_case_templates = _load_history_case_templates()
-    history_case_map = {item["title"]: item for item in history_case_templates}
-    selected_template_label = st.selectbox("模板", options=list(template_map.keys()), index=0)
-    selected_template = template_map[selected_template_label]
-    selected_history_case_label = st.selectbox("历史案例", options=["无"] + list(history_case_map.keys()), index=0)
-    selected_history_case = history_case_map.get(selected_history_case_label) if selected_history_case_label != "无" else None
-    entry_mode = str(st.session_state.get("history_replay_entry_mode", "factor")).strip().lower()
-    default_engine_mode = "agent" if entry_mode == "agent" else "factor"
-
     default_start, default_end = _default_window()
-    if selected_history_case:
-        case_start = pd.to_datetime(selected_history_case.get("start_date"), errors="coerce")
-        case_end = pd.to_datetime(selected_history_case.get("end_date"), errors="coerce")
-        if pd.notna(case_start):
-            default_start = case_start.date()
-        if pd.notna(case_end):
-            default_end = case_end.date()
+
     with st.form("history_replay_form"):
         col1, col2 = st.columns([1.2, 1.0])
         with col1:
             start_date = st.date_input("开始日期", value=default_start)
             end_date = st.date_input("结束日期", value=default_end)
-            default_symbol_index = 1
-            if selected_history_case and selected_history_case.get("symbol"):
-                resolved_index = next(
-                    (
-                        idx
-                        for idx, value in enumerate(INDEX_OPTIONS.values())
-                        if value == selected_history_case.get("symbol")
-                    ),
-                    default_symbol_index,
-                )
-                default_symbol_index = resolved_index
-            symbol_label = st.selectbox("指数", options=list(INDEX_OPTIONS.keys()), index=default_symbol_index)
-            policy_name_default = f"{selected_template['title']} 历史回放"
-            if selected_history_case:
-                policy_name_default = f"{selected_history_case['title']} 回放"
-            policy_text_default = str(selected_history_case.get("policy_text")) if selected_history_case else str(selected_template["policy_text"])
-            policy_name = st.text_input("策略名称", value=policy_name_default)
-            policy_text = st.text_area("政策文本", value=policy_text_default, height=110)
+            symbol_label = st.selectbox("对比指数基准", options=list(INDEX_OPTIONS.keys()), index=1)
+            
+            policy_name = st.text_input("测试任务名称", value=f"区间历史回测: {start_date} ~ {end_date}")
+            
+            st.info("💡 仿真引擎将根据选定日期区间，自动让大模型抓取期间内主要经济政策与重大新闻...")
+            policy_text = st.text_area("自动抓取结果/大语言模型提取的区间政策总则", 
+                                       value="[点击“运行历史回放”后，大语言模型将自动总结该期间关键经济工作会议定调及重要金融政策作为输入]", 
+                                       height=110,
+                                       help="该项将作为总体仿真先验条件输入")
         with col2:
-            default_background = selected_history_case.get("background") if selected_history_case else list(BACKGROUND_TEMPLATES.keys())[1]
             background = st.selectbox(
-                "市场背景",
+                "市场背景基调",
                 options=list(BACKGROUND_TEMPLATES.keys()),
-                index=list(BACKGROUND_TEMPLATES.keys()).index(default_background) if default_background in BACKGROUND_TEMPLATES else 1,
+                index=1,
             )
             strength = st.slider(
-                "回放强度",
+                "政策影响传导强度",
                 min_value=0.3,
-                max_value=1.6,
-                value=float((selected_history_case or selected_template).get("recommended_intensity", 1.0)),
+                max_value=2.0,
+                value=1.5,
                 step=0.1,
             )
-            rebalance_frequency = st.select_slider("调仓频率", options=[1, 2, 3, 5, 10], value=5)
-            lookback = st.slider("回看窗口", min_value=10, max_value=80, value=20, step=5)
             engine_mode = "agent"
             enable_agent_replay = True
             news_source_strategy = st.selectbox(
@@ -881,8 +853,8 @@ def _render_agent_replay_workspace(
             end_date=str(end_date),
             period_days=0,
             strategy_name="portfolio_system",
-            lookback=int(lookback),
-            rebalance_frequency=int(rebalance_frequency),
+            lookback=20,
+            rebalance_frequency=5,
             max_position=1.0,
             policy_shock=policy_score,
             policy_text=policy_text,

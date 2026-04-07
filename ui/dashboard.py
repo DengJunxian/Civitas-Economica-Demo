@@ -737,8 +737,10 @@ def render_financial_health_dashboard(metrics_dict: Dict[str, Any], key_prefix: 
         domain={'row': 0, 'column': 2}
     ))
     
+    layout_kwargs = dict(PLOTLY_DARK_LAYOUT)
+    layout_kwargs.pop("margin", None)
     fig.update_layout(
-        **PLOTLY_DARK_LAYOUT,
+        **layout_kwargs,
         grid={'rows': 1, 'columns': 3, 'pattern': "independent"},
         height=220,
         margin=dict(l=10, r=10, t=30, b=10)

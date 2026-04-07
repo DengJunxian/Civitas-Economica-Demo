@@ -987,6 +987,7 @@ def _render_agent_replay_workspace(
             st.warning(fallback_reason)
 
         baseline_result = None
+        result: Optional[BacktestResult] = None
         try:
             result = _run_engine_with_progress(
                 engine,
@@ -1007,10 +1008,37 @@ def _render_agent_replay_workspace(
                     status,
                     "无政策基线",
                 )
+        except Exception as exc:
+            if resolved_mode == "agent":
+                st.warning(f"新闻驱动回测执行失败，已自动回退到因子回测。失败原因：{exc}")
+                try:
+                    status.info("正在执行因子回测（自动回退）...")
+                    fallback_config = BacktestConfig(**{**config.__dict__})
+                    fallback_config.feature_flags = {**dict(config.feature_flags or {}), "agent_replay": False}
+                    fallback_engine = FactorBacktestEngine(fallback_config)
+                    result = _run_engine_with_progress(
+                        fallback_engine,
+                        0.0,
+                        1.0,
+                        progress,
+                        status,
+                        "因子回测（自动回退）",
+                    )
+                    resolved_mode = "factor"
+                    config = fallback_config
+                except Exception as fallback_exc:
+                    st.error(f"回测执行失败：新闻驱动与因子模式均不可用。错误：{fallback_exc}")
+                    return
+            else:
+                st.error(f"回测执行失败：{exc}")
+                return
         finally:
             progress.empty()
             status.empty()
 
+        if result is None:
+            st.error("未能生成回测结果，请稍后重试。")
+            return
         _apply_moderate_calibration(result)
 
         bundle = {
@@ -1146,6 +1174,19 @@ def render_history_replay(ctrl: Any = None) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+    with st.expander("查看本次“被测试政策”文本", expanded=False):
+        if str(bundle.get("manual_policy_text", "")).strip():
+            st.caption("已使用你手动输入的覆盖文本。")
+        else:
+            st.caption("已使用系统自动抓取并总结的政策与新闻文本。")
+        st.text_area(
+            "政策文本",
+            value=str(bundle.get("policy_text", "")),
+            height=140,
+            key=f"history_replay_policy_text_{bundle['start_date']}_{bundle['end_date']}",
+            disabled=True,
+        )
 
     _render_agent_replay_workspace(
         show_header=False,

@@ -253,7 +253,7 @@ def _render_value_bridge_tab() -> None:
 
 def _init_state() -> None:
     defaults: Dict[str, Any] = {
-        "entry": "系统说明",
+        "entry": "政策试验台",
         "controller": None,
         "runtime_mode": LIVE_MODE,
         "competition_mode": "",
@@ -286,9 +286,9 @@ def _init_state() -> None:
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
-    st.session_state.entry = _normalize_entry(str(st.session_state.get("entry", "系统说明")))
+    st.session_state.entry = _normalize_entry(str(st.session_state.get("entry", "政策试验台")))
     if st.session_state.entry not in ENTRY_POINTS:
-        st.session_state.entry = "系统说明"
+        st.session_state.entry = "政策试验台"
     _sync_runtime_mode_profile()
 
 
@@ -319,6 +319,26 @@ def _render_top_entry_selector() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+    quick_a, quick_b, quick_c = st.columns([1.2, 1.2, 2.0])
+    with quick_a:
+        if st.button(
+            "进入政策试验台",
+            key="top_entry_policy_lab",
+            use_container_width=True,
+            type="primary" if st.session_state.entry == "政策试验台" else "secondary",
+        ):
+            st.session_state.entry = "政策试验台"
+    with quick_b:
+        if st.button(
+            "进入历史回测",
+            key="top_entry_history_replay",
+            use_container_width=True,
+            type="primary" if st.session_state.entry == "历史回测" else "secondary",
+        ):
+            st.session_state.entry = "历史回测"
+    with quick_c:
+        st.caption("核心入口优先：先在政策试验台看机制，再到历史回测做历史区间验证。")
 
 
 def _ensure_demo_loaded() -> None:
@@ -546,9 +566,10 @@ def _render_sidebar_global() -> None:
         )
         
         menu_groups = {
-            "🚀 入门指导 (Onboarding)": ["系统说明"],
-            "⚙️ 核心推演 (Simulation)": ["政策试验台", "政策A/B推演"],
-            "📊 深度复盘 (Analytics)": ["历史回测", "监管优化", "真实性报告", "高级分析"]
+            "⭐ 重点功能 (Core)": ["政策试验台", "历史回测"],
+            "🧪 扩展推演 (Extended)": ["政策A/B推演", "监管优化"],
+            "📊 评估分析 (Analysis)": ["真实性报告", "高级分析"],
+            "📘 系统说明 (Guide)": ["系统说明"],
         }
 
         for group, entries in menu_groups.items():

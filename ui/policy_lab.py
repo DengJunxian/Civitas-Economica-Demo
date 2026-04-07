@@ -1948,17 +1948,23 @@ def _fallback_policy_narrative(policy_text: str, summary: Dict[str, float], pack
     lag_days = int(explanation.get("expected_lag_days", 0) or 0)
     side_effects = [str(item) for item in explanation.get("side_effects", []) if str(item).strip()]
     risk_tip = "、".join(side_effects[:2]) if side_effects else "短期波动可能放大，需关注情绪过冲。"
-    return "\n".join(
+    policy_core = str(policy_text or "").strip()
+    if len(policy_core) > 140:
+        policy_core = f"{policy_core[:140]}..."
+    return "\n\n".join(
         [
-            f"**一句话结论**：{headline}",
-            f"- 这项政策的核心目标是：{str(policy_text or '').strip()[:120]}",
-            f"- 主要传导路径：{path_text}",
-            f"- 重点受影响主体：{_top_effect_text(list(explanation.get('affected_agents', []) or []))}",
-            f"- 重点受影响行业：{_top_effect_text(list(explanation.get('affected_sectors', []) or []))}",
-            f"- 重点受影响因子：{_top_effect_text(list(explanation.get('affected_factors', []) or []))}",
-            f"- 市场结果指向：{_top_effect_text(list(explanation.get('market_results', []) or []))}",
-            f"- 仿真表现：收益率 {summary.get('return_pct', 0.0):.2%}，最大回撤 {summary.get('max_drawdown', 0.0):.2%}，波动率 {summary.get('volatility', 0.0):.4f}",
-            f"- 预计传导时滞：约 {lag_days} 天；风险提示：{risk_tip}",
+            f"从政策主线看，这次输入的政策重点是“{policy_core or '未提供政策文本'}”，整体判断是：{headline}",
+            (
+                f"在传导机制上，政策影响会沿着“{path_text}”逐步扩散，首先改变关键主体的交易预期，"
+                f"再通过资金再配置影响板块和指数表现。当前受影响较明显的主体包括"
+                f"{_top_effect_text(list(explanation.get('affected_agents', []) or []))}，"
+                f"受影响较明显的行业包括{_top_effect_text(list(explanation.get('affected_sectors', []) or []))}。"
+            ),
+            (
+                f"从仿真结果看，区间收益约为 {summary.get('return_pct', 0.0):.2%}，最大回撤约为 "
+                f"{summary.get('max_drawdown', 0.0):.2%}，波动水平约为 {summary.get('volatility', 0.0):.4f}。"
+                f"预计主要影响会在约 {lag_days} 天内逐步显现，需重点关注：{risk_tip}"
+            ),
         ]
     )
 
@@ -1984,15 +1990,12 @@ def _llm_policy_narrative(
     }
     prompt = "\n".join(
         [
-            "请把下面的政策仿真结果写成面向评委的中文自然语言解读。",
-            "要求体现：快思考/慢思考切换、政策委员会防幻觉、订单簿撮合反馈。",
-            "要求：不要输出 JSON、代码块、键名，必须严格按格式输出。",
-            "【一句话结论】",
-            "【政策如何影响市场】(3-4条)",
-            "【这组结果为什么可信】(2条)",
-            "【风险提示】(1条)",
-            "【建议评委关注的指标】(2条)",
-            "语言请简洁、可直接朗读。",
+            "请基于以下政策仿真信息，输出一段中文自然语言评估解读。",
+            "输出要求：",
+            "1) 只用中文段落，不要 JSON、代码块、键值对、项目符号、标题标签。",
+            "2) 先说明政策主线，再说明对交易行为和指数路径的影响，最后说明风险和建议关注指标。",
+            "3) 语言要清晰、专业、易懂，可直接用于答辩口头讲解。",
+            "4) 避免英文缩写和术语堆砌。",
             f"数据：{json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str)}",
         ]
     )
@@ -2003,8 +2006,7 @@ def _llm_policy_narrative(
             backend.generate(
                 prompt,
                 system_prompt=(
-                    "你是政策风洞答辩讲解专家，强调DeepSeek/智谱双路路由、"
-                    "快慢思考触发、委员会防幻觉与可解释市场传导。"
+                    "你是政策评估讲解专家，请用自然、严谨、可解释的中文进行表述。"
                 ),
                 timeout_budget=20.0,
             )
@@ -2101,6 +2103,8 @@ def _get_llm_visual_interpretation(prompt: str, cache_key: str, runtime_profile:
         response = str(backend.generate(prompt, system_prompt="你是顶尖量化分析师。用一段精炼且专业的中文（不超过100字）解读图表趋势。直接返回内容，禁用Markdown、分点和换行。")).strip()
         if not response or response.startswith("[API Error]"):
             return ""
+        if response.lstrip().startswith("{") or response.lstrip().startswith("["):
+            return ""
         cache[cache_key] = response
         return response
     except Exception:
@@ -2141,7 +2145,7 @@ def _render_agent_disagreement_chart(package_dict: Dict[str, Any], policy_text: 
     prompt = f"政策：{policy_text}，投资者影响得分为：{json.dumps(agent_effects, ensure_ascii=False)}。一句话解释谁最看好、谁最看空及原因。"
     interpretation = _get_llm_visual_interpretation(prompt, cache_key, runtime_profile)
     if interpretation:
-        st.info(f"🤖 **AI 洞察**：{interpretation}")
+        st.info(f"模型洞察：{interpretation}")
 
 
 def _render_role_orderflow_waterfall(frame: pd.DataFrame, package_dict: Dict[str, Any], policy_text: str, runtime_profile: RuntimeModeProfile) -> None:
@@ -2181,7 +2185,7 @@ def _render_role_orderflow_waterfall(frame: pd.DataFrame, package_dict: Dict[str
     prompt = f"政策：{policy_text}，预期订单流为：{json.dumps(rows, ensure_ascii=False)}。一句话概述资金买卖主导力量是谁，是追高还是潜伏？"
     interpretation = _get_llm_visual_interpretation(prompt, cache_key, runtime_profile)
     if interpretation:
-        st.info(f"🤖 **AI 洞察**：{interpretation}")
+        st.info(f"模型洞察：{interpretation}")
 
 
 def _render_sector_rotation_heatmap(package_dict: Dict[str, Any], policy_text: str, runtime_profile: RuntimeModeProfile) -> None:
@@ -2223,7 +2227,7 @@ def _render_sector_rotation_heatmap(package_dict: Dict[str, Any], policy_text: s
     prompt = f"政策：{policy_text}，行业影响：{json.dumps(ordered, ensure_ascii=False)}。一句话总结：哪个板块最受益，哪个最承压？为什么出现这种轮动？"
     interpretation = _get_llm_visual_interpretation(prompt, cache_key, runtime_profile)
     if interpretation:
-        st.info(f"🤖 **AI 洞察**：{interpretation}")
+        st.info(f"模型洞察：{interpretation}")
 
 
 def _render_regulation_counterfactual_panel(counterfactual: Dict[str, Any]) -> None:
@@ -2726,58 +2730,65 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
     with setup_cols[0]:
         st.markdown("### 仿真设置")
         with st.form("policy_lab_start_form"):
-            policy_text = st.text_area("政策文本", value=default_policy_text, height=180, key="policy_lab_policy_text_input")
-            intensity = st.slider(
-                "政策基础强度",
-                min_value=0.2,
-                max_value=2.0,
-                value=float(default_intensity),
-                step=0.1,
-                key="policy_lab_policy_intensity_input",
+            policy_text = st.text_area(
+                "政策文本",
+                value=default_policy_text,
+                height=180,
+                key="policy_lab_policy_text_input",
+                help="直接输入要试验的政策文本，系统会自动推理解读并驱动多智能体交易仿真。",
             )
-            total_days = st.slider(
-                "仿真天数",
-                min_value=10,
-                max_value=180,
-                value=max(10, min(180, int(default_total_days))),
-                step=5,
-                key="policy_lab_total_days_input",
-            )
-            effective_day = st.number_input(
-                "政策生效日",
-                min_value=1,
-                max_value=max(1, int(total_days)),
-                value=max(1, min(int(total_days), int(default_effective_day))),
-                step=1,
-                key="policy_lab_effective_day_input",
-            )
-            half_life_days = st.slider(
-                "政策影响半衰期（交易日）",
-                min_value=1,
-                max_value=120,
-                value=max(1, min(120, int(default_half_life_days))),
-                step=1,
-                key="policy_lab_half_life_input",
-            )
-            rumor_noise = st.checkbox(
-                "包含传言噪声",
-                value=bool(default_rumor_noise),
-                key="policy_lab_rumor_noise_input",
-            )
-            index_label = st.selectbox(
-                "对比指数基准",
-                options=list(INDEX_BENCHMARK_OPTIONS.keys()),
-                index=list(INDEX_BENCHMARK_OPTIONS.keys()).index(index_label_default),
-                key="policy_lab_index_label_input",
-            )
-            history_window_days = st.slider(
-                "真实基准回看天数",
-                min_value=60,
-                max_value=360,
-                value=int(current_defaults.get("history_window_days", 180)),
-                step=20,
-                key="policy_lab_history_window_input",
-            )
+            with st.expander("高级设置（可选）", expanded=False):
+                intensity = st.slider(
+                    "政策基础强度",
+                    min_value=0.2,
+                    max_value=2.0,
+                    value=float(default_intensity),
+                    step=0.1,
+                    key="policy_lab_policy_intensity_input",
+                )
+                total_days = st.slider(
+                    "仿真天数",
+                    min_value=10,
+                    max_value=180,
+                    value=max(10, min(180, int(default_total_days))),
+                    step=5,
+                    key="policy_lab_total_days_input",
+                )
+                effective_day = st.number_input(
+                    "政策生效日",
+                    min_value=1,
+                    max_value=max(1, int(total_days)),
+                    value=max(1, min(int(total_days), int(default_effective_day))),
+                    step=1,
+                    key="policy_lab_effective_day_input",
+                )
+                half_life_days = st.slider(
+                    "政策影响半衰期（交易日）",
+                    min_value=1,
+                    max_value=120,
+                    value=max(1, min(120, int(default_half_life_days))),
+                    step=1,
+                    key="policy_lab_half_life_input",
+                )
+                rumor_noise = st.checkbox(
+                    "包含传言噪声",
+                    value=bool(default_rumor_noise),
+                    key="policy_lab_rumor_noise_input",
+                )
+                index_label = st.selectbox(
+                    "对比指数基准",
+                    options=list(INDEX_BENCHMARK_OPTIONS.keys()),
+                    index=list(INDEX_BENCHMARK_OPTIONS.keys()).index(index_label_default),
+                    key="policy_lab_index_label_input",
+                )
+                history_window_days = st.slider(
+                    "真实基准回看天数",
+                    min_value=60,
+                    max_value=360,
+                    value=int(current_defaults.get("history_window_days", 180)),
+                    step=20,
+                    key="policy_lab_history_window_input",
+                )
             start_clicked = st.form_submit_button("开始推演", type="primary", use_container_width=True)
 
     def _store_session(updated_session: Optional[Dict[str, Any]]) -> None:
@@ -2951,7 +2962,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
 
     package_dict = _policy_session_policy_package(session)
     market_tab, behavior_tab, agent_tab, timeline_tab, report_tab = st.tabs(
-        ["市场走势", "行为金融", "Agent fMRI", "政策时间轴", "政策报告"]
+        ["市场走势", "行为金融", "智能体行为剖面", "政策时间轴", "政策报告"]
     )
 
     with market_tab:
@@ -2999,52 +3010,15 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                 runtime_profile,
             )
             
-            if "【一句话结论】" in narrative:
-                conclusion = "等待 AI 生成结论..."
-                impacts, trust, risks, metrics_list = [], [], [], []
-                
-                parts = narrative.split("【")
-                for p in parts:
-                    if p.startswith("一句话结论】"):
-                        conclusion = p.replace("一句话结论】", "").strip()
-                    elif p.startswith("政策如何影响市场】"):
-                        impacts = [x.strip("- ") for x in p.replace("政策如何影响市场】", "").strip().split("\n") if x.strip("- ")]
-                    elif p.startswith("这组结果为什么可信】"):
-                        trust = [x.strip("- ") for x in p.replace("这组结果为什么可信】", "").strip().split("\n") if x.strip("- ")]
-                    elif p.startswith("风险提示】"):
-                        risks = [x.strip("- ") for x in p.replace("风险提示】", "").strip().split("\n") if x.strip("- ")]
-                    elif p.startswith("建议评委关注的指标】") or p.startswith("建议关注的指标】"):
-                        metrics_list = [x.strip("- ") for x in p.replace("建议评委关注的指标】", "").replace("建议关注的指标】", "").strip().split("\n") if x.strip("- ")]
-                
-                st.markdown(
-                    f'''
-                    <div style="background: linear-gradient(135deg, #1e1e24 0%, #15151a 100%); border-left: 4px solid #3b82f6; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                        <h3 style="margin-top:0; color: #60a5fa; font-size: 1.1rem; font-weight: 600;">🎯 核心结论</h3>
-                        <p style="font-size: 1.2rem; font-weight: bold; color: #f8fafc; margin-bottom: 0;">{conclusion}</p>
-                    </div>
-                    ''', unsafe_allow_html=True
-                )
-                
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.markdown('##### 📊 市场传导链路')
-                    for imp in impacts:
-                        st.markdown(f'<div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); padding: 10px; border-radius: 6px; margin-bottom: 8px; color: #cbd5e1; font-size: 0.95rem;">{imp}</div>', unsafe_allow_html=True)
-                        
-                    st.markdown('##### ✅ 仿真可信度依据')
-                    for t in trust:
-                        st.markdown(f'<div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); padding: 10px; border-radius: 6px; margin-bottom: 8px; color: #cbd5e1; font-size: 0.95rem;">{t}</div>', unsafe_allow_html=True)
-                
-                with c2:
-                    st.markdown('##### ⚠️ 重点风险提示')
-                    for r in risks:
-                        st.markdown(f'<div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); padding: 10px; border-radius: 6px; margin-bottom: 8px; color: #cbd5e1; font-size: 0.95rem;">{r}</div>', unsafe_allow_html=True)
-                        
-                    st.markdown('##### 📋 核心监测指标')
-                    for m in metrics_list:
-                        st.markdown(f'<div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); padding: 10px; border-radius: 6px; margin-bottom: 8px; color: #cbd5e1; font-size: 0.95rem;">{m}</div>', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<div style="background: #1e1e24; padding: 20px; border-radius: 8px; color: #cbd5e1; border-left: 4px solid #64748b;">{narrative}</div>', unsafe_allow_html=True)
+            narrative_html = str(narrative or "暂无可用解读。").replace("\n", "<br>")
+            st.markdown(
+                f"""
+                <div style="background: #1e1e24; padding: 20px; border-radius: 8px; color: #cbd5e1; border-left: 4px solid #64748b;">
+                    {narrative_html}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     with behavior_tab:
         _render_behavior_finance_panel(session_frame, summary)

@@ -13,10 +13,11 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.backtester import BacktestConfig, BacktestResult, FactorBacktestEngine
+from core.history_news import HistoryNewsService
 from core.news_policy_replay import NewsDrivenPolicyReplayEngine
 from ui.backtest_panel import render_backtest_panel
 from ui import dashboard as dashboard_ui
-from ui.policy_lab import _compile_scaled_shock, _load_policy_templates
+from ui.policy_lab import _compile_scaled_shock
 from ui.reporting import official_report_meta, write_report_artifacts
 
 
@@ -39,7 +40,7 @@ HISTORY_REPORT_DIR = Path("outputs") / "history_reports"
 HISTORY_CASE_GLOB = "history_case_*.json"
 HISTORY_WORKSPACE_LABELS = {
     "factor": "智能因子回测",
-    "agent": "新闻驱动政策仿真回放",
+    "agent": "历史回测政策仿真",
 }
 
 
@@ -311,7 +312,74 @@ def _build_bias_explanation(metrics: Dict[str, float], policy_name: str) -> str:
 
 
 def _engine_mode_label(mode: str) -> str:
-    return "新闻驱动政策仿真模式" if mode == "agent" else "因子模式"
+    return "历史回测仿真模式" if mode == "agent" else "因子回测模式"
+
+
+def _fallback_period_policy_text(digest_rows: List[Dict[str, Any]], start_date: str, end_date: str, symbol: str) -> str:
+    if not digest_rows:
+        return f"{start_date} 至 {end_date} 期间，市场以存量博弈为主，建议按稳增长与流动性观察框架进行仿真。"
+    ranked = sorted(
+        digest_rows,
+        key=lambda item: abs(float(item.get("shock_score", 0.0) or 0.0)),
+        reverse=True,
+    )[:5]
+    segments: List[str] = []
+    for row in ranked:
+        day = str(row.get("date", "")).strip()
+        summary = str(row.get("summary", "")).strip()
+        if day and summary:
+            segments.append(f"{day}：{summary}")
+    if not segments:
+        segments = [str(row.get("summary", "")).strip() for row in ranked if str(row.get("summary", "")).strip()]
+    merged = "；".join(segments[:3])
+    return (
+        f"{start_date} 至 {end_date}（{symbol}）期间，主要政策与重大新闻脉络为：{merged}。"
+        "请据此评估对风险偏好、资金流向与指数波动的综合影响。"
+    )
+
+
+def _synthesize_period_policy_text(
+    *,
+    digest_rows: List[Dict[str, Any]],
+    start_date: str,
+    end_date: str,
+    symbol: str,
+) -> str:
+    fallback_text = _fallback_period_policy_text(digest_rows, start_date, end_date, symbol)
+    if not digest_rows:
+        return fallback_text
+    try:
+        from core.inference.api_backend import APIBackend
+    except Exception:
+        return fallback_text
+    prompt = "\n".join(
+        [
+            "请把以下历史区间内的主要经济政策与重大新闻，整理成“被测试政策文本”。",
+            "要求：输出一段可直接输入仿真引擎的中文自然语言，不要JSON、不要代码块、不要项目符号。",
+            "内容需包含：政策主线、市场冲击方向、影响交易行为的关键机制。",
+            f"区间：{start_date} 至 {end_date}",
+            f"指数：{symbol}",
+            f"事件摘要：{json.dumps(digest_rows[:12], ensure_ascii=False)}",
+        ]
+    )
+    try:
+        backend = APIBackend(model="deepseek-chat", max_tokens=280, temperature=0.2)
+        text = str(
+            backend.generate(
+                prompt,
+                system_prompt="你是宏观政策研究员，请输出清晰、严谨、可执行的中文政策解读。",
+                timeout_budget=15.0,
+                fallback_response="",
+            )
+            or ""
+        ).strip()
+    except Exception:
+        return fallback_text
+    if not text or text.startswith("[API Error]"):
+        return fallback_text
+    if text.lstrip().startswith("{") or text.lstrip().startswith("["):
+        return fallback_text
+    return text
 
 
 def _compute_result_summary(result: BacktestResult) -> Dict[str, float]:
@@ -333,7 +401,7 @@ def _select_replay_engine(config: BacktestConfig, engine_mode: str, feature_flag
         return (
             FactorBacktestEngine(config),
             "factor",
-            "新闻驱动仿真功能开关未开启，falling back to 因子模式。",
+            "新闻驱动仿真功能开关未开启，已回退到因子模式。",
         )
     return FactorBacktestEngine(config), "factor", ""
 
@@ -580,6 +648,8 @@ def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> 
         "report_meta": report_meta,
         "policy_name": bundle["policy_name"],
         "policy_text": bundle["policy_text"],
+        "auto_policy_text": bundle.get("auto_policy_text", ""),
+        "manual_policy_text": bundle.get("manual_policy_text", ""),
         "background": bundle["background"],
         "strength": bundle["strength"],
         "symbol_label": bundle["symbol_label"],
@@ -601,67 +671,69 @@ def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> 
         "score_adjustment_trace": result.metadata.get("score_adjustment_trace", []),
         "news_coverage": result.metadata.get("news_coverage", {}),
         "news_digest": result.metadata.get("news_digest", []),
+        "pre_news_coverage": bundle.get("pre_news_coverage", {}),
+        "pre_news_digest": bundle.get("pre_news_digest", []),
     }
     markdown = [
-        f"# History replay report: {bundle['policy_name']}",
+        f"# 历史回测报告：{bundle['policy_name']}",
         "",
-        f"- Report no: {report_meta['report_no']}",
-        f"- Date: {report_meta['date_cn']}",
-        f"- Engine mode: {bundle.get('engine_mode', 'factor')}",
-        f"- Feature flags: {bundle.get('feature_flags', {})}",
+        f"- 报告编号：{report_meta['report_no']}",
+        f"- 生成日期：{report_meta['date_cn']}",
+        f"- 仿真模式：{bundle.get('engine_mode', 'factor')}",
+        f"- 功能开关：{bundle.get('feature_flags', {})}",
         "",
-        "## Replay summary",
-        f"- Symbol: {bundle['symbol_label']}",
-        f"- Date window: {bundle['start_date']} to {bundle['end_date']}",
-        f"- Backdrop: {bundle['background']}",
-        f"- Intensity: {bundle['strength']:.1f}",
-        f"- Explanation: {_build_bias_explanation(metrics, bundle['policy_name'])}",
-        f"- Demo authenticity score: {float(result.metadata.get('demo_authenticity_score', 0.0) or 0.0):.0%}",
-        f"- Strict authenticity score: {float(result.metadata.get('strict_authenticity_score', 0.0) or 0.0):.0%}",
+        "## 回测摘要",
+        f"- 指数基准：{bundle['symbol_label']}",
+        f"- 时间窗口：{bundle['start_date']} 至 {bundle['end_date']}",
+        f"- 市场背景：{bundle['background']}",
+        f"- 传导强度：{bundle['strength']:.1f}",
+        f"- 偏差说明：{_build_bias_explanation(metrics, bundle['policy_name'])}",
+        f"- 展示优化分：{float(result.metadata.get('demo_authenticity_score', 0.0) or 0.0):.0%}",
+        f"- 严格评测分：{float(result.metadata.get('strict_authenticity_score', 0.0) or 0.0):.0%}",
         "",
-        "## Metrics",
-        f"- Trend alignment: {metrics['trend_alignment']:.0%}",
-        f"- Turning points: {metrics['turning_point_match']:.0%}",
-        f"- Drawdown gap: {metrics['drawdown_gap']:.2%}",
-        f"- Vol similarity: {metrics['vol_similarity']:.0%}",
-        f"- Response lag: {metrics['response_gap']:.0f} days",
+        "## 核心指标",
+        f"- 趋势一致性：{metrics['trend_alignment']:.0%}",
+        f"- 拐点匹配度：{metrics['turning_point_match']:.0%}",
+        f"- 回撤差距：{metrics['drawdown_gap']:.2%}",
+        f"- 波动相似度：{metrics['vol_similarity']:.0%}",
+        f"- 响应滞后：{metrics['response_gap']:.0f} 天",
         "",
-        "## Authenticity layers",
-        "### Path layer",
-        f"- Return correlation: {authenticity_layers['path'].get('return_correlation', 0.0):.3f}",
-        f"- Normalized RMSE: {authenticity_layers['path'].get('normalized_rmse', 0.0):.4f}",
-        "### Microstructure layer",
-        f"- Range fit: {authenticity_layers['microstructure'].get('range_fit', 0.0):.0%}",
-        f"- Volume fit: {authenticity_layers['microstructure'].get('volume_fit', 0.0):.3f}",
-        f"- Cancel-rate proxy: {authenticity_layers['microstructure'].get('cancel_rate_proxy', 0.0):.0%}",
-        "### Stylized facts layer",
-        f"- Tail fit: {authenticity_layers['stylized_facts'].get('tail_fit', 0.0):.0%}",
-        f"- Volatility clustering: {authenticity_layers['stylized_facts'].get('volatility_clustering', 0.0):.3f}",
-        f"- Regime-switch alignment: {authenticity_layers['stylized_facts'].get('regime_switch_alignment', 0.0):.0%}",
+        "## 拟真分层结果",
+        "### 路径层",
+        f"- 收益相关性：{authenticity_layers['path'].get('return_correlation', 0.0):.3f}",
+        f"- 标准化误差：{authenticity_layers['path'].get('normalized_rmse', 0.0):.4f}",
+        "### 微观结构层",
+        f"- 振幅拟合度：{authenticity_layers['microstructure'].get('range_fit', 0.0):.0%}",
+        f"- 成交量拟合度：{authenticity_layers['microstructure'].get('volume_fit', 0.0):.3f}",
+        f"- 撤单率代理：{authenticity_layers['microstructure'].get('cancel_rate_proxy', 0.0):.0%}",
+        "### 统计事实层",
+        f"- 尾部特征拟合：{authenticity_layers['stylized_facts'].get('tail_fit', 0.0):.0%}",
+        f"- 波动聚集度：{authenticity_layers['stylized_facts'].get('volatility_clustering', 0.0):.3f}",
+        f"- 状态切换一致性：{authenticity_layers['stylized_facts'].get('regime_switch_alignment', 0.0):.0%}",
         "",
-        "## News coverage",
-        f"- Coverage rate: {float(result.metadata.get('news_coverage', {}).get('coverage_rate', 0.0) or 0.0):.0%}",
-        f"- Days with news: {int(result.metadata.get('news_coverage', {}).get('days_with_news', 0) or 0)}",
-        f"- Selected news count: {int(result.metadata.get('news_coverage', {}).get('selected_news_count', 0) or 0)}",
+        "## 新闻覆盖情况",
+        f"- 覆盖率：{float(result.metadata.get('news_coverage', {}).get('coverage_rate', 0.0) or 0.0):.0%}",
+        f"- 有新闻交易日数：{int(result.metadata.get('news_coverage', {}).get('days_with_news', 0) or 0)}",
+        f"- 入选新闻条数：{int(result.metadata.get('news_coverage', {}).get('selected_news_count', 0) or 0)}",
     ]
     if baseline:
         markdown.extend(
             [
                 "",
-                "## Baseline comparison",
-                f"- Baseline return: {baseline.total_return:.2%}",
-                f"- Relative return: {result.total_return - baseline.total_return:+.2%}",
-                f"- Relative drawdown: {baseline.max_drawdown - result.max_drawdown:+.2%}",
+                "## 基线对照",
+                f"- 基线收益：{baseline.total_return:.2%}",
+                f"- 相对收益：{result.total_return - baseline.total_return:+.2%}",
+                f"- 相对回撤改善：{baseline.max_drawdown - result.max_drawdown:+.2%}",
             ]
         )
 
     markdown.extend(
         [
             "",
-            "## Risks",
-            "- Replay result is intended for defense, comparison, and calibration.",
-            "- Simulated prices in news mode come from policy-session closes, not equity scaling.",
-            "- All reproducibility info is recorded in the payload metadata.",
+            "## 风险提示",
+            "- 本结果用于机制验证、对照分析与答辩展示，不构成投资建议。",
+            "- 新闻模式下的仿真价格来自政策会话重演，不等同于真实逐笔成交复刻。",
+            "- 可复现信息已完整记录在报告载荷字段中。",
         ]
     )
 
@@ -798,13 +870,15 @@ def _render_agent_replay_workspace(
             end_date = st.date_input("结束日期", value=default_end)
             symbol_label = st.selectbox("对比指数基准", options=list(INDEX_OPTIONS.keys()), index=1)
             
-            policy_name = st.text_input("测试任务名称", value=f"区间历史回测: {start_date} ~ {end_date}")
+            policy_name = st.text_input("测试任务名称", value=f"历史回测: {start_date} ~ {end_date}")
             
-            st.info("💡 仿真引擎将根据选定日期区间，自动让大模型抓取期间内主要经济政策与重大新闻...")
-            policy_text = st.text_area("自动抓取结果/大语言模型提取的区间政策总则", 
-                                       value="[点击“运行历史回放”后，大语言模型将自动总结该期间关键经济工作会议定调及重要金融政策作为输入]", 
-                                       height=110,
-                                       help="该项将作为总体仿真先验条件输入")
+            st.info("系统会先自动抓取并总结该区间的主要经济政策与重大新闻，并作为“被测试政策”输入仿真。")
+            policy_text = st.text_area(
+                "手动覆盖政策文本（可选）",
+                value="",
+                height=110,
+                help="留空则自动使用模型提取结果；填写后将优先使用你输入的文本。",
+            )
         with col2:
             background = st.selectbox(
                 "市场背景基调",
@@ -836,7 +910,7 @@ def _render_agent_replay_workspace(
             )
             show_strict_details = st.toggle("展示严格指标明细", value=True)
             enable_baseline = False
-        submitted = st.form_submit_button("运行历史回放", use_container_width=True, type="primary")
+        submitted = st.form_submit_button("运行历史回测", use_container_width=True, type="primary")
 
     if submitted:
         if start_date >= end_date:
@@ -845,7 +919,45 @@ def _render_agent_replay_workspace(
 
         progress = st.progress(0.0)
         status = st.empty()
-        policy_score = _compile_policy_score(policy_text, strength, background)
+        status.info("正在抓取历史区间政策与重大新闻...")
+        digest_rows: List[Dict[str, Any]] = []
+        pre_news_coverage: Dict[str, Any] = {}
+        pre_news_digest: List[Dict[str, Any]] = []
+        try:
+            pre_news_bundle = HistoryNewsService().build_news_bundle(
+                start_date=str(start_date),
+                end_date=str(end_date),
+                symbol=INDEX_OPTIONS[symbol_label],
+                source_strategy=str(news_source_strategy),
+                scope="macro_index",
+                topk_per_day=int(news_topk_per_day),
+                persist=False,
+            )
+            digest_rows = pre_news_bundle.digest_rows()
+            pre_news_coverage = dict(pre_news_bundle.coverage or {})
+            pre_news_digest = digest_rows
+        except Exception:
+            digest_rows = []
+            pre_news_coverage = {}
+            pre_news_digest = []
+
+        auto_policy_text = _synthesize_period_policy_text(
+            digest_rows=digest_rows,
+            start_date=str(start_date),
+            end_date=str(end_date),
+            symbol=INDEX_OPTIONS[symbol_label],
+        )
+        manual_policy_text = str(policy_text or "").strip()
+        effective_policy_text = manual_policy_text or auto_policy_text
+        if not effective_policy_text.strip():
+            effective_policy_text = _fallback_period_policy_text(
+                digest_rows=[],
+                start_date=str(start_date),
+                end_date=str(end_date),
+                symbol=INDEX_OPTIONS[symbol_label],
+            )
+
+        policy_score = _compile_policy_score(effective_policy_text, strength, background)
         config = BacktestConfig(
             symbol=INDEX_OPTIONS[symbol_label],
             benchmark_symbol=INDEX_OPTIONS[symbol_label],
@@ -857,7 +969,7 @@ def _render_agent_replay_workspace(
             rebalance_frequency=5,
             max_position=1.0,
             policy_shock=policy_score,
-            policy_text=policy_text,
+            policy_text=effective_policy_text,
             sentiment_weight=0.55,
             civitas_factor_weight=0.45,
             news_source_strategy=str(news_source_strategy),
@@ -905,7 +1017,9 @@ def _render_agent_replay_workspace(
             "config": config,
             "engine_mode": resolved_mode,
             "policy_name": policy_name,
-            "policy_text": policy_text,
+            "policy_text": effective_policy_text,
+            "auto_policy_text": auto_policy_text,
+            "manual_policy_text": manual_policy_text,
             "background": background,
             "strength": strength,
             "symbol_label": symbol_label,
@@ -916,7 +1030,9 @@ def _render_agent_replay_workspace(
             "baseline_result": baseline_result,
             "metrics": _build_replay_metrics(result),
             "show_strict_details": bool(show_strict_details),
-            "history_case": selected_history_case.get("case_payload") if selected_history_case else None,
+            "history_case": None,
+            "pre_news_coverage": pre_news_coverage,
+            "pre_news_digest": pre_news_digest,
         }
         bundle["authenticity_layers"] = _build_authenticity_layers(result)
         bundle["chart_data"] = _build_authenticity_chart_data(result, bundle["authenticity_layers"], baseline_result)
@@ -926,7 +1042,7 @@ def _render_agent_replay_workspace(
 
     bundle = st.session_state.history_replay_result
     if not bundle:
-        st.info("选择时间窗口和回放模式后，点击运行历史回放。")
+        st.info("选择时间窗口后，点击“运行历史回测”。系统会自动抓取并总结该区间的政策与重大新闻。")
         return
 
     result: BacktestResult = bundle["result"]
@@ -998,7 +1114,7 @@ def _render_agent_replay_workspace(
             f"""
             <div class="summary-card">
               <div class="summary-value">{_build_bias_explanation(metrics, bundle['policy_name'])}</div>
-              <div class="summary-note">【系统提示】通过历史回放可以验证逻辑的一致性，但无法重溯所有边角事件，因此保留了可解释的容错区间。</div>
+              <div class="summary-note">【系统提示】通过历史回测可以验证逻辑的一致性，但无法重溯所有边角事件，因此保留了可解释的容错区间。</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1023,9 +1139,9 @@ def render_history_replay(ctrl: Any = None) -> None:
     st.markdown(
         """
         <div class="hero-panel">
-            <div class="hero-kicker">新闻驱动历史回测</div>
-            <h1>新闻驱动政策仿真与历史回看工作台</h1>
-            <p>重放特定历史窗口中的主要新闻、政策冲击与市场响应路径，并生成与真实大盘对照的仿真图表。（仅供教学科研与仿真评估）</p>
+            <div class="hero-kicker">历史回测</div>
+            <h1>政策仿真历史回测工作台</h1>
+            <p>自动抓取历史窗口内的主要经济政策与重大新闻，作为“被测试政策”输入仿真，并与真实大盘走势同图对比。（仅供教学科研与仿真评估）</p>
         </div>
         """,
         unsafe_allow_html=True,

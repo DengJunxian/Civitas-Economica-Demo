@@ -399,7 +399,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
 
 ## 功能模块
 - 政策试验台
-- 新闻驱动历史回测
+- 历史回测
 - 真实性报告
 - 政策 A/B 推演
 - 监管优化
@@ -453,7 +453,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
                 "scenario": scenario.name,
                 "generated_at": now,
             },
-            app_flow=["政策试验台", "新闻驱动历史回测", "真实性报告", "政策A/B推演", "监管优化"],
+            app_flow=["政策试验台", "历史回测", "真实性报告", "政策A/B推演", "监管优化"],
         )
         realism_payload = {
             "title": "真实性评估摘要",
@@ -602,7 +602,7 @@ def _render_sidebar_global() -> None:
             st.markdown(f"<div style='font-size: 12px; margin-top: 10px; color: #8aa0c2;'>{status} | 在线成功={online_success} | 降级={fallback_total} | 成功率={success_rate:.0%}</div>", unsafe_allow_html=True)
 
         st.markdown("---")
-        st.caption("建议先看“系统说明”建立整体认知，再进入政策试验台和历史回放，最后用“高级分析”回答追问。")
+        st.caption("建议先看“系统说明”建立整体认知，再进入政策试验台和历史回测，最后用“高级分析”回答追问。")
 
         if st.session_state.entry in {"真实性报告", "监管优化", "高级分析"}:
             scenarios = list_competition_scenarios()
@@ -753,7 +753,7 @@ def _render_system_guide() -> None:
         ),
         (
             "核心能力",
-            "同时具备前台演示、历史回放、真实性诊断和监管优化四类能力。",
+            "同时具备前台演示、历史回测、真实性诊断和监管优化四类能力。",
             ["多智能体市场仿真", "历史场景重放", "行为金融指标诊断"],
         ),
         (
@@ -781,7 +781,7 @@ def _render_system_guide() -> None:
     route_cards = [
         ("1. 系统说明", "先建立项目整体认知。", ["看项目定位", "看核心闭环", "看页面导航"]),
         ("2. 政策试验台", "输入政策并运行主演示。", ["展示K线与风险热度", "解释政策传导", "导出报告"]),
-        ("3. 新闻驱动历史回测", "证明项目不只是炫技界面。", ["切换因子/智能体工作台", "查看历史路径重放", "解释偏差说明"]),
+        ("3. 历史回测", "证明项目不只是炫技界面。", ["自动提炼政策新闻输入", "查看历史路径重放", "解释偏差说明"]),
         ("4. 高级分析", "回答“为什么可信”。", ["证据链", "微观结构图", "行为金融诊断"]),
     ]
     for col, (title, summary, bullets) in zip(route_cols, route_cards):
@@ -812,7 +812,7 @@ def _render_system_guide() -> None:
         (
             "面向答辩的页面",
             [
-                "新闻驱动历史回测：在同一工作台完成因子基准与智能体历史重放。",
+                "历史回测：在同一工作台自动抓取政策新闻并与真实大盘对照回测。",
                 "真实性报告/高级分析：解释哪里拟真、哪里仍有偏差。",
             ],
         ),
@@ -854,7 +854,7 @@ def main() -> None:
     if entry == "政策试验台":
         st.session_state.runtime_mode = DEMO_MODE
         _render_policy_lab_compatible("standard")
-    elif entry == "新闻驱动历史回测":
+    elif entry == "历史回测":
         st.session_state.runtime_mode = LIVE_MODE
         st.session_state["history_replay_entry_mode"] = str(
             st.session_state.get("history_replay_entry_mode", "factor")

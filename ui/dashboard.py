@@ -678,11 +678,11 @@ def render_orderflow_microstructure_panel(
     herding_proxy = float(metrics.get("herding_proxy", 0.0) or 0.0)
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Spread", f"{spread:.4f}")
-    c2.metric("Spread%", f"{spread_pct:.2%}")
-    c3.metric("DepthImb", f"{depth_imbalance:+.3f}")
-    c4.metric("Impact", f"{impact:.4f}")
-    c5.metric("Herding", f"{herding_proxy:.3f}")
+    c1.metric("买卖价差", f"{spread:.4f}")
+    c2.metric("价差占比", f"{spread_pct:.2%}")
+    c3.metric("深度失衡", f"{depth_imbalance:+.3f}")
+    c4.metric("价格冲击", f"{impact:.4f}")
+    c5.metric("羊群程度", f"{herding_proxy:.3f}")
 
 def render_financial_health_dashboard(metrics_dict: Dict[str, Any], key_prefix: str = "health") -> None:
     st.markdown("### 📊 实时金融异常指标监测", help="通过速度表盘直观反应市场在恐慌、羊群效应、流动性枯竭方面的风险情况。")
@@ -696,7 +696,7 @@ def render_financial_health_dashboard(metrics_dict: Dict[str, Any], key_prefix: 
     fig.add_trace(go.Indicator(
         mode="gauge+number",
         value=panic,
-        title={'text': "恐慌指数 (Panic)", 'font': {'size': 14, 'color': '#8aa0c2'}},
+        title={'text': "恐慌指数", 'font': {'size': 14, 'color': '#8aa0c2'}},
         gauge={'axis': {'range': [0, 1]},
                'bar': {'color': "rgba(250, 140, 22, 0.8)", 'line': {'width': 0}},
                'steps': [
@@ -711,7 +711,7 @@ def render_financial_health_dashboard(metrics_dict: Dict[str, Any], key_prefix: 
         mode="gauge+number",
         value=csad,
         number={'valueformat': '.3f'},
-        title={'text': "羊群效应 (CSAD)", 'font': {'size': 14, 'color': '#8aa0c2'}},
+        title={'text': "羊群效应（CSAD）", 'font': {'size': 14, 'color': '#8aa0c2'}},
         gauge={'axis': {'range': [0, 0.15]},
                'bar': {'color': "rgba(138, 43, 226, 0.8)", 'line': {'width': 0}},
                'steps': [
@@ -726,7 +726,7 @@ def render_financial_health_dashboard(metrics_dict: Dict[str, Any], key_prefix: 
         mode="gauge+number",
         value=imb,
         number={'valueformat': '+.2f'},
-        title={'text': "深度失衡 (Imbalance)", 'font': {'size': 14, 'color': '#8aa0c2'}},
+        title={'text': "深度失衡", 'font': {'size': 14, 'color': '#8aa0c2'}},
         gauge={'axis': {'range': [-1, 1]},
                'bar': {'color': "#1890ff", 'line': {'width': 0}},
                'steps': [
@@ -737,13 +737,13 @@ def render_financial_health_dashboard(metrics_dict: Dict[str, Any], key_prefix: 
         domain={'row': 0, 'column': 2}
     ))
     
-    layout_kwargs = dict(PLOTLY_DARK_LAYOUT)
-    layout_kwargs.pop("margin", None)
     fig.update_layout(
-        **layout_kwargs,
-        grid={'rows': 1, 'columns': 3, 'pattern': "independent"},
-        height=220,
-        margin=dict(l=10, r=10, t=30, b=10)
+        **{
+            **dict(PLOTLY_DARK_LAYOUT),
+            "grid": {'rows': 1, 'columns': 3, 'pattern': "independent"},
+            "height": 220,
+            "margin": dict(l=10, r=10, t=30, b=10),
+        }
     )
     
     st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_health_gauges")

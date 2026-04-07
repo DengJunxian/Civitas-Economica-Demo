@@ -107,3 +107,50 @@ def test_history_news_service_local_fallback_when_online_empty(tmp_path):
     digest = bundle.daily_digests[0]
     assert digest.summary
     assert -1.0 <= digest.shock_score <= 1.0
+
+
+def test_history_news_service_local_cache_backfill_and_reuse(tmp_path):
+    seed_path = Path(tmp_path) / "seed_events.jsonl"
+    cache_path = Path(tmp_path) / "history_news_cache.jsonl"
+    store = EventStore(root_dir=tmp_path / "event_store")
+    service = HistoryNewsService(event_store=store, seed_store_path=seed_path, local_cache_path=cache_path)
+    service._load_online_rows = lambda start_ts, end_ts: [
+        {
+            "title": "货币政策边际宽松，风险偏好回升",
+            "content": "指数出现修复性反弹",
+            "source": "online",
+            "source_url": "https://example.com/cache-1",
+            "published_at": pd.Timestamp("2020-04-01T06:00:00Z"),
+            "origin": "online:test",
+            "sentiment": 0.4,
+            "impact_level": "medium",
+            "confidence": 0.72,
+        }
+    ]
+
+    first = service.build_news_bundle(
+        start_date="2020-04-01",
+        end_date="2020-04-03",
+        symbol="sh000300",
+        source_strategy="mixed",
+        scope="macro_index",
+        topk_per_day=8,
+        persist=False,
+    )
+    assert first.persistence["local_cache"]["appended_count"] >= 1
+    assert cache_path.exists()
+
+    service._load_online_rows = lambda start_ts, end_ts: []
+    second = service.build_news_bundle(
+        start_date="2020-04-01",
+        end_date="2020-04-03",
+        symbol="sh000300",
+        source_strategy="mixed",
+        scope="macro_index",
+        topk_per_day=8,
+        persist=False,
+    )
+
+    assert second.coverage["local_cache_candidates"] >= 1
+    assert second.coverage["local_candidates"] >= 1
+    assert second.coverage["days_with_news"] >= 1

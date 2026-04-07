@@ -115,9 +115,11 @@ class HistoryNewsService:
         *,
         event_store: Optional[EventStore] = None,
         seed_store_path: str | Path = "data/seed_events.jsonl",
+        local_cache_path: str | Path = "data/history_news_cache.jsonl",
     ) -> None:
         self.event_store = event_store or EventStore()
         self.seed_store_path = Path(seed_store_path)
+        self.local_cache_path = Path(local_cache_path)
 
     def build_news_bundle(
         self,
@@ -129,6 +131,7 @@ class HistoryNewsService:
         scope: str = "macro_index",
         topk_per_day: int = 8,
         persist: bool = True,
+        persist_local_cache: bool = True,
         persist_dataset: str = "history_replay_news",
         scenario_prefix: str = "history_replay_news",
     ) -> HistoryNewsBundle:
@@ -140,10 +143,11 @@ class HistoryNewsService:
 
         online_rows: List[Dict[str, Any]] = []
         local_rows: List[Dict[str, Any]] = []
+        local_breakdown: Dict[str, int] = {}
         if strategy in {"mixed", "online"}:
             online_rows = self._load_online_rows(start_ts, end_ts)
         if strategy in {"mixed", "local"}:
-            local_rows = self._load_local_rows(start_ts, end_ts)
+            local_rows, local_breakdown = self._load_local_rows(start_ts, end_ts)
 
         merged = self._dedupe_rows([*online_rows, *local_rows])
         filtered = self._filter_rows(merged, symbol=symbol, scope=scope)
@@ -160,6 +164,7 @@ class HistoryNewsService:
             end_ts=end_ts,
             online_rows=online_rows,
             local_rows=local_rows,
+            local_breakdown=local_breakdown,
         )
         persistence: Dict[str, Any] = {"enabled": bool(persist)}
         if persist:
@@ -171,6 +176,14 @@ class HistoryNewsService:
                 symbol=symbol,
                 scenario_prefix=scenario_prefix,
             )
+        if persist_local_cache:
+            persistence["local_cache"] = self._persist_local_cache_rows(grouped=grouped)
+        else:
+            persistence["local_cache"] = {
+                "enabled": False,
+                "path": str(self.local_cache_path),
+                "appended_count": 0,
+            }
 
         return HistoryNewsBundle(
             source_strategy=strategy,
@@ -203,11 +216,19 @@ class HistoryNewsService:
             rows.extend(self._normalize_frame_rows(frame, source_name=source_name, start_ts=start_ts, end_ts=end_ts))
         return rows
 
-    def _load_local_rows(self, start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> List[Dict[str, Any]]:
+    def _load_local_rows(self, start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+        seed_rows = self._load_seed_store_rows(start_ts, end_ts)
+        event_rows = self._load_event_store_rows(start_ts, end_ts)
+        cache_rows = self._load_local_cache_rows(start_ts, end_ts)
         rows: List[Dict[str, Any]] = []
-        rows.extend(self._load_seed_store_rows(start_ts, end_ts))
-        rows.extend(self._load_event_store_rows(start_ts, end_ts))
-        return rows
+        rows.extend(seed_rows)
+        rows.extend(event_rows)
+        rows.extend(cache_rows)
+        return rows, {
+            "seed_candidates": int(len(seed_rows)),
+            "event_store_candidates": int(len(event_rows)),
+            "local_cache_candidates": int(len(cache_rows)),
+        }
 
     def _load_seed_store_rows(self, start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> List[Dict[str, Any]]:
         if not self.seed_store_path.exists():
@@ -283,6 +304,42 @@ class HistoryNewsService:
                         "confidence": float(item.get("confidence", 0.75) or 0.75),
                     }
                 )
+        return rows
+
+    def _load_local_cache_rows(self, start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> List[Dict[str, Any]]:
+        if not self.local_cache_path.exists():
+            return []
+        rows: List[Dict[str, Any]] = []
+        try:
+            lines = self.local_cache_path.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            return rows
+        for line in lines:
+            text = str(line or "").strip()
+            if not text:
+                continue
+            try:
+                payload = json.loads(text)
+            except Exception:
+                continue
+            title = str(payload.get("title", "")).strip()
+            content = str(payload.get("summary", "") or payload.get("content", "")).strip()
+            published = self._parse_ts(payload.get("published_at") or payload.get("created_at"))
+            if published is None or published < start_ts or published > end_ts:
+                continue
+            rows.append(
+                {
+                    "title": title,
+                    "content": content or title,
+                    "source": str(payload.get("source", "local_cache")),
+                    "source_url": str(payload.get("source_url", "")),
+                    "published_at": published,
+                    "origin": "local_cache",
+                    "sentiment": float(payload.get("sentiment", 0.0) or 0.0),
+                    "impact_level": str(payload.get("impact_level", "")),
+                    "confidence": float(payload.get("confidence", 0.78) or 0.78),
+                }
+            )
         return rows
 
     def _candidate_local_datasets(self) -> List[str]:
@@ -548,6 +605,7 @@ class HistoryNewsService:
         end_ts: pd.Timestamp,
         online_rows: Sequence[Mapping[str, Any]],
         local_rows: Sequence[Mapping[str, Any]],
+        local_breakdown: Optional[Mapping[str, int]] = None,
     ) -> Dict[str, Any]:
         bdays = pd.bdate_range(start=start_ts.tz_convert(None).date(), end=end_ts.tz_convert(None).date())
         day_count = int(len(bdays))
@@ -564,7 +622,83 @@ class HistoryNewsService:
             "selected_news_count": int(sum(len(items) for items in grouped.values())),
             "online_candidates": int(len(online_rows)),
             "local_candidates": int(len(local_rows)),
+            "seed_candidates": int((local_breakdown or {}).get("seed_candidates", 0) or 0),
+            "event_store_candidates": int((local_breakdown or {}).get("event_store_candidates", 0) or 0),
+            "local_cache_candidates": int((local_breakdown or {}).get("local_cache_candidates", 0) or 0),
             "source_distribution": source_distribution,
+        }
+
+    @staticmethod
+    def _cache_entry_key(payload: Mapping[str, Any]) -> str:
+        raw = "|".join(
+            [
+                str(payload.get("title", "")).strip().lower(),
+                str(payload.get("source_url", "")).strip().lower(),
+                str(payload.get("published_at", "")).strip(),
+                str(payload.get("summary", "")).strip().lower()[:160],
+            ]
+        )
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _persist_local_cache_rows(self, *, grouped: Mapping[str, Sequence[Mapping[str, Any]]]) -> Dict[str, Any]:
+        cache_path = self.local_cache_path
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        existing_keys: set[str] = set()
+        existing_count = 0
+        if cache_path.exists():
+            try:
+                existing_lines = cache_path.read_text(encoding="utf-8").splitlines()
+            except Exception:
+                existing_lines = []
+            for line in existing_lines:
+                text = str(line or "").strip()
+                if not text:
+                    continue
+                existing_count += 1
+                try:
+                    payload = json.loads(text)
+                except Exception:
+                    continue
+                existing_keys.add(self._cache_entry_key(payload))
+
+        to_append: List[str] = []
+        selected_count = 0
+        for day, rows in sorted(grouped.items(), key=lambda item: item[0]):
+            for item in rows:
+                selected_count += 1
+                published = item.get("published_at")
+                if not isinstance(published, pd.Timestamp):
+                    published = self._to_day_start(day)
+                payload = {
+                    "title": str(item.get("title", "")),
+                    "summary": str(item.get("content", "")),
+                    "source": str(item.get("source", "")),
+                    "source_url": str(item.get("source_url", "")),
+                    "published_at": published.isoformat(),
+                    "sentiment": float(item.get("sentiment", 0.0) or 0.0),
+                    "impact_level": str(item.get("impact_level", "")),
+                    "confidence": float(item.get("confidence", 0.75) or 0.75),
+                    "relevance_score": float(item.get("relevance_score", 0.0) or 0.0),
+                    "window_day": str(day),
+                    "cached_at": datetime.now(timezone.utc).isoformat(),
+                }
+                key = self._cache_entry_key(payload)
+                if key in existing_keys:
+                    continue
+                existing_keys.add(key)
+                to_append.append(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+        if to_append:
+            with cache_path.open("a", encoding="utf-8") as fp:
+                for line in to_append:
+                    fp.write(f"{line}\n")
+
+        return {
+            "enabled": True,
+            "path": str(cache_path),
+            "selected_count": int(selected_count),
+            "appended_count": int(len(to_append)),
+            "cache_size": int(existing_count + len(to_append)),
         }
 
     def _persist_rows(

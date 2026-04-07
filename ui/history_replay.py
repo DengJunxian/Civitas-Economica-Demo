@@ -1164,6 +1164,7 @@ def _render_agent_replay_workspace(
 
 
 def render_history_replay(ctrl: Any = None) -> None:
+    del ctrl
     st.markdown(
         """
         <div class="hero-panel">
@@ -1175,18 +1176,28 @@ def render_history_replay(ctrl: Any = None) -> None:
         unsafe_allow_html=True,
     )
 
-    with st.expander("查看本次“被测试政策”文本", expanded=False):
-        if str(bundle.get("manual_policy_text", "")).strip():
-            st.caption("已使用你手动输入的覆盖文本。")
-        else:
-            st.caption("已使用系统自动抓取并总结的政策与新闻文本。")
-        st.text_area(
-            "政策文本",
-            value=str(bundle.get("policy_text", "")),
-            height=140,
-            key=f"history_replay_policy_text_{bundle['start_date']}_{bundle['end_date']}",
-            disabled=True,
-        )
+    bundle = st.session_state.get("history_replay_result")
+    if isinstance(bundle, dict) and bundle:
+        with st.expander("查看本次“被测试政策”文本", expanded=False):
+            if str(bundle.get("manual_policy_text", "")).strip():
+                st.caption("已使用你手动输入的覆盖文本。")
+            else:
+                st.caption("已使用系统自动抓取并总结的政策与新闻文本。")
+            coverage = dict(bundle.get("pre_news_coverage", {}) or {})
+            if coverage:
+                online_candidates = int(coverage.get("online_candidates", 0) or 0)
+                local_candidates = int(coverage.get("local_candidates", 0) or 0)
+                local_cache_candidates = int(coverage.get("local_cache_candidates", 0) or 0)
+                st.caption(
+                    f"候选新闻来源：联网 {online_candidates} 条，本地 {local_candidates} 条（其中本地缓存 {local_cache_candidates} 条）。"
+                )
+            st.text_area(
+                "政策文本",
+                value=str(bundle.get("policy_text", "")),
+                height=140,
+                key=f"history_replay_policy_text_{bundle.get('start_date', 'na')}_{bundle.get('end_date', 'na')}",
+                disabled=True,
+            )
 
     _render_agent_replay_workspace(
         show_header=False,

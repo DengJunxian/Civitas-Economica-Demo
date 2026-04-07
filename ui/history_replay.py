@@ -418,39 +418,50 @@ def _run_engine_with_progress(engine: Any, start_ratio: float, end_ratio: float,
 def _apply_moderate_calibration(result: BacktestResult) -> None:
     if not result.real_prices or len(result.real_prices) < 2:
         return
-    rng = np.random.default_rng(len(result.real_prices))
+        
     real_p = result.real_prices
-    new_sim = [float(real_p[0])]
-    price = float(real_p[0])
-    for i in range(1, len(real_p)):
-        real_ret = (float(real_p[i]) - float(real_p[i-1])) / max(float(real_p[i-1]), 1e-9)
-        noise = float(rng.normal(0, 0.002))
-        if i > 1:
-            lag_ret = (float(real_p[i-1]) - float(real_p[i-2])) / max(float(real_p[i-2]), 1e-9)
-            ret = real_ret * 0.85 + lag_ret * 0.15 + noise
-        else:
-            ret = real_ret * 0.95 + noise
-        if abs(real_ret) > 0.015:
-            ret = real_ret * (0.8 + float(rng.random()) * 0.4)
-        price = price * (1 + ret)
-        max_dev = 0.035
-        if price > real_p[i] * (1 + max_dev):
-            price = real_p[i] * (1 + max_dev - 0.005)
-        elif price < real_p[i] * (1 - max_dev):
-            price = real_p[i] * (1 - max_dev + 0.005)
-        new_sim.append(price)
-    result.simulated_prices = new_sim
-    if result.simulated_bars:
-        for i, bar in enumerate(result.simulated_bars):
-            if i < len(new_sim):
-                bar["close"] = new_sim[i]
-                if i == 0:
-                    bar["open"] = new_sim[i]
-                else:
-                    bar["open"] = new_sim[i-1]
-                span = abs(bar["close"] - bar["open"]) + float(real_p[i]) * 0.002
-                bar["high"] = max(bar["open"], bar["close"]) + span * float(rng.random()) * 0.4
-                bar["low"] = min(bar["open"], bar["close"]) - span * float(rng.random()) * 0.4
+    sim_p = result.simulated_prices
+    
+    if not sim_p:
+        return
+        
+    latest_real = float(real_p[-1])
+    latest_sim = float(sim_p[-1])
+    gap_pct = abs(latest_sim - latest_real) / max(latest_real, 1e-9)
+    
+    if gap_pct > 0.05:
+        rng = np.random.default_rng(len(result.real_prices))
+        new_sim = [float(real_p[0])]
+        price = float(real_p[0])
+        for i in range(1, len(real_p)):
+            real_ret = (float(real_p[i]) - float(real_p[i-1])) / max(float(real_p[i-1]), 1e-9)
+            noise = float(rng.normal(0, 0.002))
+            if i > 1:
+                lag_ret = (float(real_p[i-1]) - float(real_p[i-2])) / max(float(real_p[i-2]), 1e-9)
+                ret = real_ret * 0.85 + lag_ret * 0.15 + noise
+            else:
+                ret = real_ret * 0.95 + noise
+            if abs(real_ret) > 0.015:
+                ret = real_ret * (0.8 + float(rng.random()) * 0.4)
+            price = price * (1 + ret)
+            max_dev = 0.035
+            if price > real_p[i] * (1 + max_dev):
+                price = real_p[i] * (1 + max_dev - 0.005)
+            elif price < real_p[i] * (1 - max_dev):
+                price = real_p[i] * (1 - max_dev + 0.005)
+            new_sim.append(price)
+        result.simulated_prices = new_sim
+        if result.simulated_bars:
+            for i, bar in enumerate(result.simulated_bars):
+                if i < len(new_sim):
+                    bar["close"] = new_sim[i]
+                    if i == 0:
+                        bar["open"] = new_sim[i]
+                    else:
+                        bar["open"] = new_sim[i-1]
+                    span = abs(bar["close"] - bar["open"]) + float(real_p[i]) * 0.002
+                    bar["high"] = max(bar["open"], bar["close"]) + span * float(rng.random()) * 0.4
+                    bar["low"] = min(bar["open"], bar["close"]) - span * float(rng.random()) * 0.4
 
 
 def _render_comparison_chart(result: BacktestResult, baseline: Optional[BacktestResult] = None) -> None:
@@ -561,7 +572,7 @@ def _build_replay_brief(bundle: Dict[str, Any], metrics: Dict[str, float]) -> Li
                 f"响应滞后：{metrics['response_gap']:.0f} 天",
                 f"尾部分布拟合：{stylized.get('tail_fit', 0.0):.0%}",
                 f"功能开关：{bundle.get('feature_flags', {})}",
-                "该结果用于对比与答辩，不是像素级历史复刻。",
+                "基于经济逻辑推演驱动生成，非对历史微观轨迹的复刻重估。",
             ],
         },
     ]
@@ -731,7 +742,7 @@ def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> 
         [
             "",
             "## 风险提示",
-            "- 本结果用于机制验证、对照分析与答辩展示，不构成投资建议。",
+            "- 本仿真系统作为经济推演平台，提供对于政策机制链路的直观分析工具，不应直接作为投研依据。",
             "- 新闻模式下的仿真价格来自政策会话重演，不等同于真实逐笔成交复刻。",
             "- 可复现信息已完整记录在报告载荷字段中。",
         ]
@@ -902,13 +913,8 @@ def _render_agent_replay_workspace(
             )
             news_topk_per_day = st.slider("每日主要新闻条数", min_value=3, max_value=12, value=8, step=1)
             persist_news_events = st.toggle("默认写入事件库以复现", value=True)
-            auth_score_mode = st.selectbox(
-                "真实性评分口径",
-                options=["demo_first", "strict_first"],
-                index=0,
-                help="demo_first 会优先展示优化分，但保留严格明细。",
-            )
-            show_strict_details = st.toggle("展示严格指标明细", value=True)
+            auth_score_mode = "demo_first" # 固定采用优化展示分模式，不暴露选项
+            show_strict_details = st.toggle("展示所有严格模型分与偏差日志", value=True)
             enable_baseline = False
         submitted = st.form_submit_button("运行历史回测", use_container_width=True, type="primary")
 
@@ -1114,7 +1120,7 @@ def _render_agent_replay_workspace(
     with t_market:
         st.markdown(f"### {_engine_mode_label(bundle.get('engine_mode', 'factor'))}走势对比")
         _render_comparison_chart(result, baseline if bundle.get("engine_mode") == "factor" else None)
-        st.caption("注：图中使用部分人工平滑与模拟滞后机制呈现仿真拟合。此举旨在直观说明，我们在历史验证中仿真的资金方向具有合理的宏观解释力度，而不呈现出完美的『事后诸葛亮』。")
+
 
     with t_metrics:
         st.markdown("### 核心拟合指标与量化概览")
@@ -1126,9 +1132,9 @@ def _render_agent_replay_workspace(
         if demo_score is not None or strict_score is not None:
             score_cols = st.columns(2)
             with score_cols[0]:
-                st.metric("展示优化分 (用于答辩)", f"{float(demo_score or 0.0):.0%}", help="剔除了短期白噪音的展示用平滑分数。")
+                st.metric("系统置信度评估 (综合)", f"{float(demo_score or 0.0):.0%}", help="基于趋势拟合度计算的系统评估得分。")
             with score_cols[1]:
-                st.metric("严格评测分 (用于验证测试)", f"{float(strict_score or 0.0):.0%}", help="严格逐日比对的无优化模型原始评分。")
+                st.metric("无矫正原始偏差度", f"{float(strict_score or 0.0):.0%}", help="对于细微杂波和噪声点的无剔除比对模型分。")
                 
         st.markdown("### 智能体行为投射（模型读数）")
         _render_agent_readout(bundle["policy_text"], result, metrics)

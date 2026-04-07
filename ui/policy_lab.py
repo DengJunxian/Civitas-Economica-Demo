@@ -2716,7 +2716,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
 
     session: Optional[Dict[str, Any]] = st.session_state.get("policy_lab_session")
     current_defaults = dict(session or {})
-    default_policy_text = str(current_defaults.get("policy_text", "请输入您想要测试的政策文本，例如：'央行宣布降息降准...'"))
+    default_policy_text = str(current_defaults.get("policy_text", "近期，各部委相继出台一系列旨在提振总需求、稳定资本市场预期的政策措施。财政部宣布将扩大专项债发行规模，重点支持先进制造业和新基建投资；同时，央行超预期实施降准0.5个百分点，并下调政策利率20个基点，以释放充足的流动性，降低实体经济融资成本。税务总局及相关监管机构亦同步出台了减免交易印花税及规范大股东减持行为的细则，明确释放维稳信号。预计上述组合拳将显著提振投资者信心，改善市场微观流动性。"))
     default_intensity = float(current_defaults.get("intensity", 1.0))
     default_total_days = int(current_defaults.get("total_days", 100))
     default_effective_day = int(current_defaults.get("effective_day", 1))

@@ -1,4 +1,4 @@
-﻿"""Policy lab page focused on government-facing policy experiments."""
+"""Policy lab page focused on government-facing policy experiments."""
 
 from __future__ import annotations
 
@@ -2071,36 +2071,80 @@ def _persist_policy_event(
         return
 
 
-def _render_agent_disagreement_chart(package_dict: Dict[str, Any]) -> None:
+ROLE_TRANSLATIONS = {
+    "retail_day_trader": "散户短线",
+    "retail_swing": "散户波段",
+    "retail_momentum_chaser": "散户趋势",
+    "mutual_fund": "公募基金",
+    "quant_arbitrage": "量化机构",
+    "market_maker": "做市资金",
+    "foreign_capital": "外资",
+    "insurance": "险资",
+    "national_team": "平准基金",
+}
+
+def _translate_role(role: str) -> str:
+    cleaned = str(role).lower().replace("_00", "").replace("_01", "").replace("_02", "").replace("_03", "").strip()
+    return ROLE_TRANSLATIONS.get(cleaned, str(role))
+
+
+def _get_llm_visual_interpretation(prompt: str, cache_key: str, runtime_profile: RuntimeModeProfile) -> str:
+    if not runtime_profile.use_live_api:
+        return ""
+    cache = st.session_state.setdefault("policy_lab_llm_visual_cache", {})
+    if cache_key in cache:
+        return cache[cache_key]
+    try:
+        from core.inference.api_backend import APIBackend
+        model_name = str(runtime_profile.model_priority[0]) if runtime_profile.model_priority else "deepseek-chat"
+        backend = APIBackend(model=model_name, max_tokens=150, temperature=0.3)
+        response = str(backend.generate(prompt, system_prompt="你是顶尖量化分析师。用一段精炼且专业的中文（不超过100字）解读图表趋势。直接返回内容，禁用Markdown、分点和换行。")).strip()
+        if not response or response.startswith("[API Error]"):
+            return ""
+        cache[cache_key] = response
+        return response
+    except Exception:
+        return ""
+
+
+def _render_agent_disagreement_chart(package_dict: Dict[str, Any], policy_text: str, runtime_profile: RuntimeModeProfile) -> None:
     agent_effects = dict(package_dict.get("agent_class_effects", {}) or {})
     if not agent_effects:
         return
-    frame = (
-        pd.DataFrame({"agent": list(agent_effects.keys()), "score": [float(v) for v in agent_effects.values()]})
-        .sort_values("score", key=lambda series: series.abs(), ascending=False)
-        .head(12)
-    )
+    rows = []
+    for raw_agent, score in agent_effects.items():
+        rows.append({"agent": _translate_role(raw_agent), "score": float(score)})
+    frame = pd.DataFrame(rows).groupby("agent", as_index=False)["score"].mean().sort_values("score", key=lambda x: x.abs(), ascending=True).head(12)
     fig = go.Figure(
         data=[
             go.Bar(
-                x=frame["agent"],
-                y=frame["score"],
-                marker_color=["#16a34a" if v >= 0 else "#dc2626" for v in frame["score"]],
+                x=frame["score"],
+                y=frame["agent"],
+                orientation="h",
+                marker_color=["#22c55e" if v >= 0 else "#ef4444" for v in frame["score"]],
             )
         ]
     )
     fig.update_layout(
-        template="plotly_white",
+        template="plotly_dark",
         title="投资者政策解读分歧",
-        xaxis_title="角色",
-        yaxis_title="影响得分",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#0b1220",
+        xaxis_title="多空分歧得分",
+        yaxis_title="主体角色",
         margin=dict(l=20, r=20, t=40, b=20),
         height=320,
     )
     st.plotly_chart(fig, use_container_width=True)
 
+    cache_key = hashlib.sha256(f"disagree_{policy_text}_{json.dumps(agent_effects)}".encode()).hexdigest()
+    prompt = f"政策：{policy_text}，投资者影响得分为：{json.dumps(agent_effects, ensure_ascii=False)}。一句话解释谁最看好、谁最看空及原因。"
+    interpretation = _get_llm_visual_interpretation(prompt, cache_key, runtime_profile)
+    if interpretation:
+        st.info(f"🤖 **AI 洞察**：{interpretation}")
 
-def _render_role_orderflow_waterfall(frame: pd.DataFrame, package_dict: Dict[str, Any]) -> None:
+
+def _render_role_orderflow_waterfall(frame: pd.DataFrame, package_dict: Dict[str, Any], policy_text: str, runtime_profile: RuntimeModeProfile) -> None:
     if frame.empty:
         return
     agent_effects = dict(package_dict.get("agent_class_effects", {}) or {})
@@ -2109,55 +2153,77 @@ def _render_role_orderflow_waterfall(frame: pd.DataFrame, package_dict: Dict[str
     scale = float(frame["volume"].mean() / max(len(agent_effects), 1))
     rows: List[Dict[str, Any]] = []
     for role, score in agent_effects.items():
-        rows.append({"role": str(role), "net_flow": float(score) * scale})
-    flow_df = pd.DataFrame(rows).sort_values("net_flow")
+        rows.append({"role": _translate_role(role), "net_flow": float(score) * scale})
+    flow_df = pd.DataFrame(rows).groupby("role", as_index=False)["net_flow"].sum().sort_values("net_flow", ascending=True)
     fig = go.Figure(
-        go.Waterfall(
-            x=flow_df["role"],
-            y=flow_df["net_flow"],
-            measure=["relative"] * len(flow_df),
-            connector={"line": {"color": "rgb(63, 63, 63)"}},
-            increasing={"marker": {"color": "#16a34a"}},
-            decreasing={"marker": {"color": "#ef4444"}},
-        )
+        data=[
+            go.Bar(
+                x=flow_df["net_flow"],
+                y=flow_df["role"],
+                orientation="h",
+                marker_color=["#ef4444" if v < 0 else "#22c55e" for v in flow_df["net_flow"]],
+            )
+        ]
     )
     fig.update_layout(
-        template="plotly_white",
-        title="角色订单流拆解（估计）",
-        yaxis_title="净买卖量（估计）",
+        template="plotly_dark",
+        title="角色订单流拆解（深度评估）",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#0b1220",
+        xaxis_title="净买卖量评估",
+        yaxis_title="主体角色",
         margin=dict(l=20, r=20, t=40, b=20),
         height=320,
     )
     st.plotly_chart(fig, use_container_width=True)
 
+    cache_key = hashlib.sha256(f"orderflow_{policy_text}_{json.dumps(agent_effects)}".encode()).hexdigest()
+    prompt = f"政策：{policy_text}，预期订单流为：{json.dumps(rows, ensure_ascii=False)}。一句话概述资金买卖主导力量是谁，是追高还是潜伏？"
+    interpretation = _get_llm_visual_interpretation(prompt, cache_key, runtime_profile)
+    if interpretation:
+        st.info(f"🤖 **AI 洞察**：{interpretation}")
 
-def _render_sector_rotation_heatmap(package_dict: Dict[str, Any]) -> None:
+
+def _render_sector_rotation_heatmap(package_dict: Dict[str, Any], policy_text: str, runtime_profile: RuntimeModeProfile) -> None:
     sector_effects = dict(package_dict.get("sector_effects", {}) or {})
     if not sector_effects:
         return
-    ordered = sorted(sector_effects.items(), key=lambda kv: abs(float(kv[1])), reverse=True)[:12]
+    ordered = sorted(sector_effects.items(), key=lambda kv: abs(float(kv[1])), reverse=True)[:18]
     labels = [str(name) for name, _ in ordered]
     values = [float(value) for _, value in ordered]
-    z = np.array([values])
+    abs_values = [abs(v) + 0.1 for v in values]
+    
     fig = go.Figure(
-        data=[
-            go.Heatmap(
-                z=z,
-                x=labels,
-                y=["sector_heat"],
+        go.Treemap(
+            labels=labels,
+            parents=[""] * len(labels),
+            values=abs_values,
+            marker=dict(
+                colors=values,
                 colorscale="RdYlGn",
-                zmid=0.0,
-                colorbar=dict(title="影响"),
-            )
-        ]
+                cmid=0,
+                showscale=True,
+                colorbar=dict(title="影响")
+            ),
+            textinfo="label",
+            hovertemplate="<b>%{label}</b><br>影响得分: %{color:.2f}<extra></extra>"
+        )
     )
     fig.update_layout(
-        template="plotly_white",
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#0b1220",
         title="板块热度轮动（政策冲击）",
-        margin=dict(l=20, r=20, t=40, b=20),
-        height=260,
+        margin=dict(l=10, r=10, t=40, b=10),
+        height=320,
     )
     st.plotly_chart(fig, use_container_width=True)
+
+    cache_key = hashlib.sha256(f"sector_{policy_text}_{json.dumps(sector_effects)}".encode()).hexdigest()
+    prompt = f"政策：{policy_text}，行业影响：{json.dumps(ordered, ensure_ascii=False)}。一句话总结：哪个板块最受益，哪个最承压？为什么出现这种轮动？"
+    interpretation = _get_llm_visual_interpretation(prompt, cache_key, runtime_profile)
+    if interpretation:
+        st.info(f"🤖 **AI 洞察**：{interpretation}")
 
 
 def _render_regulation_counterfactual_panel(counterfactual: Dict[str, Any]) -> None:
@@ -2755,76 +2821,62 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
             )
             session["status"] = "running"
             session["calendar_start"] = pd.bdate_range(start=pd.Timestamp(history_end).normalize(), periods=2)[-1].strftime("%Y-%m-%d")
+            session["autoplay"] = {"enabled": True, "step_days": 1, "interval_seconds": 1.0, "last_wallclock_ts": 0.0}
             _policy_session_advance(session, 1)
             _store_session(session)
-            st.success("仿真已开始，并已推进第 1 个交易日。")
+            st.success("仿真已开始，并已自动推演第 1 个交易日。")
         session = st.session_state.get("policy_lab_session")
 
     session = st.session_state.get("policy_lab_session")
-    control_cols = st.columns(5)
-    can_advance = bool(session) and str(session.get("status", "")).lower() in {"running", "paused"}
-    if control_cols[0].button("继续 1 天", use_container_width=True, disabled=not can_advance, key="policy_lab_continue_1"):
-        _policy_session_advance(session, 1)
+    
+    if not session:
+        st.info("请先配置政策并点击“开始仿真”。")
+        return
+        
+    control_cols = st.columns(4)
+    can_advance = str(session.get("status", "")).lower() in {"running", "paused"}
+    
+    autoplay = session.get("autoplay", {"enabled": False, "step_days": 1, "interval_seconds": 1.0, "last_wallclock_ts": 0.0})
+    
+    playing_label = "暂停仿真 ⏸️" if autoplay.get("enabled", False) else "恢复仿真 ▶️"
+    if control_cols[0].button(playing_label, use_container_width=True, disabled=not can_advance, key="policy_lab_pause_resume"):
+        autoplay["enabled"] = not autoplay.get("enabled", False)
+        session["autoplay"] = autoplay
         _store_session(session)
-        st.success("已继续 1 个交易日。")
-    if control_cols[1].button("继续 5 天", use_container_width=True, disabled=not can_advance, key="policy_lab_continue_5"):
-        _policy_session_advance(session, 5)
-        _store_session(session)
-        st.success("已继续 5 个交易日。")
-    remaining_days = max(0, int(session.get("total_days", 0)) - int(session.get("current_day", 0))) if session else 0
-    if control_cols[2].button("运行到结束", use_container_width=True, disabled=not can_advance or remaining_days <= 0, key="policy_lab_continue_all"):
+    
+    remaining_days = max(0, int(session.get("total_days", 0)) - int(session.get("current_day", 0)))
+    if control_cols[1].button("跳转到结束 ⏭️", use_container_width=True, disabled=not can_advance or remaining_days <= 0, key="policy_lab_jump_end"):
+        session["autoplay"]["enabled"] = False
         _policy_session_advance(session, remaining_days)
         _store_session(session)
-        st.success("仿真已推进到结束。")
-    if control_cols[3].button("停止仿真", use_container_width=True, disabled=not session or str(session.get("status", "")).lower() not in {"running", "paused"}, key="policy_lab_stop"):
+        st.success("已直接推进到仿真结束。")
+        
+    if control_cols[2].button("停止 ⏹️", use_container_width=True, disabled=not can_advance, key="policy_lab_stop"):
         _policy_session_stop(session)
+        session["autoplay"]["enabled"] = False
         _store_session(session)
-        st.warning("仿真已停止。")
-    if control_cols[4].button("重置会话", use_container_width=True, key="policy_lab_reset"):
+        st.warning("仿真已强制停止。")
+        
+    if control_cols[3].button("重置大屏 🔄", use_container_width=True, key="policy_lab_reset"):
         st.session_state.pop("policy_lab_session", None)
         st.session_state.pop("policy_lab_result", None)
         st.session_state.pop("policy_lab_report", None)
         st.success("会话已重置。")
-        st.stop()
+        st.rerun()
 
-    session = st.session_state.get("policy_lab_session")
-    if not session:
-        st.info("请先配置政策并点击“开始仿真”。")
-        return
-
-    autoplay = _policy_session_autoplay_state(session)
-    st.markdown("### 自动演示")
-    autoplay_cols = st.columns([1.2, 1.0, 1.2, 2.0])
-    autoplay["enabled"] = autoplay_cols[0].toggle(
-        "自动逐日运行",
-        value=bool(autoplay.get("enabled", False)),
-        key="policy_lab_autoplay_toggle",
-        help="按模拟交易日自动推进当前会话，不会创建系统级定时任务。",
-    )
-    autoplay["step_days"] = int(
-        autoplay_cols[1].selectbox(
-            "每次推进",
-            options=[1, 2, 5],
-            index=[1, 2, 5].index(int(autoplay.get("step_days", 1))) if int(autoplay.get("step_days", 1)) in [1, 2, 5] else 0,
-            key="policy_lab_autoplay_step_days",
+    if can_advance:
+        interval = st.slider(
+            "自动运行速度 (秒/交易日)",
+            min_value=0.5, max_value=3.0, value=float(autoplay.get("interval_seconds", 1.0)), step=0.1, key="policy_lab_speed_slider"
         )
-    )
-    autoplay["interval_seconds"] = float(
-        autoplay_cols[2].slider(
-            "播放间隔（秒）",
-            min_value=0.4,
-            max_value=2.0,
-            value=float(min(max(float(autoplay.get("interval_seconds", 0.8) or 0.8), 0.4), 2.0)),
-            step=0.2,
-            key="policy_lab_autoplay_interval",
-        )
-    )
-    autoplay_cols[3].caption("自动逐日运行指的是仿真里的交易日回放，不是现实时间的每日定时任务。")
-    if not autoplay["enabled"]:
-        autoplay["last_wallclock_ts"] = 0.0
-    _store_session(session)
+        autoplay["interval_seconds"] = interval
+        autoplay["step_days"] = 1
+        if not autoplay["enabled"]:
+            autoplay["last_wallclock_ts"] = 0.0
+        session["autoplay"] = autoplay
+        _store_session(session)
 
-    if autoplay["enabled"] and str(session.get("status", "")).lower() in {"running", "paused"}:
+    if autoplay.get("enabled", False) and str(session.get("status", "")).lower() in {"running", "paused"}:
         if _policy_session_maybe_autoplay(session):
             _store_session(session)
             session = st.session_state.get("policy_lab_session")
@@ -2946,20 +2998,67 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
 
         if package_dict and not session_frame.empty:
             left, right = st.columns(2)
+            policy_text_str = str(session.get("policy_text", ""))
             with left:
-                _render_agent_disagreement_chart(package_dict)
+                _render_agent_disagreement_chart(package_dict, policy_text_str, runtime_profile)
             with right:
-                _render_role_orderflow_waterfall(session_frame, package_dict)
-            _render_sector_rotation_heatmap(package_dict)
+                _render_role_orderflow_waterfall(session_frame, package_dict, policy_text_str, runtime_profile)
+            _render_sector_rotation_heatmap(package_dict, policy_text_str, runtime_profile)
+            
             st.markdown("#### 政策评估解读")
-            st.markdown(
-                _get_policy_narrative(
-                    str(session.get("policy_text", "")),
-                    summary,
-                    package_dict,
-                    runtime_profile,
-                )
+            narrative = _get_policy_narrative(
+                policy_text_str,
+                summary,
+                package_dict,
+                runtime_profile,
             )
+            
+            if "【一句话结论】" in narrative:
+                conclusion = "等待 AI 生成结论..."
+                impacts, trust, risks, metrics_list = [], [], [], []
+                
+                parts = narrative.split("【")
+                for p in parts:
+                    if p.startswith("一句话结论】"):
+                        conclusion = p.replace("一句话结论】", "").strip()
+                    elif p.startswith("政策如何影响市场】"):
+                        impacts = [x.strip("- ") for x in p.replace("政策如何影响市场】", "").strip().split("\n") if x.strip("- ")]
+                    elif p.startswith("这组结果为什么可信】"):
+                        trust = [x.strip("- ") for x in p.replace("这组结果为什么可信】", "").strip().split("\n") if x.strip("- ")]
+                    elif p.startswith("风险提示】"):
+                        risks = [x.strip("- ") for x in p.replace("风险提示】", "").strip().split("\n") if x.strip("- ")]
+                    elif p.startswith("建议评委关注的指标】") or p.startswith("建议关注的指标】"):
+                        metrics_list = [x.strip("- ") for x in p.replace("建议评委关注的指标】", "").replace("建议关注的指标】", "").strip().split("\n") if x.strip("- ")]
+                
+                st.markdown(
+                    f'''
+                    <div style="background: linear-gradient(135deg, #1e1e24 0%, #15151a 100%); border-left: 4px solid #3b82f6; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                        <h3 style="margin-top:0; color: #60a5fa; font-size: 1.1rem; font-weight: 600;">🎯 核心结论</h3>
+                        <p style="font-size: 1.2rem; font-weight: bold; color: #f8fafc; margin-bottom: 0;">{conclusion}</p>
+                    </div>
+                    ''', unsafe_allow_html=True
+                )
+                
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown('##### 📊 市场传导链路')
+                    for imp in impacts:
+                        st.markdown(f'<div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); padding: 10px; border-radius: 6px; margin-bottom: 8px; color: #cbd5e1; font-size: 0.95rem;">{imp}</div>', unsafe_allow_html=True)
+                        
+                    st.markdown('##### ✅ 仿真可信度依据')
+                    for t in trust:
+                        st.markdown(f'<div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); padding: 10px; border-radius: 6px; margin-bottom: 8px; color: #cbd5e1; font-size: 0.95rem;">{t}</div>', unsafe_allow_html=True)
+                
+                with c2:
+                    st.markdown('##### ⚠️ 重点风险提示')
+                    for r in risks:
+                        st.markdown(f'<div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); padding: 10px; border-radius: 6px; margin-bottom: 8px; color: #cbd5e1; font-size: 0.95rem;">{r}</div>', unsafe_allow_html=True)
+                        
+                    st.markdown('##### 📋 核心监测指标')
+                    for m in metrics_list:
+                        st.markdown(f'<div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); padding: 10px; border-radius: 6px; margin-bottom: 8px; color: #cbd5e1; font-size: 0.95rem;">{m}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div style="background: #1e1e24; padding: 20px; border-radius: 8px; color: #cbd5e1; border-left: 4px solid #64748b;">{narrative}</div>', unsafe_allow_html=True)
 
     with behavior_tab:
         _render_behavior_finance_panel(session_frame, summary)

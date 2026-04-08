@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -990,9 +991,8 @@ def _build_policy_demo_cards(
 
     signal_strength = float(policy_signal.get("strength", summary.get("policy_signal_avg", 0.0)) or 0.0)
     social_mean = float(sentiment.get("social_mean", 0.0) or 0.0)
-    buy_volume = float(order_flow.get("buy_volume", 0.0) or 0.0)
-    sell_volume = float(order_flow.get("sell_volume", 0.0) or 0.0)
-    trade_count = int(matching.get("trade_count", latest.get("trade_count", 0)) or 0)
+    imbalance = float(order_flow.get("imbalance", 0.0) or 0.0)
+    matching_mode = str(matching.get("matching_mode", latest.get("matching_mode", "session")))
     latest_close = float(index_move.get("new_price", summary.get("最新收盘价", summary.get("latest_close", 0.0))) or 0.0)
     return_pct = float(index_move.get("return_pct", latest.get("price_change_pct", 0.0)) or 0.0)
 
@@ -1005,12 +1005,12 @@ def _build_policy_demo_cards(
         {
             "phase": "情绪扩散",
             "summary": f"情绪均值 {social_mean:+.2f}，多智能体开始重估政策影响。",
-            "detail": f"买量 {buy_volume:.0f}｜卖量 {sell_volume:.0f}",
+            "detail": f"订单失衡 {imbalance:+.0f}｜传导斜率 {signal_strength:+.2f}",
         },
         {
             "phase": "撮合落地",
             "summary": f"最新点位 {latest_close:.2f}，单日变化 {return_pct:+.2f}%。",
-            "detail": f"成交 {trade_count} 笔｜撮合模式 {str(matching.get('matching_mode', latest.get('matching_mode', 'session')))}",
+            "detail": f"撮合模式 {matching_mode}｜市场进入重定价阶段",
         },
     ]
 
@@ -1056,7 +1056,7 @@ def _build_policy_demo_briefing(session: Dict[str, Any], summary: Optional[Dict[
     bullets = [
         f"交易日进度 {current_day}/{total_days}，当前模式 {str(session.get('mode_text', '会话仿真'))}",
         f"政策强度 {signal_strength:+.2f}，活跃政策 {sum(1 for item in session.get('policy_events', []) if item.get('status') == 'active')} 项",
-        f"买量 {float(order_flow.get('buy_volume', 0.0) or 0.0):.0f} / 卖量 {float(order_flow.get('sell_volume', 0.0) or 0.0):.0f}，成交 {trade_count} 笔",
+        f"订单失衡 {imbalance:+.0f}，单日变化 {return_pct:+.2f}%，传导阶段：{phase}",
     ]
     chips = [
         f"状态：{_policy_session_status_text(str(session.get('status', 'idle')))}",
@@ -1068,7 +1068,7 @@ def _build_policy_demo_briefing(session: Dict[str, Any], summary: Optional[Dict[
     if len(subtitle) > 88:
         subtitle = subtitle[:88] + "…"
     return {
-        "kicker": "Policy Wind Tunnel",
+        "kicker": "政策风洞推演",
         "phase": phase,
         "subtitle": subtitle or "等待政策输入后启动会话仿真。",
         "alert": alert,
@@ -1589,7 +1589,7 @@ def _policy_session_generate_report(session: Dict[str, Any], runtime_profile: Ru
         f"- 运行模式：{_runtime_mode_text(runtime_profile)}",
         "",
         "## 会话摘要",
-        f"- 总收益：{payload['summary'].get('return_pct', 0.0):.2%}",
+        f"- 累计涨跌：{payload['summary'].get('return_pct', 0.0):.2%}",
         f"- 最大回撤：{payload['summary'].get('max_drawdown', 0.0):.2%}",
         f"- 平均恐慌度：{payload['summary'].get('avg_panic', 0.0):.4f}",
         f"- 波动率：{payload['summary'].get('volatility', 0.0):.4f}",
@@ -1693,11 +1693,15 @@ def _policy_session_display_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "high": "最高",
         "low": "最低",
         "close": "收盘",
-        "volume": "成交量",
         "panic_level": "恐慌度",
         "csad": "羊群度",
     }
-    return frame.rename(columns=mapping)
+    display = frame.rename(columns=mapping)
+    if "volume" in display.columns:
+        display = display.drop(columns=["volume"], errors="ignore")
+    if "成交量" in display.columns:
+        display = display.drop(columns=["成交量"], errors="ignore")
+    return display
 
 
 def _compute_policy_summary(metrics: pd.DataFrame) -> Dict[str, float]:
@@ -1719,8 +1723,6 @@ def _build_chart(frame: pd.DataFrame, *, chart_title: str = "指数日K图（东
     chart = frame.copy()
     for window in (5, 10, 20, 30):
         chart[f"ma{window}"] = chart["close"].rolling(window).mean()
-    up_mask = (chart["close"] >= chart["open"]).tolist()
-    volume_colors = ["#d63b3b" if is_up else "#1c9b63" for is_up in up_mask]
     ma_styles = {
         "ma5": {"label": "5日均线", "color": "#f5a623", "width": 1.35},
         "ma10": {"label": "10日均线", "color": "#3a78d4", "width": 1.35},
@@ -1728,7 +1730,7 @@ def _build_chart(frame: pd.DataFrame, *, chart_title: str = "指数日K图（东
         "ma30": {"label": "30日均线", "color": "#4a5568", "width": 1.15},
     }
 
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.02, row_heights=[0.76, 0.24])
+    fig = make_subplots(rows=1, cols=1, shared_xaxes=True)
     if mode == "分时":
         chart["avg_price"] = chart["close"].expanding().mean()
         fig.add_trace(
@@ -1740,8 +1742,6 @@ def _build_chart(frame: pd.DataFrame, *, chart_title: str = "指数日K图（东
                 line=dict(color="#2f6fed", width=1.9),
                 hovertemplate="时间=%{x}<br>价格=%{y:.2f}<extra></extra>",
             ),
-            row=1,
-            col=1,
         )
         fig.add_trace(
             go.Scatter(
@@ -1752,8 +1752,6 @@ def _build_chart(frame: pd.DataFrame, *, chart_title: str = "指数日K图（东
                 line=dict(color="#f5a623", width=1.15),
                 hovertemplate="时间=%{x}<br>均价=%{y:.2f}<extra></extra>",
             ),
-            row=1,
-            col=1,
         )
     else:
         fig.add_trace(
@@ -1771,8 +1769,6 @@ def _build_chart(frame: pd.DataFrame, *, chart_title: str = "指数日K图（东
                 whiskerwidth=0.55,
                 hoverlabel=dict(font=dict(family="Microsoft YaHei")),
             ),
-            row=1,
-            col=1,
         )
         for key, meta in ma_styles.items():
             fig.add_trace(
@@ -1784,22 +1780,7 @@ def _build_chart(frame: pd.DataFrame, *, chart_title: str = "指数日K图（东
                     line=dict(color=meta["color"], width=meta["width"]),
                     hovertemplate=f"时间=%{{x}}<br>{meta['label']}=%{{y:.2f}}<extra></extra>",
                 ),
-                row=1,
-                col=1,
             )
-    fig.add_trace(
-        go.Bar(
-            x=chart["time"],
-            y=chart["volume"],
-            name="成交量",
-            marker_color=volume_colors,
-            marker_line_width=0,
-            opacity=0.92,
-            hovertemplate="时间=%{x}<br>成交量=%{y:,.0f}<extra></extra>",
-        ),
-        row=2,
-        col=1,
-    )
     fig.update_layout(
         margin=dict(l=12, r=8, t=34, b=8),
         title=dict(text=chart_title, x=0.01, xanchor="left", font=dict(size=15, color="#e2e8f0")),
@@ -1820,7 +1801,6 @@ def _build_chart(frame: pd.DataFrame, *, chart_title: str = "指数日K图（东
         hovermode="x unified",
         xaxis_rangeslider_visible=False,
         dragmode="pan",
-        bargap=0.12,
         hoverlabel=dict(bgcolor="rgba(43,51,63,0.96)", bordercolor="#2b333f", font=dict(color="#ffffff")),
     )
     fig.update_xaxes(
@@ -1836,6 +1816,8 @@ def _build_chart(frame: pd.DataFrame, *, chart_title: str = "指数日K图（东
         spikesnap="cursor",
         spikecolor="#64748b",
         spikethickness=1,
+        row=1,
+        col=1,
     )
     fig.update_yaxes(
         title_text="指数点位",
@@ -1855,24 +1837,6 @@ def _build_chart(frame: pd.DataFrame, *, chart_title: str = "指数日K图（东
         spikecolor="#838a97",
         spikethickness=1,
     )
-    fig.update_yaxes(
-        title_text="成交量",
-        row=2,
-        col=1,
-        side="right",
-        gridcolor="rgba(148,163,184,0.1)",
-        zeroline=False,
-        showline=True,
-        linewidth=1,
-        linecolor="#243244",
-        tickfont=dict(color="#94a3b8"),
-        nticks=4,
-        showspikes=True,
-        spikemode="across",
-        spikesnap="cursor",
-        spikecolor="#838a97",
-        spikethickness=1,
-    )
     return fig
 
 
@@ -1886,13 +1850,6 @@ def _render_quote_banner(frame: pd.DataFrame, *, index_label: str, index_symbol:
     pct = change / prev_close if abs(prev_close) > 1e-9 else 0.0
     color = "#d9383a" if change >= 0 else "#18a058"
     sign = "+" if change >= 0 else ""
-    volume_value = float(latest["volume"])
-    if volume_value >= 100000000:
-        volume_text = f"{volume_value / 100000000:.2f}亿"
-    elif volume_value >= 10000:
-        volume_text = f"{volume_value / 10000:.2f}万"
-    else:
-        volume_text = f"{volume_value:,.0f}"
     st.markdown(
         (
             "<div style='border:1px solid #223247;border-radius:12px;padding:12px 16px;background:linear-gradient(180deg,rgba(11,18,32,0.98) 0%,rgba(7,12,22,0.98) 100%);box-shadow:0 12px 30px rgba(0,0,0,0.28);'>"
@@ -1903,11 +1860,10 @@ def _render_quote_banner(frame: pd.DataFrame, *, index_label: str, index_symbol:
             f"<div style='font-size:30px;font-weight:700;color:{color};line-height:1.15;margin-top:6px;'>{last_close:.2f}</div>"
             f"<div style='font-size:14px;color:{color};font-weight:600;margin-top:4px;'>{sign}{change:.2f} &nbsp;&nbsp; {sign}{pct:.2%}</div>"
             "</div>"
-            "<div style='display:grid;grid-template-columns:repeat(4,minmax(78px,1fr));gap:8px;flex:1;min-width:300px;'>"
+            "<div style='display:grid;grid-template-columns:repeat(3,minmax(78px,1fr));gap:8px;flex:1;min-width:240px;'>"
             f"<div style='background:#0f172a;border:1px solid #1f2f44;border-radius:8px;padding:7px 10px;'><div style='font-size:11px;color:#8aa0c2;'>今开</div><div style='font-size:15px;color:#e2e8f0;font-weight:600;'>{float(latest['open']):.2f}</div></div>"
             f"<div style='background:#0f172a;border:1px solid #1f2f44;border-radius:8px;padding:7px 10px;'><div style='font-size:11px;color:#8aa0c2;'>最高</div><div style='font-size:15px;color:#f87171;font-weight:600;'>{float(latest['high']):.2f}</div></div>"
             f"<div style='background:#0f172a;border:1px solid #1f2f44;border-radius:8px;padding:7px 10px;'><div style='font-size:11px;color:#8aa0c2;'>最低</div><div style='font-size:15px;color:#4ade80;font-weight:600;'>{float(latest['low']):.2f}</div></div>"
-            f"<div style='background:#0f172a;border:1px solid #1f2f44;border-radius:8px;padding:7px 10px;'><div style='font-size:11px;color:#8aa0c2;'>成交量</div><div style='font-size:15px;color:#e2e8f0;font-weight:600;'>{volume_text}</div></div>"
             "</div>"
             "</div>"
             "</div>"
@@ -2085,9 +2041,111 @@ ROLE_TRANSLATIONS = {
     "national_team": "平准基金",
 }
 
+ENGLISH_TOKEN_TRANSLATIONS = {
+    "retail": "散户",
+    "institutional": "机构",
+    "institution": "机构",
+    "quant": "量化",
+    "fund": "基金",
+    "bank": "银行",
+    "insurance": "险资",
+    "foreign": "外资",
+    "northbound": "北向",
+    "market": "市场",
+    "maker": "做市",
+    "trader": "交易",
+    "swing": "波段",
+    "day": "日内",
+    "momentum": "动量",
+    "chaser": "追涨",
+    "team": "团队",
+    "committee": "委员会",
+    "smart": "聪明",
+    "money": "资金",
+    "hedge": "对冲",
+    "private": "私募",
+    "state": "国资",
+    "policy": "政策",
+    "sector": "板块",
+    "technology": "科技",
+    "tech": "科技",
+    "finance": "金融",
+    "broker": "券商",
+    "banking": "银行",
+    "real": "地产",
+    "estate": "地产",
+    "property": "地产",
+    "consumer": "消费",
+    "retailer": "零售",
+    "manufacturing": "制造",
+    "industry": "工业",
+    "industrial": "工业",
+    "energy": "能源",
+    "materials": "材料",
+    "utility": "公用事业",
+    "utilities": "公用事业",
+    "healthcare": "医药",
+    "medical": "医药",
+    "pharma": "医药",
+    "communication": "通信",
+    "media": "传媒",
+    "internet": "互联网",
+    "auto": "汽车",
+    "agriculture": "农业",
+    "transport": "交通",
+    "logistics": "物流",
+    "semiconductor": "半导体",
+    "chip": "芯片",
+    "ai": "人工智能",
+    "new": "新",
+}
+
+SECTOR_TRANSLATIONS = {
+    "real_estate": "房地产",
+    "new_energy": "新能源",
+    "non_bank_financial": "非银金融",
+    "consumer_staples": "必选消费",
+    "consumer_discretionary": "可选消费",
+    "information_technology": "信息技术",
+}
+
+
+def _translate_english_tag(value: str, *, default_prefix: str = "类别") -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return default_prefix
+    lowered = raw.lower()
+    if lowered in ENGLISH_TOKEN_TRANSLATIONS:
+        return ENGLISH_TOKEN_TRANSLATIONS[lowered]
+    parts = [part for part in re.split(r"[_\-\s/]+", lowered) if part]
+    if not parts:
+        return raw
+    translated_parts: List[str] = []
+    translated_any = False
+    for part in parts:
+        translated = ENGLISH_TOKEN_TRANSLATIONS.get(part, part)
+        translated_parts.append(translated)
+        if translated != part:
+            translated_any = True
+    if translated_any:
+        return "".join(translated_parts)
+    return raw
+
+
+def _translate_sector_name(name: str) -> str:
+    lowered = str(name or "").strip().lower()
+    if not lowered:
+        return "其他板块"
+    if lowered in SECTOR_TRANSLATIONS:
+        return SECTOR_TRANSLATIONS[lowered]
+    return _translate_english_tag(str(name), default_prefix="板块")
+
+
 def _translate_role(role: str) -> str:
     cleaned = str(role).lower().replace("_00", "").replace("_01", "").replace("_02", "").replace("_03", "").strip()
-    return ROLE_TRANSLATIONS.get(cleaned, str(role))
+    if cleaned in ROLE_TRANSLATIONS:
+        return ROLE_TRANSLATIONS[cleaned]
+    return _translate_english_tag(str(role), default_prefix="角色")
 
 
 def _get_llm_visual_interpretation(prompt: str, cache_key: str, runtime_profile: RuntimeModeProfile) -> str:
@@ -2193,7 +2251,7 @@ def _render_sector_rotation_heatmap(package_dict: Dict[str, Any], policy_text: s
     if not sector_effects:
         return
     ordered = sorted(sector_effects.items(), key=lambda kv: abs(float(kv[1])), reverse=True)[:18]
-    labels = [str(name) for name, _ in ordered]
+    labels = [_translate_sector_name(str(name)) for name, _ in ordered]
     values = [float(value) for _, value in ordered]
     abs_values = [abs(v) + 0.1 for v in values]
     
@@ -2210,7 +2268,7 @@ def _render_sector_rotation_heatmap(package_dict: Dict[str, Any], policy_text: s
                 colorbar=dict(title="影响")
             ),
             textinfo="label",
-            hovertemplate="<b>%{label}</b><br>影响得分: %{color:.2f}<extra></extra>"
+            hovertemplate="<b>%{label}</b><br>影响得分：%{color:.2f}<extra></extra>"
         )
     )
     fig.update_layout(
@@ -2253,11 +2311,16 @@ def _render_regulation_counterfactual_panel(counterfactual: Dict[str, Any]) -> N
     st.plotly_chart(fig, use_container_width=True)
 
     scorecards = dict(counterfactual.get("scorecards", {}) or {})
+    world_labels = {
+        "no_intervention": "不介入",
+        "early_intervention": "提前介入",
+        "late_intervention": "延后介入",
+    }
     rows: List[Dict[str, Any]] = []
     for world_name, metrics in scorecards.items():
         rows.append(
             {
-                "world": world_name,
+                "world": world_labels.get(world_name, str(world_name)),
                 "return_pct": float(metrics.get("return_pct", 0.0)),
                 "max_drawdown": float(metrics.get("max_drawdown", 0.0)),
                 "avg_panic": float(metrics.get("avg_panic", 0.0)),
@@ -2285,6 +2348,7 @@ def _render_behavior_finance_panel(frame: pd.DataFrame, summary: Dict[str, Any])
     metric_cols[1].metric("最大恐慌度", f"{float(summary.get('max_panic', 0.0)):.2f}")
     metric_cols[2].metric("波动率", f"{float(summary.get('volatility', 0.0)):.2%}")
     metric_cols[3].metric("最大回撤", f"{float(summary.get('max_drawdown', 0.0)):.2%}")
+    st.caption("百分比口径：波动率=会话内日收益标准差；最大回撤=区间峰值到谷值最大跌幅；累计收益=期末相对起点的净变化。")
 
     csad = pd.to_numeric(frame.get("csad"), errors="coerce").fillna(0.0)
     panic = pd.to_numeric(frame.get("panic_level"), errors="coerce").fillna(0.0)
@@ -2333,9 +2397,10 @@ def _render_behavior_finance_panel(frame: pd.DataFrame, summary: Dict[str, Any])
         go.Bar(
             x=frame["time"],
             y=returns * 100.0,
-            name="单日收益 %",
+            name="单日涨跌（%）",
             marker_color=["#22c55e" if value >= 0 else "#ef4444" for value in returns],
             opacity=0.45,
+            hovertemplate="日期=%{x}<br>单日涨跌=%{y:.2f}%<extra></extra>",
         ),
         row=2,
         col=1,
@@ -2360,7 +2425,7 @@ def _render_behavior_finance_panel(frame: pd.DataFrame, summary: Dict[str, Any])
             <div class="summary-card">
               <div class="summary-label">行为金融解释</div>
               <div class="summary-value">{float(summary.get('return_pct', 0.0)):+.2%}</div>
-              <div class="summary-note">累计收益作为价格反馈结果，和 CSAD / 恐慌度一起读，避免只看涨跌。</div>
+              <div class="summary-note">这里的百分比表示“区间净变化”而非年化收益，需与 CSAD、恐慌度和回撤一起解读，避免单看涨跌。</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -2937,7 +3002,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
     metric_cols[2].metric("活跃政策数", f"{active_policies}")
     metric_cols[3].metric("待生效政策数", f"{queued_policies}")
     metric_cols[4].metric("最新收盘价", f"{float(session.get('last_close', 0.0)):.2f}")
-    metric_cols[5].metric("总收益", f"{summary.get('return_pct', 0.0):.2%}")
+    metric_cols[5].metric("会话波动率", f"{summary.get('volatility', 0.0):.2%}")
     st.progress(min(1.0, current_day / max(total_days, 1)))
 
     latest_step_report = dict(session.get("latest_step_report", {}) or {})
@@ -2961,9 +3026,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
         )
 
     package_dict = _policy_session_policy_package(session)
-    market_tab, behavior_tab, agent_tab, timeline_tab, report_tab = st.tabs(
-        ["市场走势", "行为金融", "智能体行为剖面", "政策时间轴", "政策报告"]
-    )
+    market_tab, behavior_tab, agent_tab = st.tabs(["市场走势", "行为金融", "智能体行为剖面"])
 
     with market_tab:
         chart_mode = st.radio(
@@ -3020,13 +3083,6 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                 unsafe_allow_html=True,
             )
 
-    with behavior_tab:
-        _render_behavior_finance_panel(session_frame, summary)
-
-    with agent_tab:
-        _render_agent_fmri_panel(session, package_dict)
-
-    with timeline_tab:
         st.markdown("### 政策时间轴")
         timeline_df = pd.DataFrame(session.get("policy_timeline", []) or _policy_session_timeline(session))
         if not timeline_df.empty:
@@ -3034,7 +3090,22 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
         else:
             st.info("当前还没有追加政策。")
 
-        st.markdown("### 追加政策")
+        st.markdown("### 拓展推演（已并入政策试验台）")
+        counterfactual_source = (
+            session_frame[["step", "time", "open", "high", "low", "close", "volume", "csad", "panic_level"]]
+            if not session_frame.empty
+            else pd.DataFrame()
+        )
+        counterfactual = _build_regulation_counterfactual_worlds(
+            counterfactual_source,
+            intensity=float(max(summary.get("policy_signal_avg", 1.0), 0.1)),
+        )
+        if counterfactual.get("worlds"):
+            _render_regulation_counterfactual_panel(counterfactual)
+        else:
+            st.info("当前数据量不足，继续推进会话后可查看拓展推演对照。")
+
+        st.markdown("### 追加政策（原拓展推演入口已合并）")
         can_append = str(session.get("status", "")).lower() in {"running", "paused"}
         append_cols = st.columns(2)
         with append_cols[0]:
@@ -3104,7 +3175,6 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
         else:
             st.info("继续仿真后，这里会展示逐日市场路径与交易明细。")
 
-    with report_tab:
         st.markdown("### 政策评估报告")
         report_bundle = session.get("report_bundle")
         report_ready = not session_frame.empty
@@ -3177,6 +3247,12 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                     use_container_width=True,
                     key=f"policy_lab_report_json_{presentation_mode}_{report_bundle['stem']}",
                 )
+
+    with behavior_tab:
+        _render_behavior_finance_panel(session_frame, summary)
+
+    with agent_tab:
+        _render_agent_fmri_panel(session, package_dict)
 
     autoplay = _policy_session_autoplay_state(session)
     if autoplay.get("enabled", False) and str(session.get("status", "")).lower() in {"running", "paused"}:

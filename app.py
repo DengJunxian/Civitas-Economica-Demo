@@ -33,7 +33,6 @@ from ui.behavioral_diagnostics import render_behavioral_diagnostics
 from ui.demo_wind_tunnel import render_demo_tab
 from ui.history_replay import render_history_replay
 from ui.policy_lab import _build_regulation_counterfactual_worlds, render_policy_lab
-from ui.regulator_optimization import REGULATOR_OPTIMIZATION_PAGE_FLAG, render_regulator_optimization
 from ui.reporting import export_defense_bundle
 from ui import dashboard as dashboard_ui
 
@@ -62,6 +61,8 @@ ENTRY_ALIASES = {
     "历史智能体回放": "历史回测",
     "新闻驱动历史回测": "历史回测",
     "历史回测": "历史回测",
+    "政策A/B推演": "政策试验台",
+    "监管优化": "政策试验台",
 }
 ENTRY_DESCRIPTIONS = {
     "政策试验台": "输入新政策，观察市场、风险与情绪如何联动变化。",
@@ -567,10 +568,10 @@ def _render_sidebar_global() -> None:
         
         menu_groups = {
             "⭐ 重点功能 (Core)": ["政策试验台", "历史回测"],
-            "🧪 扩展推演 (Extended)": ["政策A/B推演", "监管优化"],
             "📊 评估分析 (Analysis)": ["真实性报告", "高级分析"],
             "📘 系统说明 (Guide)": ["系统说明"],
         }
+        st.caption("扩展推演能力已并入“政策试验台”的市场走势页。")
 
         for group, entries in menu_groups.items():
             st.markdown(f"<div style='margin-top: 16px; margin-bottom: 8px; font-size: 13px; color: #8aa0c2; letter-spacing: 1px;'>{group}</div>", unsafe_allow_html=True)
@@ -886,13 +887,10 @@ def main() -> None:
         render_behavioral_diagnostics()
     elif entry == "政策A/B推演":
         st.session_state.runtime_mode = DEMO_MODE
-        _render_policy_lab_compatible("defense")
+        _render_policy_lab_compatible("standard")
     elif entry == "监管优化":
-        st.session_state.runtime_mode = LIVE_MODE
-        if _feature_flag_enabled(REGULATOR_OPTIMIZATION_PAGE_FLAG, default=True):
-            render_regulator_optimization()
-        else:
-            render_backtest_panel(ctrl=st.session_state.get("controller"))
+        st.session_state.runtime_mode = DEMO_MODE
+        _render_policy_lab_compatible("standard")
     elif entry == "高级分析":
         _render_advanced_analysis()
     else:

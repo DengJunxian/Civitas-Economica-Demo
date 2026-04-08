@@ -145,6 +145,33 @@ def _runtime_mode_text(runtime_profile: RuntimeModeProfile) -> str:
     return f"{label}｜{summary}" if summary else label
 
 
+def _sanitize_report_markdown_for_frontend(markdown_text: str) -> str:
+    """Drop process-improvement sections to keep report content focused on policy evaluation."""
+    text = str(markdown_text or "").replace("\r\n", "\n")
+    if not text.strip():
+        return "暂无报告正文。"
+
+    hidden_keywords = ("项目改进", "改进过程", "优化过程", "迭代过程", "重构过程")
+    cleaned_lines: List[str] = []
+    skip_section = False
+    for raw_line in text.split("\n"):
+        line = raw_line.strip()
+        is_heading = line.startswith("#")
+        if is_heading:
+            if any(keyword in line for keyword in hidden_keywords):
+                skip_section = True
+                continue
+            if skip_section:
+                skip_section = False
+        if skip_section:
+            continue
+        if any(keyword in line for keyword in hidden_keywords):
+            continue
+        cleaned_lines.append(raw_line)
+    cleaned = "\n".join(cleaned_lines).strip()
+    return cleaned or "暂无报告正文。"
+
+
 def _data_source_text(data_source: str) -> str:
     mapping = {
         "real_index": "真实指数数据",
@@ -1458,7 +1485,7 @@ def _policy_session_report_payload(session: Dict[str, Any], runtime_profile: Run
             runtime_profile,
         )
         return {
-            "title": f"政策实验台 - {session.get('policy_name', '政策仿真')}",
+            "title": f"政策试验台 - {session.get('policy_name', '政策仿真')}",
             "summary": summary,
             "policy_name": session.get("policy_name", "政策仿真"),
             "policy_text": session.get("policy_text", ""),
@@ -1505,7 +1532,7 @@ def _policy_session_report_payload(session: Dict[str, Any], runtime_profile: Run
         runtime_profile,
     )
     return {
-        "title": f"政策实验台 - {session.get('policy_name', '政策仿真')}",
+            "title": f"政策试验台 - {session.get('policy_name', '政策仿真')}",
         "summary": summary,
         "policy_name": session.get("policy_name", "政策仿真"),
         "policy_text": session.get("policy_text", ""),
@@ -1560,13 +1587,14 @@ def _policy_session_generate_report(session: Dict[str, Any], runtime_profile: Ru
     runner = session.get("_runner")
     if isinstance(runner, PolicySession):
         report = runner.generate_report(use_llm=bool(runtime_profile.use_live_api))
+        report_markdown = _sanitize_report_markdown_for_frontend(str(report.get("报告正文", "")))
         payload = _policy_session_report_payload(session, runtime_profile)
         report_meta = official_report_meta("policy_lab_session", str(payload["title"]))
         report_bundle = write_report_artifacts(
             root_dir=POLICY_REPORT_DIR / "session_reports",
             report_type="policy_lab_session",
             title=str(payload["title"]),
-            markdown_text=str(report.get("报告正文", "")),
+            markdown_text=report_markdown,
             payload=payload,
         )
         payload["report_meta"] = report_meta
@@ -1651,11 +1679,12 @@ def _policy_session_generate_report(session: Dict[str, Any], runtime_profile: Ru
             "- 政策影响会随时间自然衰减。",
         ]
     )
+    report_markdown = _sanitize_report_markdown_for_frontend("\n".join(markdown_lines))
     report_bundle = write_report_artifacts(
         root_dir=POLICY_REPORT_DIR / "session_reports",
         report_type="policy_lab_session",
         title=str(payload["title"]),
-        markdown_text="\n".join(markdown_lines),
+        markdown_text=report_markdown,
         payload=payload,
     )
     payload["report_meta"] = report_meta
@@ -2774,7 +2803,7 @@ def _build_policy_session_report_bundle(
     index_symbol: str,
     runtime_profile: RuntimeModeProfile,
 ) -> Dict[str, Any]:
-    report_title = f"政策实验台会话 - {selected_title}"
+    report_title = f"政策试验台会话 - {selected_title}"
     payload = dict(report.get("报告数据", {}) or {})
     report_meta = official_report_meta("policy_lab_session", report_title)
     payload.update(
@@ -2791,7 +2820,7 @@ def _build_policy_session_report_bundle(
         root_dir=POLICY_REPORT_DIR,
         report_type="policy_lab_session",
         title=report_title,
-        markdown_text=str(report.get("报告正文", "")),
+        markdown_text=_sanitize_report_markdown_for_frontend(str(report.get("报告正文", ""))),
         payload=payload,
     )
     bundle["report_meta"] = report_meta
@@ -2799,7 +2828,7 @@ def _build_policy_session_report_bundle(
 
 
 def render_policy_lab(*, presentation_mode: str = "standard") -> None:
-    st.subheader("政策实验台")
+    st.subheader("政策试验台")
     st.caption("仅供教学科研与仿真，不构成投资建议。")
     runtime_profile = _resolve_runtime_profile()
     presentation_mode = str(presentation_mode or "standard").strip().lower()
@@ -3023,7 +3052,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
             unsafe_allow_html=True,
         )
 
-    st.markdown("### 会话仪表盘")
+    st.markdown("### 会话总览")
     metric_cols = st.columns(6)
     metric_cols[0].metric("会话状态", policy_status)
     metric_cols[1].metric("已推进交易日", f"{current_day}/{total_days}")
@@ -3039,7 +3068,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
         latest_step_report=latest_step_report,
         session_summary=summary,
     )
-    st.markdown("### 传导快照")
+    st.markdown("### 政策传导速览")
     card_cols = st.columns(len(demo_cards))
     for col, card in zip(card_cols, demo_cards):
         col.markdown(
@@ -3054,7 +3083,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
         )
 
     package_dict = _policy_session_policy_package(session)
-    market_tab, behavior_tab, agent_tab = st.tabs(["市场走势", "行为金融", "智能体行为剖面"])
+    market_tab, behavior_tab, agent_tab = st.tabs(["市场走势", "行为金融", "智能体画像"])
 
     with market_tab:
         chart_mode = st.radio(
@@ -3093,7 +3122,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                 _render_role_orderflow_waterfall(session_frame, package_dict, policy_text_str, runtime_profile)
             _render_sector_rotation_heatmap(package_dict, policy_text_str, runtime_profile)
             
-            st.markdown("#### 政策评估解读")
+            st.markdown("#### 政策影响解读")
             narrative = _get_policy_narrative(
                 policy_text_str,
                 summary,
@@ -3118,7 +3147,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
         else:
             st.info("当前还没有追加政策。")
 
-        st.markdown("### 拓展推演（已并入政策试验台）")
+        st.markdown("### 反事实对照推演")
         counterfactual_source = (
             session_frame[["step", "time", "open", "high", "low", "close", "volume", "csad", "panic_level"]]
             if not session_frame.empty
@@ -3131,9 +3160,9 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
         if counterfactual.get("worlds"):
             _render_regulation_counterfactual_panel(counterfactual)
         else:
-            st.info("当前数据量不足，继续推进会话后可查看拓展推演对照。")
+            st.info("当前数据量不足，继续推进会话后可查看反事实对照结果。")
 
-        st.markdown("### 追加政策（原拓展推演入口已合并）")
+        st.markdown("### 追加政策设置")
         can_append = str(session.get("status", "")).lower() in {"running", "paused"}
         append_cols = st.columns(2)
         with append_cols[0]:
@@ -3196,18 +3225,18 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                 _store_session(session)
                 st.success("政策已加入会话队列。")
 
-        st.markdown("### 会话明细")
+        st.markdown("### 日度明细")
         display_frame = _policy_session_display_frame(session_frame)
         if not display_frame.empty:
             st.dataframe(display_frame.tail(60), use_container_width=True, hide_index=True)
         else:
-            st.info("继续仿真后，这里会展示逐日市场路径与交易明细。")
+            st.info("继续仿真后，这里将展示逐日市场路径与交易明细。")
 
-        st.markdown("### 政策评估报告")
+        st.markdown("### 政策评估报告（在线预览）")
         report_bundle = session.get("report_bundle")
         report_ready = not session_frame.empty
         if st.button(
-            "生成政策评估报告",
+            "生成/更新政策评估报告",
             use_container_width=True,
             disabled=not report_ready,
             key=f"policy_lab_generate_report_{presentation_mode}",
@@ -3222,6 +3251,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
         if report_bundle:
             report_meta = report_bundle.get("report_meta", {})
             disabled_reasons = dict(report_bundle.get("disabled_reasons", {}) or {})
+            report_preview = _sanitize_report_markdown_for_frontend(str(report_bundle.get("markdown_text", "")))
             st.markdown(
                 f"""
                 <div class="summary-card">
@@ -3236,10 +3266,13 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
             if disabled_reasons:
                 reason_text = "；".join(f"{k}: {v}" for k, v in disabled_reasons.items())
                 st.info(f"部分导出能力降级：{reason_text}")
+            st.caption("报告正文已在页面直接展示，可按需下载不同格式文件。")
+            st.markdown("#### 报告正文预览")
+            st.markdown(report_preview)
             download_cols = st.columns(4)
             with download_cols[0]:
                 st.download_button(
-                    "下载文档版",
+                    "下载 Word（文档）",
                     data=report_bundle.get("docx_bytes") or b"",
                     file_name=f"{report_bundle['stem']}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -3249,7 +3282,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                 )
             with download_cols[1]:
                 st.download_button(
-                    "下载版式版",
+                    "下载 PDF（版式）",
                     data=report_bundle.get("pdf_bytes") or b"",
                     file_name=f"{report_bundle['stem']}.pdf",
                     mime="application/pdf",
@@ -3259,8 +3292,8 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                 )
             with download_cols[2]:
                 st.download_button(
-                    "下载文本版",
-                    data=report_bundle["markdown_text"],
+                    "下载 Markdown（文本）",
+                    data=report_preview,
                     file_name=f"{report_bundle['stem']}.md",
                     mime="text/markdown",
                     use_container_width=True,
@@ -3268,7 +3301,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                 )
             with download_cols[3]:
                 st.download_button(
-                    "下载数据版",
+                    "下载 JSON（数据）",
                     data=report_bundle["json_text"],
                     file_name=f"{report_bundle['stem']}.json",
                     mime="application/json",

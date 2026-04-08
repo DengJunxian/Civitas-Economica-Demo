@@ -214,7 +214,7 @@ def _run_policy_ab_comparison(
 
 def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None:
     if show_header:
-        st.markdown("## 智能因子回测")
+        st.markdown("## 因子回测")
         st.caption("支持组合系统策略、因子诊断、政策 A/B 自动对比与量化研究数据导出。")
 
     if "backtest_result" not in st.session_state:
@@ -277,7 +277,7 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
             )
             lookback = st.slider("观察窗口", min_value=5, max_value=120, value=int(cfg_state.get("lookback", 20)))
             rebalance_frequency = st.select_slider(
-                "调仓频率(交易日)",
+                "调仓频率（交易日）",
                 options=[1, 2, 3, 5, 10, 20],
                 value=int(cfg_state.get("rebalance_frequency", 5)),
             )
@@ -291,9 +291,9 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
             allow_short = st.checkbox("允许做空", value=bool(cfg_state.get("allow_short", False)))
 
         with col_c:
-            commission_bps = st.slider("佣金 (bps)", min_value=0.0, max_value=20.0, value=float(cfg_state.get("commission_bps", 2.5)), step=0.1)
-            stamp_bps = st.slider("印花税 (bps, 卖出)", min_value=0.0, max_value=20.0, value=float(cfg_state.get("stamp_bps", 5.0)), step=0.1)
-            slippage_bps = st.slider("滑点 (bps)", min_value=0.0, max_value=40.0, value=float(cfg_state.get("slippage_bps", 5.0)), step=0.5)
+            commission_bps = st.slider("佣金（bps）", min_value=0.0, max_value=20.0, value=float(cfg_state.get("commission_bps", 2.5)), step=0.1)
+            stamp_bps = st.slider("印花税（bps，卖出）", min_value=0.0, max_value=20.0, value=float(cfg_state.get("stamp_bps", 5.0)), step=0.1)
+            slippage_bps = st.slider("滑点（bps）", min_value=0.0, max_value=40.0, value=float(cfg_state.get("slippage_bps", 5.0)), step=0.5)
             market_impact = st.slider("冲击系数", min_value=0.0, max_value=0.5, value=float(cfg_state.get("market_impact", 0.05)), step=0.01)
             policy_shock = st.slider("政策冲击因子", min_value=-1.0, max_value=1.0, value=float(cfg_state.get("policy_shock", 0.0)), step=0.05)
             sentiment_weight = st.slider("情绪权重", min_value=0.0, max_value=1.0, value=float(cfg_state.get("sentiment_weight", 0.5)), step=0.05)
@@ -426,9 +426,9 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
 
     dl_col1, dl_col2, dl_col3 = st.columns(3)
     with dl_col1:
-        st.download_button("下载绩效序列 CSV", data=perf_csv, file_name="backtest_performance.csv", mime="text/csv", width="stretch")
+        st.download_button("下载 CSV（绩效序列）", data=perf_csv, file_name="backtest_performance.csv", mime="text/csv", width="stretch")
     with dl_col2:
-        st.download_button("下载回测摘要 JSON", data=payload_json, file_name="backtest_summary.json", mime="application/json", width="stretch")
+        st.download_button("下载 JSON（回测摘要）", data=payload_json, file_name="backtest_summary.json", mime="application/json", width="stretch")
     with dl_col3:
         if st.button("导出量化研究数据束", width="stretch"):
             session_backtester: Optional[HistoricalBacktester] = st.session_state.get("backtester")
@@ -442,16 +442,16 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
                 except Exception as exc:
                     st.error(f"导出失败: {exc}")
 
-    st.markdown("### 政策A/B自动对比报告")
+    st.markdown("### 政策 A/B 对比报告")
     cfg_live = st.session_state.get("backtest_cfg", {})
     base_policy_shock = float(cfg_live.get("policy_shock", 0.0))
     p_col1, p_col2, p_col3 = st.columns(3)
     with p_col1:
-        policy_a = st.number_input("政策A冲击", value=base_policy_shock, step=0.05, key="policy_a_shock_input")
+        policy_a = st.number_input("政策 A 冲击", value=base_policy_shock, step=0.05, key="policy_a_shock_input")
     with p_col2:
-        policy_b = st.number_input("政策B冲击", value=base_policy_shock + 0.30, step=0.05, key="policy_b_shock_input")
+        policy_b = st.number_input("政策 B 冲击", value=base_policy_shock + 0.30, step=0.05, key="policy_b_shock_input")
     with p_col3:
-        run_compare = st.button("生成政策A/B自动对比报告", width="stretch")
+        run_compare = st.button("生成政策 A/B 对比报告", width="stretch")
 
     if run_compare:
         compare_backtester: Optional[HistoricalBacktester] = st.session_state.get("backtester")

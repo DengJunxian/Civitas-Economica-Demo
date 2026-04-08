@@ -93,7 +93,7 @@ def _render_social_propagation_report(report: Dict[str, Any]) -> None:
             )
         st.dataframe(pd.DataFrame(packet_rows), use_container_width=True, hide_index=True)
 
-    st.markdown("#### AI 解读")
+    st.markdown("#### 智能解读")
     st.markdown(
         narrate_payload(
             "社会传播报告解读",
@@ -176,7 +176,7 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
 
     # Intervention A/B panel
     ab_path = Path("outputs") / "intervention_effect_report.json"
-    st.markdown("### 干预前 / 干预后 A/B 对照")
+    st.markdown("### 干预前后对照（A/B）")
     if ab_path.exists():
         try:
             ab = json.loads(ab_path.read_text(encoding="utf-8"))

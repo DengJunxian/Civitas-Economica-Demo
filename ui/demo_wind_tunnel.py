@@ -118,7 +118,7 @@ def _build_policy_chain_payload(scenario: Any, current_step: int) -> Dict[str, A
 
 
 def _render_three_stage_story(scenario: Any, current_step: int) -> None:
-    st.subheader("三段式叙事：分析师 -> 经理 -> 市场")
+    st.subheader("三阶段叙事链路")
     analyst = scenario.analyst_manager_output.get("analyst_outputs", {})
     manager = scenario.analyst_manager_output.get("manager_decision", {})
     market_row = scenario.metrics[scenario.metrics["step"] <= current_step].tail(1)
@@ -126,7 +126,7 @@ def _render_three_stage_story(scenario: Any, current_step: int) -> None:
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown("### 1) 分析师")
+        st.markdown("### 分析师阶段")
         st.markdown(
             narrate_payload(
                 "分析师阶段解读",
@@ -135,7 +135,7 @@ def _render_three_stage_story(scenario: Any, current_step: int) -> None:
             )
         )
     with c2:
-        st.markdown("### 2) 经理")
+        st.markdown("### 经理阶段")
         st.markdown(
             narrate_payload(
                 "经理阶段解读",
@@ -144,7 +144,7 @@ def _render_three_stage_story(scenario: Any, current_step: int) -> None:
             )
         )
     with c3:
-        st.markdown("### 3) 市场")
+        st.markdown("### 市场反馈阶段")
         st.markdown(
             narrate_payload(
                 "市场反馈阶段解读",
@@ -187,7 +187,7 @@ def _handle_autoplay(scenario: Any) -> None:
 
 
 def render_demo_tab(ctrl: Optional[Any] = None) -> None:
-    st.markdown("## 答辩模式")
+    st.markdown("## 答辩演示")
     st.caption("一键加载场景、自动播放时间线，5 分钟内完成全链路演示。")
 
     scenarios = list_competition_scenarios()
@@ -214,7 +214,7 @@ def render_demo_tab(ctrl: Optional[Any] = None) -> None:
     with control_cols[2]:
         pause_clicked = st.button("暂停推演", use_container_width=True)
     with control_cols[3]:
-        step_clicked = st.button("单日推演 (Day+1)", use_container_width=True)
+        step_clicked = st.button("单日推演（+1天）", use_container_width=True)
     with control_cols[4]:
         reset_clicked = st.button("重置", use_container_width=True)
 

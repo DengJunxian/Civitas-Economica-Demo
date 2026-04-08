@@ -471,7 +471,7 @@ def render_decision_evidence_flow(
     narration_items: Iterable[Dict[str, Any]],
     analyst_manager_output: Dict[str, Any],
 ) -> None:
-    st.subheader("证据流")
+    st.subheader("证据流总览")
     st.caption("展示结构化证据卡、矛盾矩阵、经理最终卡、风控告警与校准指标。")
 
     analyst_cards = analyst_manager_output.get("analyst_cards")
@@ -685,7 +685,7 @@ def render_orderflow_microstructure_panel(
     c5.metric("羊群程度", f"{herding_proxy:.3f}")
 
 def render_financial_health_dashboard(metrics_dict: Dict[str, Any], key_prefix: str = "health") -> None:
-    st.markdown("### 📊 实时金融异常指标监测", help="通过速度表盘直观反应市场在恐慌、羊群效应、流动性枯竭方面的风险情况。")
+    st.markdown("### 实时异常指标监测", help="通过速度表盘直观反应市场在恐慌、羊群效应、流动性枯竭方面的风险情况。")
     
     panic = float(metrics_dict.get("panic_level", 0.0))
     csad = float(metrics_dict.get("csad", 0.0))
@@ -760,7 +760,7 @@ def render_ai_insight_card(text: str) -> None:
                     backdrop-filter: blur(8px);
                     animation: insight-pulse 3.5s infinite;">
             <div style="color: #4da6ff; font-weight: 700; font-size: 14px; margin-bottom: 8px; letter-spacing: 1.5px; display: flex; align-items: center; justify-content: space-between;">
-                <span>🧠 AI 专家前瞻与状态点评</span>
+                <span>智能前瞻与状态点评</span>
                 <span style="font-size: 11px; font-weight: normal; background: rgba(24, 144, 255, 0.2); padding: 2px 8px; border-radius: 4px;">由 ModelRouter 实时驱动</span>
             </div>
             <div style="color: #e2e8f0; font-size: 15px; line-height: 1.6;">

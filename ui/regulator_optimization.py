@@ -68,7 +68,7 @@ def _build_regulator_result_frames(result: Dict[str, Any]) -> Dict[str, pd.DataF
 
 
 def render_regulator_optimization() -> None:
-    st.markdown("## 监管优化")
+    st.markdown("## 监管策略优化")
     st.caption("独立监管优化页：默认优先真实环境，输出 A/B、Pareto、推荐方案与证据链。")
 
     with st.form("regulator_optimization_form", clear_on_submit=False):
@@ -125,7 +125,7 @@ def render_regulator_optimization() -> None:
             f"fallback={env_selection.get('fallback_used', False)}"
         )
 
-    st.markdown("### 反事实 A/B 对照")
+    st.markdown("### 反事实对照（A/B）")
     left, right = st.columns(2)
     with left:
         if frames["baseline"].empty:
@@ -138,7 +138,7 @@ def render_regulator_optimization() -> None:
         else:
             st.dataframe(frames["deltas"], use_container_width=True, hide_index=True)
 
-    st.markdown("### Pareto 前沿")
+    st.markdown("### 帕累托前沿")
     pareto_df = frames["pareto"]
     if pareto_df.empty:
         st.info("暂无 Pareto 数据。")

@@ -65,22 +65,22 @@ ENTRY_ALIASES = {
     "监管优化": "政策试验台",
 }
 ENTRY_DESCRIPTIONS = {
-    "政策试验台": "输入新政策，观察市场、风险与情绪如何联动变化。",
-    "历史回测": "自动抓取回测时段的主要经济政策与新闻作为输入，仿真并与大盘真实走势进行可信度对照。",
-    "真实性报告": "查看路径拟合、微观结构拟合、行为模式拟合及可解释差异。",
-    "政策A/B推演": "同一政策在不同干预方案下做对照实验，支持答辩展示。",
-    "监管优化": "面向监管目标做动作搜索，输出稳市场-流动性-成本权衡。",
-    "高级分析": "集中展示证据链、行为金融诊断与专家级答辩视图。",
-    "系统说明": "快速了解架构、数据流与工程实现边界。",
+    "政策试验台": "输入政策文本，查看市场路径、风险指标与情绪传导。",
+    "历史回测": "基于真实历史窗口自动汇总政策与新闻，评估仿真与真实走势的一致性。",
+    "真实性报告": "查看路径拟合、微观结构与行为特征的拟真程度。",
+    "政策A/B推演": "比较不同政策组合的效果差异，支持情景对照。",
+    "监管优化": "围绕稳定性、流动性与成本进行监管策略权衡。",
+    "高级分析": "聚合证据链、行为金融诊断与专家视图。",
+    "系统说明": "快速了解页面结构、数据流与推荐使用路径。",
 }
 ENTRY_PURPOSE = {
-    "政策试验台": "输入政策并运行多智能体仿真",
-    "历史回测": "基于真实历史期间的政策与新闻事件进行回测",
-    "真实性报告": "解释哪里像真、哪里不像真",
-    "政策A/B推演": "政策组合对照与机制解释",
-    "监管优化": "监管动作优化与权衡分析",
-    "高级分析": "专家级答辩与证据追问",
-    "系统说明": "了解系统如何工作",
+    "政策试验台": "进行政策仿真与影响评估",
+    "历史回测": "验证历史区间下的拟真效果",
+    "真实性报告": "查看拟真证据与偏差边界",
+    "政策A/B推演": "做政策组合情景对照",
+    "监管优化": "搜索并比较监管策略",
+    "高级分析": "追问证据、机制与风险",
+    "系统说明": "快速建立全局认知",
 }
 THEME_PATH = Path("theme") / "competition_dark.css"
 MATERIALS_ROOT = Path("outputs") / "competition_materials"
@@ -222,7 +222,7 @@ def _render_value_bridge_tab() -> None:
         st.warning(f"反事实计算失败：{exc}")
         return
 
-    st.markdown("#### 监管反事实 A/B 差异")
+    st.markdown("#### 监管反事实对照（A/B）")
     worlds = dict(counterfactual.get("worlds", {}) or {})
     scorecards = dict(counterfactual.get("scorecards", {}) or {})
     rec = str(counterfactual.get("recommended_timing", ""))
@@ -313,9 +313,9 @@ def _render_top_entry_selector() -> None:
     st.markdown(
         f"""
         <div class='mode-pill' style='box-shadow: 0 0 15px rgba(24, 144, 255, 0.2) inset; padding: 6px 16px; font-weight: 600;'>
-            <span style='color: #fff;'>📍 模块枢纽：</span>{st.session_state.entry} 
+            <span style='color: #fff;'>当前模块：</span>{st.session_state.entry} 
             <span style='margin: 0 12px; color: #1f365c;'>|</span> 
-            <span style='color: #8aa0c2;'>🎯 核心职能：</span>{ENTRY_PURPOSE.get(st.session_state.entry, "")}
+            <span style='color: #8aa0c2;'>核心用途：</span>{ENTRY_PURPOSE.get(st.session_state.entry, "")}
         </div>
         """,
         unsafe_allow_html=True,
@@ -339,7 +339,7 @@ def _render_top_entry_selector() -> None:
         ):
             st.session_state.entry = "历史回测"
     with quick_c:
-        st.caption("核心入口优先：先在政策试验台看机制，再到历史回测做历史区间验证。")
+        st.caption("推荐路径：政策试验台 -> 历史回测 -> 高级分析。")
 
 
 def _ensure_demo_loaded() -> None:
@@ -562,16 +562,16 @@ def _generate_competition_materials() -> Dict[str, Path]:
 def _render_sidebar_global() -> None:
     with st.sidebar:
         st.markdown(
-            "### 🧭 导航菜单",
+            "### 导航菜单",
             help="在这里切换沙箱的不同功能模块。从上到下按展示逻辑排列。"
         )
         
         menu_groups = {
-            "⭐ 重点功能 (Core)": ["政策试验台", "历史回测"],
-            "📊 评估分析 (Analysis)": ["真实性报告", "高级分析"],
-            "📘 系统说明 (Guide)": ["系统说明"],
+            "重点功能": ["政策试验台", "历史回测"],
+            "评估分析": ["真实性报告", "高级分析"],
+            "系统说明": ["系统说明"],
         }
-        st.caption("扩展推演能力已并入“政策试验台”的市场走势页。")
+        st.caption("反事实对照与追加政策可在“政策试验台”内直接完成。")
 
         for group, entries in menu_groups.items():
             st.markdown(f"<div style='margin-top: 16px; margin-bottom: 8px; font-size: 13px; color: #8aa0c2; letter-spacing: 1px;'>{group}</div>", unsafe_allow_html=True)
@@ -587,15 +587,15 @@ def _render_sidebar_global() -> None:
                         st.session_state.entry = entry
         
         st.markdown("---")
-        st.markdown("### ⚡ 仿真模式设置")
-        sim_mode_display = {"SMART": "智能模式 (API优先 + 自动回退)", "DEEP": "深度模式 (Reasoner + Chat)"}
+        st.markdown("### 推演模式设置")
+        sim_mode_display = {"SMART": "智能模式（API 优先 + 自动回退）", "DEEP": "深度模式（Reasoner + Chat）"}
         selected_mode_key = st.radio(
             "选择 LLM 调度策略",
             options=["SMART", "DEEP"],
             index=0 if st.session_state.simulation_mode == "SMART" else 1,
             format_func=lambda x: sim_mode_display.get(x, x),
             label_visibility="collapsed",
-            help="智能模式默认在线 API 优先，单次失败自动回退离线；深度模式优先 DeepSeek Reasoner。"
+            help="智能模式优先在线 API，失败自动回退；深度模式优先 Reasoner，适合深入解读。"
         )
         if selected_mode_key != st.session_state.simulation_mode:
             st.session_state.simulation_mode = selected_mode_key
@@ -608,7 +608,7 @@ def _render_sidebar_global() -> None:
         if isinstance(runtime_profile, MutableMapping):
             summary = str(runtime_profile.get("summary", ""))
             pause_seconds = float(runtime_profile.get("pause_for_llm_seconds", 0.0) or 0.0)
-            st.caption(f"🛡️ 模式摘要：{summary}")
+            st.caption(f"模式摘要：{summary}")
 
         runtime_summary = _runtime_router_summary()
         if runtime_summary:
@@ -624,7 +624,7 @@ def _render_sidebar_global() -> None:
             st.markdown(f"<div style='font-size: 12px; margin-top: 10px; color: #8aa0c2;'>{status} | 在线成功={online_success} | 降级={fallback_total} | 成功率={success_rate:.0%}</div>", unsafe_allow_html=True)
 
         st.markdown("---")
-        st.caption("建议先看“系统说明”建立整体认知，再进入政策试验台和历史回测，最后用“高级分析”回答追问。")
+        st.caption("建议先看“系统说明”，再进入政策试验台与历史回测，最后用“高级分析”回答追问。")
 
         if st.session_state.entry in {"真实性报告", "监管优化", "高级分析"}:
             scenarios = list_competition_scenarios()
@@ -640,7 +640,7 @@ def _render_sidebar_global() -> None:
             else:
                 st.warning("未发现可用答辩场景，请检查 demo_scenarios 内容完整性。")
 
-            if st.button("生成答辩材料", width="stretch"):
+            if st.button("导出答辩材料", width="stretch"):
                 _ensure_demo_loaded()
                 if st.session_state.get("demo_scenario") is None:
                     st.error("当前没有可用场景，无法生成比赛材料。")
@@ -653,7 +653,7 @@ def _render_sidebar_global() -> None:
                         st.error(f"比赛材料生成失败：{exc}")
 
             if st.session_state.materials_last_export:
-                st.caption("最近生成文件（自然语言展示）")
+                st.caption("最近导出文件：")
                 for name, path in st.session_state.materials_last_export.items():
                     st.markdown(f"- 已生成 `{name}`，保存位置：`{path}`")
 
@@ -735,7 +735,7 @@ def _render_advanced_analysis() -> None:
     st.session_state.runtime_mode = DEMO_MODE
     st.markdown("## 高级分析")
     st.caption("这里保留专家追问、答辩演示、行为金融诊断和研究参数面板。")
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["智能决策解读", "市场行为分析", "答辩演示", "研究参数", "价值接线"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["智能决策解读", "市场行为分析", "答辩演示", "研究参数", "价值链路"])
 
     with tab1:
         _render_ai_decision_tab()
@@ -755,8 +755,8 @@ def _render_system_guide() -> None:
     st.markdown(
         """
         <div class="hero-panel" style="margin-top: 10px;">
-            <div class="hero-kicker">Judge Quick View</div>
-            <h1 style="font-size: 28px; margin-bottom: 15px;">3 分钟理解这个项目</h1>
+            <div class="hero-kicker">快速上手</div>
+            <h1 style="font-size: 28px; margin-bottom: 15px;">3 分钟了解系统</h1>
             <p style="font-size: 16px; color: #8aa0c2; max-width: 100%;">
                 数治观澜是一套面向金融政策评估与监管答辩的多智能体推演沙箱，
                 重点展示“政策输入 -> 智能体决策 -> 市场撮合 -> 风险诊断 -> 材料导出”的完整闭环。
@@ -769,7 +769,7 @@ def _render_system_guide() -> None:
     top_cols = st.columns(3)
     top_cards = [
         (
-            "项目定位",
+            "系统定位",
             "把抽象政策冲击翻译成可以看、可以解释、可以复盘的市场推演过程。",
             ["面向政策评估", "支持答辩演示", "强调可解释结果"],
         ),
@@ -779,7 +779,7 @@ def _render_system_guide() -> None:
             ["多智能体市场仿真", "历史场景重放", "行为金融指标诊断"],
         ),
         (
-            "评委建议路线",
+            "推荐使用路径",
             "先看系统说明，再跑政策试验台，最后用高级分析回答追问。",
             ["第 1 步：系统说明", "第 2 步：政策试验台", "第 3 步：高级分析"],
         ),
@@ -798,13 +798,13 @@ def _render_system_guide() -> None:
                 unsafe_allow_html=True,
             )
 
-    st.markdown("### 评委建议演示路径")
+    st.markdown("### 推荐演示路径")
     route_cols = st.columns(4)
     route_cards = [
         ("1. 系统说明", "先建立项目整体认知。", ["看项目定位", "看核心闭环", "看页面导航"]),
         ("2. 政策试验台", "输入政策并运行主演示。", ["展示K线与风险热度", "解释政策传导", "导出报告"]),
-        ("3. 历史回测", "证明项目不只是炫技界面。", ["自动提炼政策新闻输入", "查看历史路径重放", "解释偏差说明"]),
-        ("4. 高级分析", "回答“为什么可信”。", ["证据链", "微观结构图", "行为金融诊断"]),
+        ("3. 历史回测", "验证模型在历史区间的解释力。", ["自动提炼政策新闻输入", "查看历史路径重放", "解释偏差说明"]),
+        ("4. 高级分析", "回答“结论依据是什么”。", ["证据链", "微观结构图", "行为金融诊断"]),
     ]
     for col, (title, summary, bullets) in zip(route_cols, route_cards):
         with col:
@@ -820,11 +820,11 @@ def _render_system_guide() -> None:
                 unsafe_allow_html=True,
             )
 
-    st.markdown("### 页面功能总览")
+    st.markdown("### 页面能力总览")
     overview_cols = st.columns(2)
     overview_cards = [
         (
-            "面向演示的页面",
+            "演示主线页面",
             [
                 "政策试验台：展示政策输入后的市场路径和风险指标变化。",
                 "政策A/B推演：对比不同干预方案的效果差异。",
@@ -832,10 +832,10 @@ def _render_system_guide() -> None:
             ],
         ),
         (
-            "面向答辩的页面",
+            "分析深挖页面",
             [
-                "历史回测：在同一工作台自动抓取政策新闻并与真实大盘对照回测。",
-                "真实性报告/高级分析：解释哪里拟真、哪里仍有偏差。",
+                "历史回测：自动抓取政策新闻并与真实大盘对照回测。",
+                "真实性报告/高级分析：解释拟真程度、偏差来源与证据依据。",
             ],
         ),
     ]

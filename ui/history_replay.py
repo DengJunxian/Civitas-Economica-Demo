@@ -921,9 +921,9 @@ def _render_agent_replay_workspace(
             end_date = st.date_input("结束日期", value=default_end)
             symbol_label = st.selectbox("对比指数基准", options=list(INDEX_OPTIONS.keys()), index=1)
             
-            policy_name = st.text_input("测试任务名称", value=f"历史回测: {start_date} ~ {end_date}")
+            policy_name = st.text_input("任务名称", value=f"历史回测：{start_date} ~ {end_date}")
             
-            st.info("系统会先自动抓取并总结该区间的主要经济政策与重大新闻，并作为“被测试政策”输入仿真。")
+            st.info("系统会自动抓取并总结该区间的主要经济政策与重大新闻，并作为测试政策输入仿真。")
             policy_text = st.text_area(
                 "手动覆盖政策文本（可选）",
                 value="",
@@ -1155,7 +1155,7 @@ def _render_agent_replay_workspace(
     )
 
     t_market, t_metrics, t_behavior, t_report = st.tabs(
-        ["📈 市场走势与对比", "📊 仿真指标解读", "🧠 行为与层级分析", "📄 历史评估报告归档"]
+        ["市场走势对比", "指标解读", "行为诊断", "历史评估报告"]
     )
 
     with t_market:
@@ -1176,26 +1176,26 @@ def _render_agent_replay_workspace(
                 shown_score = float(demo_score if demo_score is not None else strict_score or 0.0)
                 st.metric("仿真可信度", f"{shown_score:.0%}", help="综合趋势、波动与响应时点后的可信区间评估。")
                 
-        st.markdown("### 智能体行为投射（模型读数）")
+        st.markdown("### 智能体行为读数")
         _render_agent_readout(bundle["policy_text"], result, metrics)
 
     with t_behavior:
-        st.markdown("### 仿真层级行为诊断报告")
+        st.markdown("### 仿真行为分层诊断")
         _render_replay_brief(bundle["replay_cards"])
 
-        st.markdown("### 仿真偏差与容错说明")
+        st.markdown("### 偏差说明与解释边界")
         st.markdown(
             f"""
             <div class="summary-card">
               <div class="summary-value">{_build_bias_explanation(metrics, bundle['policy_name'])}</div>
-              <div class="summary-note">【系统提示】通过历史回测可以验证逻辑的一致性，但无法重溯所有边角事件，因此保留了可解释的容错区间。</div>
+              <div class="summary-note">【系统提示】历史回测用于验证政策逻辑一致性；对个别边角事件保留可解释的误差区间。</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
     with t_report:
-        st.markdown("### 历史推演文件归档")
+        st.markdown("### 历史评估报告预览与导出")
         _render_report_export(bundle["export_bundle"])
 
 

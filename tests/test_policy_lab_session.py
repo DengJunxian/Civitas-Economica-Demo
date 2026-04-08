@@ -177,7 +177,7 @@ def test_policy_session_report_payload_contains_chinese_summary_and_package() ->
     payload = _policy_session_report_payload(session, resolve_runtime_mode_profile("SMART"))
 
     assert package["event"]["raw_text"]
-    assert payload["title"].startswith("政策实验台")
+    assert payload["title"].startswith("政策试验台")
     assert payload["session"]["status"] == "running"
     assert payload["timeline"]
     assert payload["narrative"]

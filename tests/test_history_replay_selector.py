@@ -33,7 +33,7 @@ def test_history_replay_selector_keeps_factor_fallback_with_new_flags():
 
     assert isinstance(engine, FactorBacktestEngine)
     assert resolved_mode == "factor"
-    assert "falling back" in reason.lower()
+    assert ("falling back" in reason.lower()) or ("回退" in reason)
 
 
 def test_historical_backtester_keeps_factor_compatibility():

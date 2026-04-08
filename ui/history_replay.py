@@ -472,11 +472,11 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
     point_count = max(1, length - 1)
     real_ret = np.diff(real_p) / np.maximum(real_p[:-1], 1e-12)
     seed_base = int(round(float(real_p[0]) * 100.0)) + length * 97 + 7
-    min_match = 0.50
-    max_match = 0.70
+    min_match = 0.70
+    max_match = 0.80
 
     best_prices = sim_p.copy()
-    best_target = 0.60
+    best_target = 0.75
     best_achieved = _direction_match_ratio(real_p, best_prices)
     best_distance = min(abs(best_achieved - min_match), abs(best_achieved - max_match))
     best_match_points = int(round(np.clip(best_achieved, 0.0, 1.0) * point_count))
@@ -486,13 +486,13 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
     max_attempts = 7
     for attempt in range(max_attempts):
         rng = np.random.default_rng(seed_base + attempt * 131)
-        target_match = float(np.clip(0.60 + rng.uniform(-0.08, 0.08), 0.52, 0.68))
+        target_match = float(np.clip(0.75 + rng.uniform(-0.05, 0.05), 0.70, 0.80))
         match_count = int(round(target_match * point_count))
         match_count = int(np.clip(match_count, int(np.floor(min_match * point_count)), int(np.ceil(max_match * point_count))))
         all_points = np.arange(point_count, dtype=int)
         match_points = set(int(i) for i in rng.choice(all_points, size=max(1, match_count), replace=False).tolist())
 
-        base_amp = float(max(np.percentile(np.abs(real_ret), 60), 0.0022))
+        base_amp = float(max(np.percentile(np.abs(real_ret), 55), 0.0018))
         candidate: List[float] = [float(real_p[0])]
         large_bias_points = 0
 
@@ -506,20 +506,21 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
             desired_sign = real_sign if step_idx in match_points else -real_sign
 
             local_amp = max(abs(real_step_ret), base_amp)
-            oscillation = float(0.45 + 0.55 * abs(np.sin(idx * 1.31 + rng.uniform(-0.35, 0.35))))
-            noise_amp = float(local_amp * (0.20 + 0.55 * rng.random()))
+            oscillation = float(0.58 + 0.40 * abs(np.sin(idx * 1.29 + rng.uniform(-0.25, 0.25))))
+            noise_amp = float(local_amp * (0.12 + 0.35 * rng.random()))
             shock_amp = 0.0
-            if rng.random() < 0.18:
-                shock_amp = float(local_amp * rng.uniform(0.45, 1.25))
+            if rng.random() < 0.10:
+                shock_amp = float(local_amp * rng.uniform(0.20, 0.65))
                 large_bias_points += 1
 
-            ret_mag = float(np.clip(local_amp * oscillation + noise_amp + shock_amp, 0.0012, 0.06))
+            ret_mag = float(np.clip(local_amp * oscillation + noise_amp + shock_amp, 0.0009, 0.038))
             step_ret = float(desired_sign * ret_mag)
-            if idx >= 2 and rng.random() < 0.16:
-                step_ret = float(-np.sign(step_ret) * min(abs(step_ret) * rng.uniform(0.35, 0.85), 0.04))
+            if idx >= 2 and rng.random() < 0.10:
+                step_ret = float(-np.sign(step_ret) * min(abs(step_ret) * rng.uniform(0.30, 0.65), 0.02))
 
             next_price = prev_price * (1.0 + step_ret)
-            dev_cap = 0.12 if idx < max(4, point_count // 3) else 0.16
+            next_price = float(next_price * 0.78 + real_p[idx] * 0.22)
+            dev_cap = 0.07 if idx < max(4, point_count // 3) else 0.10
             upper = real_p[idx] * (1.0 + dev_cap)
             lower = real_p[idx] * (1.0 - dev_cap)
             next_price = float(np.clip(next_price, lower, upper))
@@ -556,12 +557,12 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
             prev_close = float(calibrated[idx - 1] if idx > 0 else calibrated[idx])
             gap = 0.0 if idx == 0 else float(bar_rng.normal(0.0, 0.0018))
             open_price = float(prev_close * (1.0 + gap))
-            open_price = float(np.clip(open_price, close_price * 0.94, close_price * 1.06))
+            open_price = float(np.clip(open_price, close_price * 0.965, close_price * 1.035))
 
             body = abs(close_price - open_price)
-            base_span = max(body, float(real_p[idx]) * float(0.0022 + bar_rng.random() * 0.0062))
-            upper_wick = base_span * float(0.35 + bar_rng.random() * 1.15)
-            lower_wick = base_span * float(0.35 + bar_rng.random() * 1.15)
+            base_span = max(body, float(real_p[idx]) * float(0.0018 + bar_rng.random() * 0.0038))
+            upper_wick = base_span * float(0.28 + bar_rng.random() * 0.72)
+            lower_wick = base_span * float(0.28 + bar_rng.random() * 0.72)
             high = max(open_price, close_price) + upper_wick
             low = max(1e-6, min(open_price, close_price) - lower_wick)
 
@@ -569,7 +570,9 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
             base_volume = float(base_volume if base_volume is not None else 0.0)
             if base_volume <= 0.0:
                 base_volume = 1000.0
-            burst = 1.0 + min(abs(close_price / max(open_price, 1e-9) - 1.0) * 110.0, 1.2) + float(bar_rng.random() * 0.25)
+            move_amp = abs(close_price / max(open_price, 1e-9) - 1.0)
+            burst = 0.88 + min(move_amp * 62.0, 0.45) + float(bar_rng.random() * 0.22)
+            burst = float(np.clip(burst, 0.80, 1.55))
 
             bar["open"] = open_price
             bar["close"] = close_price

@@ -21,8 +21,8 @@ def test_moderate_calibration_uses_mixed_profile_and_large_bias_points() -> None
 
     profile = dict(result.metadata.get("calibration_mix_profile", {}) or {})
     assert profile["total_adjusted_points"] == 30
-    assert 0.50 <= float(profile["achieved_direction_match"]) <= 0.70
-    assert 0.50 <= float(profile["target_direction_match"]) <= 0.70
+    assert 0.70 <= float(profile["achieved_direction_match"]) <= 0.80
+    assert 0.70 <= float(profile["target_direction_match"]) <= 0.80
     assert int(profile["anchor_points"]) >= 1
 
     calibrated = np.asarray(result.simulated_prices, dtype=float)
@@ -30,11 +30,12 @@ def test_moderate_calibration_uses_mixed_profile_and_large_bias_points() -> None
     real_ret = np.diff(real) / np.maximum(real[:-1], 1e-9)
     sim_ret = np.diff(calibrated) / np.maximum(calibrated[:-1], 1e-9)
     sign_match = float(np.mean(np.sign(real_ret) == np.sign(sim_ret)))
-    assert 0.50 <= sign_match <= 0.70
+    assert 0.70 <= sign_match <= 0.80
 
     rel_dev = np.abs(calibrated[1:] - real[1:]) / np.maximum(real[1:], 1e-9)
-    assert float(np.max(rel_dev)) >= 0.02
-    assert int(np.sum(rel_dev >= 0.015)) >= 6
+    assert float(np.max(rel_dev)) >= 0.004
+    assert int(np.sum(rel_dev >= 0.003)) >= 6
+    assert float(np.median(rel_dev)) <= 0.06
 
     bars = result.simulated_bars
     assert bars

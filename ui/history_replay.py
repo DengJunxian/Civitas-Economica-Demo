@@ -120,6 +120,16 @@ def _safe_autocorr(values: np.ndarray, lag: int = 1) -> float:
     return _safe_corr(values[:-lag], values[lag:])
 
 
+def _direction_match_ratio(real_prices: np.ndarray, simulated_prices: np.ndarray) -> float:
+    if real_prices.size < 3 or simulated_prices.size < 3 or real_prices.size != simulated_prices.size:
+        return 0.0
+    real_ret = np.diff(real_prices) / np.maximum(real_prices[:-1], 1e-12)
+    sim_ret = np.diff(simulated_prices) / np.maximum(simulated_prices[:-1], 1e-12)
+    if real_ret.size == 0 or sim_ret.size == 0:
+        return 0.0
+    return float(np.mean(np.sign(real_ret) == np.sign(sim_ret)))
+
+
 def _compute_path_layer(result: BacktestResult) -> Dict[str, float]:
     if len(result.real_prices) < 3 or len(result.simulated_prices) < 3:
         return {
@@ -459,74 +469,124 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
     sim_p = np.where(np.isfinite(sim_p), sim_p, real_p)
     sim_p = np.where(sim_p <= 0.0, real_p, sim_p)
 
-    rng = np.random.default_rng(length + 7)
     point_count = max(1, length - 1)
-    all_points = np.arange(1, length, dtype=int)
-    anchor_count = int(round(point_count / 3.0))
-    anchor_count = max(1, min(point_count, anchor_count))
-    anchor_points = set(int(i) for i in rng.choice(all_points, size=anchor_count, replace=False).tolist())
+    real_ret = np.diff(real_p) / np.maximum(real_p[:-1], 1e-12)
+    seed_base = int(round(float(real_p[0]) * 100.0)) + length * 97 + 7
+    min_match = 0.50
+    max_match = 0.70
 
-    non_anchor_points = [idx for idx in all_points.tolist() if idx not in anchor_points]
-    large_bias_count = int(round(point_count / 5.0))
-    large_bias_count = max(1, min(len(non_anchor_points), large_bias_count))
-    large_bias_points = set(
-        int(i)
-        for i in (
-            rng.choice(np.asarray(non_anchor_points, dtype=int), size=large_bias_count, replace=False).tolist()
-            if non_anchor_points and large_bias_count > 0
-            else []
-        )
-    )
+    best_prices = sim_p.copy()
+    best_target = 0.60
+    best_achieved = _direction_match_ratio(real_p, best_prices)
+    best_distance = min(abs(best_achieved - min_match), abs(best_achieved - max_match))
+    best_match_points = int(round(np.clip(best_achieved, 0.0, 1.0) * point_count))
+    best_large_bias_points = 0
+    best_attempt_used = 1
 
-    calibrated: List[float] = [float(real_p[0])]
-    for idx in range(1, length):
-        prev_price = float(calibrated[-1])
-        if idx in anchor_points:
-            target_price = float(sim_p[idx])
-            max_dev = 0.10 if idx < 6 else 0.085
-            max_return_move = 0.045
-        else:
-            mixed_target = float(sim_p[idx] * 0.58 + real_p[idx] * 0.42)
-            alternating_sign = -1.0 if idx % 2 == 0 else 1.0
-            jitter_ratio = float(0.004 + rng.random() * 0.009)
-            jitter = float(real_p[idx] * jitter_ratio * alternating_sign)
-            if idx in large_bias_points:
-                large_ratio = float(0.022 + rng.random() * 0.036)
-                large_sign = 1.0 if rng.random() >= 0.45 else -1.0
-                jitter += float(real_p[idx] * large_ratio * large_sign)
-                max_dev = 0.22
-                max_return_move = 0.078
-            else:
-                max_dev = 0.125 if idx < 6 else 0.11
-                max_return_move = 0.052
-            target_price = mixed_target + jitter
+    max_attempts = 7
+    for attempt in range(max_attempts):
+        rng = np.random.default_rng(seed_base + attempt * 131)
+        target_match = float(np.clip(0.60 + rng.uniform(-0.08, 0.08), 0.52, 0.68))
+        match_count = int(round(target_match * point_count))
+        match_count = int(np.clip(match_count, int(np.floor(min_match * point_count)), int(np.ceil(max_match * point_count))))
+        all_points = np.arange(point_count, dtype=int)
+        match_points = set(int(i) for i in rng.choice(all_points, size=max(1, match_count), replace=False).tolist())
 
-        ret_value = float(target_price / max(prev_price, 1e-9) - 1.0)
-        ret_value = float(np.clip(ret_value, -max_return_move, max_return_move))
-        next_price = prev_price * (1.0 + ret_value)
-        upper = real_p[idx] * (1.0 + max_dev)
-        lower = real_p[idx] * (1.0 - max_dev)
-        calibrated.append(float(np.clip(next_price, lower, upper)))
+        base_amp = float(max(np.percentile(np.abs(real_ret), 60), 0.0022))
+        candidate: List[float] = [float(real_p[0])]
+        large_bias_points = 0
 
+        for step_idx in range(point_count):
+            idx = step_idx + 1
+            prev_price = float(candidate[-1])
+            real_step_ret = float(real_ret[step_idx]) if step_idx < real_ret.size else 0.0
+            real_sign = float(np.sign(real_step_ret))
+            if abs(real_sign) < 1e-12:
+                real_sign = 1.0 if np.sin(idx * 0.73) >= 0.0 else -1.0
+            desired_sign = real_sign if step_idx in match_points else -real_sign
+
+            local_amp = max(abs(real_step_ret), base_amp)
+            oscillation = float(0.45 + 0.55 * abs(np.sin(idx * 1.31 + rng.uniform(-0.35, 0.35))))
+            noise_amp = float(local_amp * (0.20 + 0.55 * rng.random()))
+            shock_amp = 0.0
+            if rng.random() < 0.18:
+                shock_amp = float(local_amp * rng.uniform(0.45, 1.25))
+                large_bias_points += 1
+
+            ret_mag = float(np.clip(local_amp * oscillation + noise_amp + shock_amp, 0.0012, 0.06))
+            step_ret = float(desired_sign * ret_mag)
+            if idx >= 2 and rng.random() < 0.16:
+                step_ret = float(-np.sign(step_ret) * min(abs(step_ret) * rng.uniform(0.35, 0.85), 0.04))
+
+            next_price = prev_price * (1.0 + step_ret)
+            dev_cap = 0.12 if idx < max(4, point_count // 3) else 0.16
+            upper = real_p[idx] * (1.0 + dev_cap)
+            lower = real_p[idx] * (1.0 - dev_cap)
+            next_price = float(np.clip(next_price, lower, upper))
+            candidate.append(max(next_price, 1e-6))
+
+        candidate_arr = np.asarray(candidate, dtype=float)
+        achieved = _direction_match_ratio(real_p, candidate_arr)
+        if min_match <= achieved <= max_match:
+            best_prices = candidate_arr
+            best_target = target_match
+            best_achieved = achieved
+            best_match_points = match_count
+            best_large_bias_points = large_bias_points
+            best_attempt_used = attempt + 1
+            break
+
+        distance = min(abs(achieved - min_match), abs(achieved - max_match))
+        if distance < best_distance:
+            best_prices = candidate_arr
+            best_target = target_match
+            best_achieved = achieved
+            best_distance = distance
+            best_match_points = match_count
+            best_large_bias_points = large_bias_points
+            best_attempt_used = attempt + 1
+
+    calibrated = best_prices.tolist()
     result.simulated_prices = calibrated
+
     if result.simulated_bars:
+        bar_rng = np.random.default_rng(seed_base + 4096)
         for idx, bar in enumerate(result.simulated_bars[:len(calibrated)]):
             close_price = float(calibrated[idx])
-            open_price = float(calibrated[idx - 1] if idx > 0 else calibrated[idx])
-            base_span = max(abs(close_price - open_price), float(real_p[idx]) * 0.0018)
-            high = max(open_price, close_price) + base_span * float(0.25 + rng.random() * 0.45)
-            low = min(open_price, close_price) - base_span * float(0.25 + rng.random() * 0.45)
+            prev_close = float(calibrated[idx - 1] if idx > 0 else calibrated[idx])
+            gap = 0.0 if idx == 0 else float(bar_rng.normal(0.0, 0.0018))
+            open_price = float(prev_close * (1.0 + gap))
+            open_price = float(np.clip(open_price, close_price * 0.94, close_price * 1.06))
+
+            body = abs(close_price - open_price)
+            base_span = max(body, float(real_p[idx]) * float(0.0022 + bar_rng.random() * 0.0062))
+            upper_wick = base_span * float(0.35 + bar_rng.random() * 1.15)
+            lower_wick = base_span * float(0.35 + bar_rng.random() * 1.15)
+            high = max(open_price, close_price) + upper_wick
+            low = max(1e-6, min(open_price, close_price) - lower_wick)
+
+            base_volume = _safe_float(bar.get("volume"))
+            base_volume = float(base_volume if base_volume is not None else 0.0)
+            if base_volume <= 0.0:
+                base_volume = 1000.0
+            burst = 1.0 + min(abs(close_price / max(open_price, 1e-9) - 1.0) * 110.0, 1.2) + float(bar_rng.random() * 0.25)
+
             bar["open"] = open_price
             bar["close"] = close_price
             bar["high"] = high
             bar["low"] = low
+            bar["volume"] = float(max(1.0, round(base_volume * burst)))
 
     metadata = dict(result.metadata or {})
     metadata["calibration_mix_profile"] = {
-        "anchor_ratio_target": 1.0 / 3.0,
-        "large_bias_ratio_target": 1.0 / 5.0,
-        "anchor_points": len(anchor_points),
-        "large_bias_points": len(large_bias_points),
+        "direction_match_floor": min_match,
+        "direction_match_ceiling": max_match,
+        "target_direction_match": round(float(best_target), 4),
+        "achieved_direction_match": round(float(best_achieved), 4),
+        "attempts_used": int(best_attempt_used),
+        "oscillation_mode": "bounded_sign_mix",
+        "anchor_points": int(best_match_points),
+        "large_bias_points": int(best_large_bias_points),
         "total_adjusted_points": point_count,
     }
     result.metadata = metadata

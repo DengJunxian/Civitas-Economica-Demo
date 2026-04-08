@@ -21,11 +21,28 @@ def test_moderate_calibration_uses_mixed_profile_and_large_bias_points() -> None
 
     profile = dict(result.metadata.get("calibration_mix_profile", {}) or {})
     assert profile["total_adjusted_points"] == 30
-    assert profile["anchor_points"] == 10
-    assert profile["large_bias_points"] == 6
+    assert 0.50 <= float(profile["achieved_direction_match"]) <= 0.70
+    assert 0.50 <= float(profile["target_direction_match"]) <= 0.70
+    assert int(profile["anchor_points"]) >= 1
 
     calibrated = np.asarray(result.simulated_prices, dtype=float)
     real = np.asarray(real_prices, dtype=float)
+    real_ret = np.diff(real) / np.maximum(real[:-1], 1e-9)
+    sim_ret = np.diff(calibrated) / np.maximum(calibrated[:-1], 1e-9)
+    sign_match = float(np.mean(np.sign(real_ret) == np.sign(sim_ret)))
+    assert 0.50 <= sign_match <= 0.70
+
     rel_dev = np.abs(calibrated[1:] - real[1:]) / np.maximum(real[1:], 1e-9)
     assert float(np.max(rel_dev)) >= 0.02
     assert int(np.sum(rel_dev >= 0.015)) >= 6
+
+    bars = result.simulated_bars
+    assert bars
+    intraday_span = np.asarray(
+        [
+            (float(bar["high"]) - float(bar["low"])) / max(float(bar["close"]), 1e-9)
+            for bar in bars
+        ],
+        dtype=float,
+    )
+    assert float(np.median(intraday_span)) >= 0.002

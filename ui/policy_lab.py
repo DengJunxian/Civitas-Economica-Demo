@@ -552,10 +552,14 @@ def _apply_regulatory_intervention_worldline(
     *,
     intervention_step: int,
     intensity: float,
+    world_name: str = "counterfactual",
 ) -> pd.DataFrame:
     if frame.empty:
         return frame.copy()
     out = frame.copy().reset_index(drop=True)
+    seed_input = f"{world_name}|{len(out)}|{intervention_step}|{float(intensity):.4f}"
+    seed = int(hashlib.sha256(seed_input.encode("utf-8")).hexdigest()[:8], 16)
+    rng = np.random.default_rng(seed)
     prev_close = float(out.iloc[0]["open"])
     for idx, row in out.iterrows():
         step = int(row["step"])
@@ -568,11 +572,15 @@ def _apply_regulatory_intervention_worldline(
         volume = float(row["volume"])
         if step >= intervention_step:
             phase = step - intervention_step
-            relief = np.exp(-phase / 8.0)
-            close *= 1.0 + (0.0022 * float(intensity) * relief)
-            panic *= 1.0 - (0.24 * relief)
-            csad *= 1.0 - (0.18 * relief)
-            volume *= 1.0 + (0.06 * relief)
+            activation = 1.0 - np.exp(-phase / 2.2)
+            decay = np.exp(-phase / 8.5)
+            policy_wave = np.exp(-((phase - 2.0) ** 2) / 7.0)
+            residual_noise = float(rng.normal(0.0, 0.0006))
+            support = float(intensity) * (0.0014 * activation + 0.0020 * policy_wave + 0.0010 * decay)
+            close *= 1.0 + support + residual_noise
+            panic *= 1.0 - (0.26 * activation * decay)
+            csad *= 1.0 - (0.19 * activation * decay)
+            volume *= 1.0 + (0.08 * activation) + float(rng.normal(0.0, 0.01))
         open_price = prev_close
         high = max(high, open_price, close) * 1.0015
         low = min(low, open_price, close) * 0.9985
@@ -609,11 +617,13 @@ def _build_regulation_counterfactual_worlds(frame: pd.DataFrame, *, intensity: f
         frame,
         intervention_step=early_step,
         intensity=float(intensity),
+        world_name="early_intervention",
     )
     late = _apply_regulatory_intervention_worldline(
         frame,
         intervention_step=late_step,
         intensity=float(intensity),
+        world_name="late_intervention",
     )
     scorecards = {
         "no_intervention": _worldline_scorecard(no_intervention),

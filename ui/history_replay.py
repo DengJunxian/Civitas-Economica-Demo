@@ -458,19 +458,52 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
 
     sim_p = np.where(np.isfinite(sim_p), sim_p, real_p)
     sim_p = np.where(sim_p <= 0.0, real_p, sim_p)
-    real_ret = np.diff(real_p) / np.maximum(real_p[:-1], 1e-9)
-    sim_ret = np.diff(sim_p) / np.maximum(sim_p[:-1], 1e-9)
 
     rng = np.random.default_rng(length + 7)
-    blend_weight = 0.74  # 保留多智能体仿真路径作为主信号，只做轻微贴合。
-    blended_ret = sim_ret * blend_weight + real_ret * (1.0 - blend_weight)
-    blended_ret += rng.normal(0.0, 0.0008, size=blended_ret.shape[0])
-    blended_ret = np.clip(blended_ret, -0.026, 0.026)
+    point_count = max(1, length - 1)
+    all_points = np.arange(1, length, dtype=int)
+    anchor_count = int(round(point_count / 3.0))
+    anchor_count = max(1, min(point_count, anchor_count))
+    anchor_points = set(int(i) for i in rng.choice(all_points, size=anchor_count, replace=False).tolist())
+
+    non_anchor_points = [idx for idx in all_points.tolist() if idx not in anchor_points]
+    large_bias_count = int(round(point_count / 5.0))
+    large_bias_count = max(1, min(len(non_anchor_points), large_bias_count))
+    large_bias_points = set(
+        int(i)
+        for i in (
+            rng.choice(np.asarray(non_anchor_points, dtype=int), size=large_bias_count, replace=False).tolist()
+            if non_anchor_points and large_bias_count > 0
+            else []
+        )
+    )
 
     calibrated: List[float] = [float(real_p[0])]
-    for idx, ret_value in enumerate(blended_ret, start=1):
-        next_price = calibrated[-1] * (1.0 + float(ret_value))
-        max_dev = 0.085 if idx < 6 else 0.068
+    for idx in range(1, length):
+        prev_price = float(calibrated[-1])
+        if idx in anchor_points:
+            target_price = float(sim_p[idx])
+            max_dev = 0.10 if idx < 6 else 0.085
+            max_return_move = 0.045
+        else:
+            mixed_target = float(sim_p[idx] * 0.58 + real_p[idx] * 0.42)
+            alternating_sign = -1.0 if idx % 2 == 0 else 1.0
+            jitter_ratio = float(0.004 + rng.random() * 0.009)
+            jitter = float(real_p[idx] * jitter_ratio * alternating_sign)
+            if idx in large_bias_points:
+                large_ratio = float(0.022 + rng.random() * 0.036)
+                large_sign = 1.0 if rng.random() >= 0.45 else -1.0
+                jitter += float(real_p[idx] * large_ratio * large_sign)
+                max_dev = 0.22
+                max_return_move = 0.078
+            else:
+                max_dev = 0.125 if idx < 6 else 0.11
+                max_return_move = 0.052
+            target_price = mixed_target + jitter
+
+        ret_value = float(target_price / max(prev_price, 1e-9) - 1.0)
+        ret_value = float(np.clip(ret_value, -max_return_move, max_return_move))
+        next_price = prev_price * (1.0 + ret_value)
         upper = real_p[idx] * (1.0 + max_dev)
         lower = real_p[idx] * (1.0 - max_dev)
         calibrated.append(float(np.clip(next_price, lower, upper)))
@@ -487,6 +520,16 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
             bar["close"] = close_price
             bar["high"] = high
             bar["low"] = low
+
+    metadata = dict(result.metadata or {})
+    metadata["calibration_mix_profile"] = {
+        "anchor_ratio_target": 1.0 / 3.0,
+        "large_bias_ratio_target": 1.0 / 5.0,
+        "anchor_points": len(anchor_points),
+        "large_bias_points": len(large_bias_points),
+        "total_adjusted_points": point_count,
+    }
+    result.metadata = metadata
 
     _moderate_display_confidence(result)
 

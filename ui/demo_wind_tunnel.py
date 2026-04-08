@@ -49,11 +49,18 @@ def _counterfactual_world(metrics: pd.DataFrame) -> pd.DataFrame:
     b = metrics.copy()
     if b.empty:
         return b
-    base = float(b.iloc[0]["close"])
-    for idx, row in b.iterrows():
-        shock = 1.0 - 0.002 * float(idx)
-        panic_drag = 1.0 - 0.18 * float(row.get("panic_level", 0.0))
-        b.at[idx, "close"] = max(base * 0.82, float(row["close"]) * shock * panic_drag)
+
+    # Pandas 2.2+ raises on float assignment into integer columns, so we coerce
+    # close/panic inputs to numeric float before generating the B-world series.
+    close_series = pd.to_numeric(b["close"], errors="coerce").ffill().bfill().fillna(0.0).astype(float)
+    panic_source = b["panic_level"] if "panic_level" in b.columns else pd.Series(0.0, index=b.index)
+    panic_series = pd.to_numeric(panic_source, errors="coerce").fillna(0.0).astype(float)
+
+    base = float(close_series.iloc[0])
+    index_position = pd.Series(range(len(b)), index=b.index, dtype="float64")
+    shock = 1.0 - 0.002 * index_position
+    panic_drag = 1.0 - 0.18 * panic_series
+    b["close"] = (close_series * shock * panic_drag).clip(lower=base * 0.82)
     return b
 
 

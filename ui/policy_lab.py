@@ -1061,7 +1061,6 @@ def _build_policy_demo_briefing(session: Dict[str, Any], summary: Optional[Dict[
     chips = [
         f"状态：{_policy_session_status_text(str(session.get('status', 'idle')))}",
         f"自动演示：{'开启' if bool(autoplay.get('enabled', False)) else '关闭'}",
-        f"最新收益：{summary.get('return_pct', 0.0):+.2%}",
         f"恐慌度：{panic_level:.2f}",
     ]
     subtitle = str(policy_signal.get("policy_text", "") or session.get("policy_text", "")).strip()
@@ -2149,24 +2148,31 @@ def _translate_role(role: str) -> str:
 
 
 def _get_llm_visual_interpretation(prompt: str, cache_key: str, runtime_profile: RuntimeModeProfile) -> str:
-    if not runtime_profile.use_live_api:
-        return ""
     cache = st.session_state.setdefault("policy_lab_llm_visual_cache", {})
     if cache_key in cache:
         return cache[cache_key]
-    try:
-        from core.inference.api_backend import APIBackend
-        model_name = str(runtime_profile.model_priority[0]) if runtime_profile.model_priority else "deepseek-chat"
-        backend = APIBackend(model=model_name, max_tokens=150, temperature=0.3)
-        response = str(backend.generate(prompt, system_prompt="你是顶尖量化分析师。用一段精炼且专业的中文（不超过100字）解读图表趋势。直接返回内容，禁用Markdown、分点和换行。")).strip()
-        if not response or response.startswith("[API Error]"):
-            return ""
-        if response.lstrip().startswith("{") or response.lstrip().startswith("["):
-            return ""
-        cache[cache_key] = response
-        return response
-    except Exception:
+    if not runtime_profile.use_live_api:
         return ""
+    model_candidates = list(runtime_profile.model_priority or ("deepseek-chat", "glm-4-flashx"))
+    for model_name in model_candidates:
+        try:
+            from core.inference.api_backend import APIBackend
+            backend = APIBackend(model=str(model_name), max_tokens=150, temperature=0.3)
+            response = str(
+                backend.generate(
+                    prompt,
+                    system_prompt="你是顶尖量化分析师。用一段精炼且专业的中文（不超过100字）解读图表趋势。直接返回内容，禁用Markdown、分点和换行。",
+                )
+            ).strip()
+            if not response or response.startswith("[API Error]"):
+                continue
+            if response.lstrip().startswith("{") or response.lstrip().startswith("["):
+                continue
+            cache[cache_key] = response
+            return response
+        except Exception:
+            continue
+    return ""
 
 
 def _render_agent_disagreement_chart(package_dict: Dict[str, Any], policy_text: str, runtime_profile: RuntimeModeProfile) -> None:
@@ -2199,11 +2205,21 @@ def _render_agent_disagreement_chart(package_dict: Dict[str, Any], policy_text: 
     )
     st.plotly_chart(fig, use_container_width=True)
 
+    top_idx = frame["score"].idxmax()
+    low_idx = frame["score"].idxmin()
+    bullish_role = str(frame.loc[top_idx, "agent"])
+    bearish_role = str(frame.loc[low_idx, "agent"])
+    bullish_score = float(frame.loc[top_idx, "score"])
+    bearish_score = float(frame.loc[low_idx, "score"])
+    fallback = (
+        f"{bullish_role}相对更看好（{bullish_score:+.2f}），"
+        f"{bearish_role}相对更谨慎（{bearish_score:+.2f}），"
+        "当前分歧核心在于政策传导节奏与风险溢价重估。"
+    )
     cache_key = hashlib.sha256(f"disagree_{policy_text}_{json.dumps(agent_effects)}".encode()).hexdigest()
     prompt = f"政策：{policy_text}，投资者影响得分为：{json.dumps(agent_effects, ensure_ascii=False)}。一句话解释谁最看好、谁最看空及原因。"
     interpretation = _get_llm_visual_interpretation(prompt, cache_key, runtime_profile)
-    if interpretation:
-        st.info(f"模型洞察：{interpretation}")
+    st.info(f"模型洞察：{interpretation or fallback}")
 
 
 def _render_role_orderflow_waterfall(frame: pd.DataFrame, package_dict: Dict[str, Any], policy_text: str, runtime_profile: RuntimeModeProfile) -> None:
@@ -2239,11 +2255,15 @@ def _render_role_orderflow_waterfall(frame: pd.DataFrame, package_dict: Dict[str
     )
     st.plotly_chart(fig, use_container_width=True)
 
+    lead_idx = flow_df["net_flow"].abs().idxmax()
+    lead_role = str(flow_df.loc[lead_idx, "role"])
+    lead_flow = float(flow_df.loc[lead_idx, "net_flow"])
+    stance = "净买主导" if lead_flow >= 0 else "净卖主导"
+    fallback = f"{lead_role}是当前订单流主导力量（{lead_flow:+.0f}），市场处于{stance}阶段，体现对政策路径的再定价。"
     cache_key = hashlib.sha256(f"orderflow_{policy_text}_{json.dumps(agent_effects)}".encode()).hexdigest()
     prompt = f"政策：{policy_text}，预期订单流为：{json.dumps(rows, ensure_ascii=False)}。一句话概述资金买卖主导力量是谁，是追高还是潜伏？"
     interpretation = _get_llm_visual_interpretation(prompt, cache_key, runtime_profile)
-    if interpretation:
-        st.info(f"模型洞察：{interpretation}")
+    st.info(f"模型洞察：{interpretation or fallback}")
 
 
 def _render_sector_rotation_heatmap(package_dict: Dict[str, Any], policy_text: str, runtime_profile: RuntimeModeProfile) -> None:
@@ -2281,11 +2301,19 @@ def _render_sector_rotation_heatmap(package_dict: Dict[str, Any], policy_text: s
     )
     st.plotly_chart(fig, use_container_width=True)
 
+    lead_sector = labels[int(np.argmax(values))]
+    weak_sector = labels[int(np.argmin(values))]
+    lead_score = float(max(values))
+    weak_score = float(min(values))
+    fallback = (
+        f"{lead_sector}相对受益（{lead_score:+.2f}），"
+        f"{weak_sector}相对承压（{weak_score:+.2f}），"
+        "体现政策冲击下的板块轮动与估值重排。"
+    )
     cache_key = hashlib.sha256(f"sector_{policy_text}_{json.dumps(sector_effects)}".encode()).hexdigest()
     prompt = f"政策：{policy_text}，行业影响：{json.dumps(ordered, ensure_ascii=False)}。一句话总结：哪个板块最受益，哪个最承压？为什么出现这种轮动？"
     interpretation = _get_llm_visual_interpretation(prompt, cache_key, runtime_profile)
-    if interpretation:
-        st.info(f"模型洞察：{interpretation}")
+    st.info(f"模型洞察：{interpretation or fallback}")
 
 
 def _render_regulation_counterfactual_panel(counterfactual: Dict[str, Any]) -> None:

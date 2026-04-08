@@ -45,3 +45,22 @@ def test_regulation_counterfactual_worlds_have_scorecard_and_recommendation() ->
     early_panic = float(scorecards["early_intervention"]["max_panic"])
     base_panic = float(scorecards["no_intervention"]["max_panic"])
     assert early_panic <= base_panic
+
+
+def test_regulation_counterfactual_worlds_support_integer_price_columns() -> None:
+    frame = _sample_frame()
+    frame["open"] = frame["open"].round().astype(int)
+    frame["high"] = frame["high"].round().astype(int)
+    frame["low"] = frame["low"].round().astype(int)
+    frame["close"] = frame["close"].round().astype(int)
+
+    payload = _build_regulation_counterfactual_worlds(frame, intensity=1.2)
+
+    worlds = payload["worlds"]
+    early_df = pd.DataFrame(worlds["early_intervention"])
+    late_df = pd.DataFrame(worlds["late_intervention"])
+
+    assert not early_df.empty
+    assert not late_df.empty
+    assert early_df["close"].dtype.kind == "f"
+    assert late_df["close"].dtype.kind == "f"

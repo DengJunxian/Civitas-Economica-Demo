@@ -557,6 +557,17 @@ def _apply_regulatory_intervention_worldline(
     if frame.empty:
         return frame.copy()
     out = frame.copy().reset_index(drop=True)
+    numeric_columns = ("open", "high", "low", "close", "panic_level", "csad", "volume")
+    for col in numeric_columns:
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+    for col in ("open", "high", "low", "close"):
+        if col in out.columns:
+            out[col] = out[col].ffill().bfill().fillna(0.0).astype(float)
+    for col in ("panic_level", "csad", "volume"):
+        if col in out.columns:
+            out[col] = out[col].fillna(0.0).astype(float)
+
     seed_input = f"{world_name}|{len(out)}|{intervention_step}|{float(intensity):.4f}"
     seed = int(hashlib.sha256(seed_input.encode("utf-8")).hexdigest()[:8], 16)
     rng = np.random.default_rng(seed)

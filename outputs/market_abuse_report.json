@@ -1,13 +1,6 @@
 {
   "total_events": 0,
   "events": [],
-  "agent_submit_count": {
-    "deep_00": 3,
-    "deep_01": 3,
-    "deep_02": 1,
-    "deep_03": 3,
-    "deep_04": 3,
-    "deep_05": 4
-  },
+  "agent_submit_count": {},
   "agent_cancel_count": {}
 }

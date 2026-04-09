@@ -66,6 +66,17 @@ _MACRO_INDEX_TOKENS = (
     "index",
     "liquidity",
 )
+_PRIORITY_EVENT_TOKENS = (
+    "新国九条",
+    "国九条",
+    "资本市场新国九条",
+    "国务院关于加强监管防范风险推动资本市场高质量发展的若干意见",
+)
+
+
+def _contains_priority_event(text: str) -> bool:
+    normalized = str(text or "").lower()
+    return any(token.lower() in normalized for token in _PRIORITY_EVENT_TOKENS)
 
 
 @dataclass(slots=True)
@@ -449,12 +460,16 @@ class HistoryNewsService:
     def _relevance_score(self, row: Mapping[str, Any]) -> float:
         text = f"{row.get('title', '')} {row.get('content', '')}".lower()
         macro_hits = sum(1 for token in _MACRO_INDEX_TOKENS if token.lower() in text)
+        priority_hits = sum(1 for token in _PRIORITY_EVENT_TOKENS if token.lower() in text)
         pos_hits = sum(1 for token in _POSITIVE_TOKENS if token in text)
         neg_hits = sum(1 for token in _NEGATIVE_TOKENS if token in text)
         intensity = abs(float(row.get("sentiment", 0.0) or 0.0))
         impact = str(row.get("impact_level", "")).strip().lower()
         impact_bonus = {"critical": 0.4, "high": 0.25, "medium": 0.12}.get(impact, 0.0)
-        return float(macro_hits * 0.45 + (pos_hits + neg_hits) * 0.12 + intensity * 0.35 + impact_bonus)
+        priority_bonus = min(priority_hits, 2) * 1.4
+        return float(
+            macro_hits * 0.45 + (pos_hits + neg_hits) * 0.12 + intensity * 0.35 + impact_bonus + priority_bonus
+        )
 
     def _filter_rows(self, rows: Sequence[Dict[str, Any]], *, symbol: str, scope: str) -> List[Dict[str, Any]]:
         scope_norm = str(scope or "macro_index").strip().lower()
@@ -464,7 +479,7 @@ class HistoryNewsService:
         symbol_hint = str(symbol or "").lower()
         for item in rows:
             text = f"{item.get('title', '')} {item.get('content', '')}".lower()
-            macro_hit = any(token.lower() in text for token in _MACRO_INDEX_TOKENS)
+            macro_hit = any(token.lower() in text for token in _MACRO_INDEX_TOKENS) or _contains_priority_event(text)
             symbol_hit = bool(symbol_hint and symbol_hint in text)
             if macro_hit or symbol_hit:
                 filtered.append(item)
@@ -500,6 +515,17 @@ class HistoryNewsService:
         else:
             summary = str(llm.get("summary", "")).strip()
             shock_score = float(llm.get("shock_score", 0.0) or 0.0)
+        if rows and not _contains_priority_event(summary):
+            key_title = next(
+                (
+                    str(item.get("title", "")).strip()
+                    for item in rows
+                    if _contains_priority_event(f"{item.get('title', '')} {item.get('content', '')}")
+                ),
+                "",
+            )
+            if key_title:
+                summary = f"重点事件：{key_title}。{summary}" if summary else f"重点事件：{key_title}"
         shock_score = float(max(-1.0, min(1.0, shock_score)))
         source_mix: Dict[str, int] = {}
         for item in rows:

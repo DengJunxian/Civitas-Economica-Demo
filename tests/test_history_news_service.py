@@ -154,3 +154,49 @@ def test_history_news_service_local_cache_backfill_and_reuse(tmp_path):
     assert second.coverage["local_cache_candidates"] >= 1
     assert second.coverage["local_candidates"] >= 1
     assert second.coverage["days_with_news"] >= 1
+
+
+def test_history_news_service_prioritizes_new_guojiutiao_event(tmp_path):
+    seed_path = Path(tmp_path) / "seed_events.jsonl"
+    rows = [
+        {
+            "title": "新国九条发布：加强监管防范风险，推动资本市场高质量发展",
+            "summary": "资本市场基础制度迎来重要改革信号",
+            "source": "seed",
+            "source_url": "seed://priority",
+            "created_at": "2024-09-24T03:00:00Z",
+            "sentiment": 0.05,
+            "impact_level": "high",
+        },
+        {
+            "title": "宏观经济数据例行发布",
+            "summary": "市场观望情绪延续",
+            "source": "seed",
+            "source_url": "seed://normal",
+            "created_at": "2024-09-24T04:00:00Z",
+            "sentiment": 0.05,
+            "impact_level": "medium",
+        },
+    ]
+    seed_path.write_text("\n".join(json.dumps(item, ensure_ascii=False) for item in rows), encoding="utf-8")
+
+    service = HistoryNewsService(event_store=EventStore(root_dir=tmp_path / "event_store"), seed_store_path=seed_path)
+    service._load_online_rows = lambda start_ts, end_ts: []
+    service._llm_digest = lambda **kwargs: None
+
+    bundle = service.build_news_bundle(
+        start_date="2024-09-24",
+        end_date="2024-09-24",
+        symbol="sh000001",
+        source_strategy="local",
+        scope="macro_index",
+        topk_per_day=2,
+        persist=False,
+        persist_local_cache=False,
+    )
+
+    selected = bundle.items_by_day.get("2024-09-24", [])
+    assert selected
+    assert "国九条" in str(selected[0].get("title", ""))
+    assert bundle.daily_digests
+    assert "国九条" in bundle.daily_digests[0].summary

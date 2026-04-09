@@ -38,6 +38,7 @@ BACKGROUND_TEMPLATES = {
 
 HISTORY_REPORT_DIR = Path("outputs") / "history_reports"
 HISTORY_CASE_GLOB = "history_case_*.json"
+DEFAULT_HISTORY_REPLAY_START_DATE = date(2024, 9, 24)
 HISTORY_WORKSPACE_LABELS = {
     "factor": "智能因子回测",
     "agent": "历史回测政策仿真",
@@ -46,7 +47,9 @@ HISTORY_WORKSPACE_LABELS = {
 
 def _default_window() -> tuple[date, date]:
     end = date.today() - timedelta(days=2)
-    start = end - timedelta(days=240)
+    start = DEFAULT_HISTORY_REPLAY_START_DATE
+    if start >= end:
+        start = end - timedelta(days=30)
     return start, end
 
 
@@ -326,8 +329,12 @@ def _engine_mode_label(mode: str) -> str:
 
 
 def _fallback_period_policy_text(digest_rows: List[Dict[str, Any]], start_date: str, end_date: str, symbol: str) -> str:
+    focus_hint = "并重点关注“新国九条”发布对风险偏好、流动性预期与监管定价的传导影响。"
     if not digest_rows:
-        return f"{start_date} 至 {end_date} 期间，市场以存量博弈为主，建议按稳增长与流动性观察框架进行仿真。"
+        return (
+            f"{start_date} 至 {end_date} 期间，市场以存量博弈为主，"
+            f"建议按稳增长与流动性观察框架进行仿真，{focus_hint}"
+        )
     ranked = sorted(
         digest_rows,
         key=lambda item: abs(float(item.get("shock_score", 0.0) or 0.0)),
@@ -344,7 +351,7 @@ def _fallback_period_policy_text(digest_rows: List[Dict[str, Any]], start_date: 
     merged = "；".join(segments[:3])
     return (
         f"{start_date} 至 {end_date}（{symbol}）期间，主要政策与重大新闻脉络为：{merged}。"
-        "请据此评估对风险偏好、资金流向与指数波动的综合影响。"
+        f"请据此评估对风险偏好、资金流向与指数波动的综合影响，{focus_hint}"
     )
 
 
@@ -367,6 +374,7 @@ def _synthesize_period_policy_text(
             "请把以下历史区间内的主要经济政策与重大新闻，整理成“被测试政策文本”。",
             "要求：输出一段可直接输入仿真引擎的中文自然语言，不要JSON、不要代码块、不要项目符号。",
             "内容需包含：政策主线、市场冲击方向、影响交易行为的关键机制。",
+            "尤其要明确覆盖：新国九条发布及其对市场机制的影响。",
             f"区间：{start_date} 至 {end_date}",
             f"指数：{symbol}",
             f"事件摘要：{json.dumps(digest_rows[:12], ensure_ascii=False)}",

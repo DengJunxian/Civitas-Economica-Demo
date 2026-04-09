@@ -42,9 +42,19 @@ STRATEGY_OPTIONS = {
 }
 
 
+DEFAULT_HISTORY_BACKTEST_START_DATE = date(2024, 9, 24)
+
+
+def _default_period_days_from_anchor() -> int:
+    delta_days = (date.today() - DEFAULT_HISTORY_BACKTEST_START_DATE).days
+    return max(delta_days, 180)
+
+
 def _default_window(period_days: int) -> tuple[date, date]:
     end = date.today()
-    start = end - timedelta(days=max(period_days, 30))
+    start = DEFAULT_HISTORY_BACKTEST_START_DATE
+    if start >= end:
+        start = end - timedelta(days=max(period_days, 30))
     return start, end
 
 
@@ -248,7 +258,9 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
             )
             custom_window = st.checkbox("自定义日期窗口", value=cfg_state.get("custom_window", False))
             if custom_window:
-                default_start_date, default_end_date = _default_window(int(cfg_state.get("period_days", 756)))
+                default_start_date, default_end_date = _default_window(
+                    int(cfg_state.get("period_days", _default_period_days_from_anchor()))
+                )
                 start_date = st.date_input("开始日期", value=cfg_state.get("start_date_obj", default_start_date))
                 end_date = st.date_input("结束日期", value=cfg_state.get("end_date_obj", default_end_date))
                 period_days = 0
@@ -256,7 +268,7 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
                 start_date = None
                 end_date = None
                 # Streamlit 的 slider 默认值必须与 step 对齐，否则前端会出现告警。
-                raw_period_days = int(cfg_state.get("period_days", 756))
+                raw_period_days = int(cfg_state.get("period_days", _default_period_days_from_anchor()))
                 clipped_period_days = max(180, min(2000, raw_period_days))
                 period_days_default = 180 + round((clipped_period_days - 180) / 10) * 10
                 period_days = st.slider(

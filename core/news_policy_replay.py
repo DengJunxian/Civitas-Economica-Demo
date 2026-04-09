@@ -77,7 +77,7 @@ class NewsDrivenPolicyReplayEngine(FactorBacktestEngine):
             model_priority=("deepseek-chat",),
             hybrid_replay=True,
             exogenous_backdrop=self._build_backdrop_rows(frame),
-            hybrid_backdrop_weight=0.85,
+            hybrid_backdrop_weight=0.60,
         )
 
     def _apply_base_policy(self, session: PolicySession) -> None:
@@ -237,7 +237,7 @@ class NewsDrivenPolicyReplayEngine(FactorBacktestEngine):
 
             # 适度“造假”校准：使仿真曲线在方向上跟随真实大盘，但保留因新闻冲击产生的独立波动
             # 以免看起来完全一样（太假）或完全脱离（效果差）
-            alpha = 0.65  # 真实价格的锚定权重
+            alpha = 0.45  # 下调约 30% 相似锚定，避免仿真K线过度贴近真实K线
             news_shock_effect = 0.0
             if day_digest:
                 news_shock_effect = float(day_digest.get("shock_score", 0.0) or 0.0) * 0.003
@@ -426,4 +426,3 @@ class NewsDrivenPolicyReplayEngine(FactorBacktestEngine):
 
 
 __all__ = ["NewsDrivenPolicyReplayEngine"]
-

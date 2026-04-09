@@ -480,8 +480,9 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
     point_count = max(1, length - 1)
     real_ret = np.diff(real_p) / np.maximum(real_p[:-1], 1e-12)
     seed_base = int(round(float(real_p[0]) * 100.0)) + length * 97 + 7
-    min_match = 0.70
-    max_match = 0.80
+    # 目标方向一致率下调约 30%，降低“仿真K线过于贴脸”的观感。
+    min_match = 0.49
+    max_match = 0.56
 
     best_prices = sim_p.copy()
     best_target = 0.75
@@ -494,7 +495,7 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
     max_attempts = 7
     for attempt in range(max_attempts):
         rng = np.random.default_rng(seed_base + attempt * 131)
-        target_match = float(np.clip(0.75 + rng.uniform(-0.05, 0.05), 0.70, 0.80))
+        target_match = float(np.clip(0.525 + rng.uniform(-0.04, 0.04), min_match, max_match))
         match_count = int(round(target_match * point_count))
         match_count = int(np.clip(match_count, int(np.floor(min_match * point_count)), int(np.ceil(max_match * point_count))))
         all_points = np.arange(point_count, dtype=int)
@@ -527,8 +528,8 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
                 step_ret = float(-np.sign(step_ret) * min(abs(step_ret) * rng.uniform(0.30, 0.65), 0.02))
 
             next_price = prev_price * (1.0 + step_ret)
-            next_price = float(next_price * 0.78 + real_p[idx] * 0.22)
-            dev_cap = 0.07 if idx < max(4, point_count // 3) else 0.10
+            next_price = float(next_price * 0.85 + real_p[idx] * 0.15)
+            dev_cap = 0.10 if idx < max(4, point_count // 3) else 0.13
             upper = real_p[idx] * (1.0 + dev_cap)
             lower = real_p[idx] * (1.0 - dev_cap)
             next_price = float(np.clip(next_price, lower, upper))

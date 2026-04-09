@@ -447,15 +447,16 @@ def _moderate_display_confidence(result: BacktestResult) -> None:
     metadata = dict(result.metadata or {})
     strict_raw = _safe_float(metadata.get("strict_authenticity_score"))
     demo_raw = _safe_float(metadata.get("demo_authenticity_score"))
-    corr = max(0.0, min(1.0, _safe_float(result.price_correlation) or 0.0))
-    vol_corr = max(0.0, min(1.0, _safe_float(result.volatility_correlation) or 0.0))
-    rmse = max(0.0, min(1.0, _safe_float(result.price_rmse) or 0.0))
-    proxy = 0.52 + corr * 0.28 + vol_corr * 0.18 - rmse * 0.12
-    strict = float(np.clip(strict_raw if strict_raw is not None else proxy - 0.03, 0.58, 0.72))
-    demo_source = demo_raw if demo_raw is not None else max(proxy, strict + 0.02)
-    demo = float(np.clip(demo_source, 0.60, 0.78))
-    if demo <= strict:
-        demo = float(min(0.78, strict + 0.02))
+    # Convert raw metrics to [0, 1] proxies without aggressive score inflation.
+    corr_norm = float(np.clip(((_safe_float(result.price_correlation) or 0.0) + 1.0) / 2.0, 0.0, 1.0))
+    vol_norm = float(np.clip(_safe_float(result.volatility_correlation) or 0.0, 0.0, 1.0))
+    rmse_fit = float(np.clip(1.0 - (_safe_float(result.price_rmse) or 0.0) * 2.5, 0.0, 1.0))
+    proxy = float(np.clip(0.50 * corr_norm + 0.20 * vol_norm + 0.30 * rmse_fit, 0.0, 1.0))
+
+    # Keep strict/demo driven by model output if present, otherwise fall back to proxy.
+    strict = float(np.clip(strict_raw if strict_raw is not None else proxy, 0.0, 1.0))
+    demo_source = demo_raw if demo_raw is not None else (0.85 * strict + 0.15 * proxy)
+    demo = float(np.clip(demo_source, 0.0, 1.0))
     metadata["strict_authenticity_score"] = round(strict, 4)
     metadata["demo_authenticity_score"] = round(demo, 4)
     result.metadata = metadata
@@ -1283,13 +1284,24 @@ def _render_agent_replay_workspace(
         _render_metric_cards(result, metrics)
         _render_baseline_delta_cards(result, baseline if bundle.get("engine_mode") == "factor" else None)
         
-        demo_score = result.metadata.get("demo_authenticity_score")
-        strict_score = result.metadata.get("strict_authenticity_score")
+        demo_score = _safe_float(result.metadata.get("demo_authenticity_score"))
+        strict_score = _safe_float(result.metadata.get("strict_authenticity_score"))
         if demo_score is not None or strict_score is not None:
-            score_cols = st.columns(1)
+            strict_value = float(strict_score if strict_score is not None else demo_score or 0.0)
+            demo_value = float(demo_score if demo_score is not None else strict_value)
+            score_cols = st.columns(2)
             with score_cols[0]:
-                shown_score = float(demo_score if demo_score is not None else strict_score or 0.0)
-                st.metric("仿真可信度", f"{shown_score:.0%}", help="综合趋势、波动与响应时点后的可信区间评估。")
+                st.metric(
+                    "严格拟真分",
+                    f"{strict_value:.0%}",
+                    help="直接来源于路径、波动与回撤拟合的严格评分，不做展示增益。",
+                )
+            with score_cols[1]:
+                st.metric(
+                    "综合置信分",
+                    f"{demo_value:.0%}",
+                    help="在严格拟真分基础上，结合覆盖率与稳健性做轻量综合。",
+                )
                 
         st.markdown("### 智能体行为读数")
         _render_agent_readout(bundle["policy_text"], result, metrics)

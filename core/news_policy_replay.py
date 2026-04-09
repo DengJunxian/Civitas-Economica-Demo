@@ -128,21 +128,22 @@ class NewsDrivenPolicyReplayEngine(FactorBacktestEngine):
 
         trace: List[Dict[str, Any]] = [{"type": "strict_base", "value": strict}]
         demo = strict
-        max_add = 0.12
+        # Keep demo score close to strict score to avoid optimistic frontend inflation.
+        max_add = 0.05
         add_used = 0.0
         coverage = float(news_bundle.coverage.get("coverage_rate", 0.0) or 0.0)
-        if coverage >= 0.6:
-            add = min(0.035, max_add - add_used)
+        if coverage >= 0.70:
+            add = min(0.015, max_add - add_used)
             demo += add
             add_used += add
             trace.append({"type": "coverage_bonus", "value": add, "reason": f"coverage_rate={coverage:.2f}"})
-        if price_corr >= 0.58:
-            add = min(0.045, max_add - add_used)
+        if price_corr >= 0.62:
+            add = min(0.020, max_add - add_used)
             demo += add
             add_used += add
             trace.append({"type": "trend_bonus", "value": add, "reason": f"price_corr={price_corr:.2f}"})
-        if rmse_fit >= 0.65:
-            add = min(0.03, max_add - add_used)
+        if rmse_fit >= 0.70:
+            add = min(0.015, max_add - add_used)
             demo += add
             add_used += add
             trace.append({"type": "rmse_bonus", "value": add, "reason": f"rmse_fit={rmse_fit:.2f}"})

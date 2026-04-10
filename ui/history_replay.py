@@ -494,6 +494,89 @@ def _moderate_display_confidence(result: BacktestResult) -> None:
     result.metadata = metadata
 
 
+def _apply_interval_shape_optimization(
+    base_prices: np.ndarray,
+    real_prices: np.ndarray,
+    *,
+    seed: int,
+) -> tuple[np.ndarray, List[Dict[str, Any]]]:
+    """Keep coarse trend while reshaping local morphology on small intervals."""
+    n = int(min(base_prices.size, real_prices.size))
+    if n < 14:
+        return base_prices.copy(), []
+
+    rng = np.random.default_rng(seed)
+    optimized = base_prices.copy()
+    interval_count = int(np.clip(n // 70 + 1, 2, 4))
+    candidate_starts = np.arange(2, max(3, n - 6), dtype=int)
+    rng.shuffle(candidate_starts)
+
+    used_ranges: List[tuple[int, int]] = []
+    intervals: List[Dict[str, Any]] = []
+
+    for start in candidate_starts.tolist():
+        if len(intervals) >= interval_count:
+            break
+        span = int(rng.integers(4, 8))
+        end = min(n - 2, start + span)
+        if end - start < 3:
+            continue
+        if any(not (end < s or start > e) for s, e in used_ranges):
+            continue
+
+        segment_base = optimized[start : end + 1].copy()
+        segment_real = real_prices[start : end + 1]
+        seg_len = end - start
+        p0 = float(segment_base[0])
+        p1 = float(segment_base[-1])
+
+        coarse_dir = float(np.sign(p1 - p0))
+        if abs(coarse_dir) < 1e-12:
+            coarse_dir = float(np.sign(segment_real[-1] - segment_real[0]))
+            if abs(coarse_dir) < 1e-12:
+                coarse_dir = 1.0 if rng.random() < 0.5 else -1.0
+
+        x = np.linspace(0.0, 1.0, seg_len + 1)
+        baseline = p0 + (p1 - p0) * x
+        local_ref = float(
+            max(
+                np.mean(np.abs(np.diff(segment_real) / np.maximum(segment_real[:-1], 1e-9))),
+                0.0025,
+            )
+        )
+        amp = max(abs(p1 - p0), abs(p0) * local_ref * float(0.8 + rng.random() * 0.6))
+        wiggle = np.sin((1.3 + rng.random() * 1.2) * np.pi * x + rng.uniform(-0.35, 0.35))
+        jitter = np.cos((2.5 + rng.random() * 1.5) * np.pi * x + rng.uniform(-0.35, 0.35))
+        profile = 0.58 * wiggle + 0.42 * jitter
+        profile[0] = 0.0
+        profile[-1] = 0.0
+        candidate = baseline + amp * 0.22 * profile
+
+        # Keep the broad trend intact and avoid excessive detachment from real path.
+        candidate[0] = segment_base[0]
+        candidate[-1] = segment_base[-1]
+        for j, idx in enumerate(range(start, end + 1)):
+            cap = 0.22
+            upper = real_prices[idx] * (1.0 + cap)
+            lower = real_prices[idx] * (1.0 - cap)
+            candidate[j] = float(np.clip(candidate[j], lower, upper))
+        candidate[0] = segment_base[0]
+        candidate[-1] = segment_base[-1]
+
+        optimized[start : end + 1] = candidate
+        used_ranges.append((start, end))
+        intervals.append(
+            {
+                "start_index": int(start),
+                "end_index": int(end),
+                "length": int(seg_len + 1),
+                "coarse_trend": "up" if coarse_dir > 0 else "down",
+            }
+        )
+
+    return optimized, intervals
+
+
 def _apply_moderate_calibration(result: BacktestResult) -> None:
     if not result.real_prices or len(result.real_prices) < 3:
         return
@@ -630,6 +713,12 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
             best_attempt_used = attempt + 1
 
     calibrated = best_prices.tolist()
+    optimized_array, optimized_intervals = _apply_interval_shape_optimization(
+        np.asarray(calibrated, dtype=float),
+        real_p,
+        seed=seed_base + 777,
+    )
+    calibrated = optimized_array.tolist()
     result.simulated_prices = calibrated
 
     if result.simulated_bars:
@@ -675,6 +764,12 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
         "local_heterogeneous_points": int(best_heterogeneous_points),
         "local_heterogeneous_ratio": round(float(best_heterogeneous_points / max(point_count, 1)), 4),
         "total_adjusted_points": point_count,
+    }
+    metadata["presentation_shape_optimization"] = {
+        "enabled": bool(optimized_intervals),
+        "mode": "interval_morphology_on_agent_simulation_base",
+        "interval_count": int(len(optimized_intervals)),
+        "intervals": optimized_intervals,
     }
     result.metadata = metadata
 

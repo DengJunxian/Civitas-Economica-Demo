@@ -537,13 +537,13 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
         match_points = set(int(i) for i in rng.choice(all_points, size=max(1, match_count), replace=False).tolist())
 
         heterogeneous_points: set[int] = set()
-        segment_count = int(np.clip(point_count // 35, 1, 3))
+        segment_count = int(np.clip(point_count // 60, 1, 2))
         for _ in range(segment_count):
-            seg_len = int(rng.integers(2, 5))
+            seg_len = int(rng.integers(1, 4))
             start_upper = max(2, point_count - seg_len)
             seg_start = int(rng.integers(1, start_upper))
             heterogeneous_points.update(range(seg_start, min(point_count, seg_start + seg_len)))
-        max_heterogeneous_points = int(np.clip(round(point_count * 0.12), 2, 8))
+        max_heterogeneous_points = int(np.clip(round(point_count * 0.07), 1, 4))
         if len(heterogeneous_points) > max_heterogeneous_points:
             heterogeneous_points = set(
                 int(i)

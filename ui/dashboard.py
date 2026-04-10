@@ -632,6 +632,7 @@ def build_kpi_snapshot(metrics: pd.DataFrame, step: int, regulation_hint: str = 
         "reg_action": regulation_hint,
     }
 
+'''
 def render_orderflow_microstructure_panel(
     role_order_flows: Optional[Mapping[str, float]] = None,
     microstructure_metrics: Optional[Mapping[str, Any]] = None,
@@ -640,7 +641,61 @@ def render_orderflow_microstructure_panel(
 ) -> None:
     """Render role order-flow decomposition and microstructure summary."""
     st.subheader("角色订单流与微结构")
-    st.caption("展示各类主体净买卖拆解，以及 spread/depth/impact/herding 等核心指标。")
+        st.caption("展示各类主体净买卖拆解，以及价差、深度、冲击与羊群程度等核心微结构指标。")
+
+    role_order_flows = dict(role_order_flows or {})
+    if role_order_flows:
+        orderflow_df = pd.DataFrame(
+            [{"role": str(role), "net_flow": float(value)} for role, value in role_order_flows.items()]
+        ).sort_values("net_flow", ascending=False)
+        fig = go.Figure(
+            data=[
+                go.Bar(
+                    x=orderflow_df["role"],
+                    y=orderflow_df["net_flow"],
+                    marker_color=["#16a34a" if value >= 0 else "#ef4444" for value in orderflow_df["net_flow"]],
+                    name="净买卖额",
+                )
+            ]
+        )
+        fig.update_layout(
+            **PLOTLY_DARK_LAYOUT,
+            title="角色净买卖拆解",
+            xaxis_title="角色",
+            yaxis_title="净买卖额",
+            height=320,
+            showlegend=False,
+        )
+        st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_role_flow_plot")
+        export_plot_bundle(fig, orderflow_df, f"{key_prefix}_role_orderflow", f"{key_prefix}_role_orderflow")
+    else:
+        st.info("当前场景暂无角色订单流明细。")
+
+    metrics = dict(microstructure_metrics or {})
+    spread = float(metrics.get("spread", 0.0) or 0.0)
+    spread_pct = float(metrics.get("spread_pct", 0.0) or 0.0)
+    depth_imbalance = float(metrics.get("depth_imbalance", 0.0) or 0.0)
+    impact = float(metrics.get("impact", metrics.get("impact_bps", 0.0)) or 0.0)
+    herding_proxy = float(metrics.get("herding_proxy", 0.0) or 0.0)
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("买卖价差", f"{spread:.4f}")
+    c2.metric("价差占比", f"{spread_pct:.2%}")
+    c3.metric("深度失衡", f"{depth_imbalance:+.3f}")
+    c4.metric("价格冲击", f"{impact:.4f}")
+    c5.metric("羊群程度", f"{herding_proxy:.3f}")
+
+'''
+
+def render_orderflow_microstructure_panel(
+    role_order_flows: Optional[Mapping[str, float]] = None,
+    microstructure_metrics: Optional[Mapping[str, Any]] = None,
+    *,
+    key_prefix: str = "micro_panel",
+) -> None:
+    """Render role order-flow decomposition and microstructure summary."""
+    st.subheader("角色订单流与微观结构")
+    st.caption("展示不同主体的净买卖拆解，以及价差、深度、冲击和羊群度等关键微观结构指标。")
 
     role_order_flows = dict(role_order_flows or {})
     if role_order_flows:

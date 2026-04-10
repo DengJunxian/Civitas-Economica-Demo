@@ -312,7 +312,7 @@ def render_demo_tab(ctrl: Optional[Any] = None) -> None:
             st.session_state[insight_cache_key] = generate_daily_llm_insight(metrics_snapshot)
         dashboard_ui.render_ai_insight_card(st.session_state[insight_cache_key])
 
-    st.info(f"**Day {current_step}** | 自动讲解：{_current_narration_text()}")
+    st.info(f"**第 {current_step} 个交易日** | 自动讲解：{_current_narration_text()}")
     st.progress(min(1.0, current_step / max(1, len(metrics))))
 
     _render_three_stage_story(scenario, current_step)

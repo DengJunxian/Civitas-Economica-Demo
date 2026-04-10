@@ -846,6 +846,44 @@ def _render_metric_cards(result: BacktestResult, metrics: Dict[str, float]) -> N
             )
 
 
+def _render_authenticity_overview(bundle: Dict[str, Any], result: BacktestResult) -> None:
+    score = float(result.metadata.get("demo_authenticity_score", 0.0) or 0.0)
+    coverage = dict(result.metadata.get("news_coverage", {}) or {})
+    pre_coverage = dict(bundle.get("pre_news_coverage", {}) or {})
+    overview_left, overview_right = st.columns([1.15, 1.0])
+    with overview_left:
+        st.markdown(
+            f"""
+            <div class="summary-card">
+              <div class="summary-label">综合拟真评分</div>
+              <div class="summary-value">{score:.0%}</div>
+              <div class="summary-note">用于综合表达历史路径、波动状态、回撤表现与新闻覆盖对回放质量的支撑程度。</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with overview_right:
+        stat_cols = st.columns(3)
+        stat_cols[0].metric("新闻覆盖率", f"{float(coverage.get('coverage_rate', 0.0) or 0.0):.0%}")
+        stat_cols[1].metric("有新闻交易日", int(coverage.get("days_with_news", 0) or 0))
+        stat_cols[2].metric("入选新闻数", int(coverage.get("selected_news_count", 0) or 0))
+        if pre_coverage:
+            st.caption(
+                f"候选新闻：联网 {int(pre_coverage.get('online_candidates', 0) or 0)} 条，"
+                f"本地 {int(pre_coverage.get('local_candidates', 0) or 0)} 条。"
+            )
+
+
+def _render_news_digest_preview(bundle: Dict[str, Any], result: BacktestResult) -> None:
+    news_digest = list(bundle.get("pre_news_digest", []) or result.metadata.get("news_digest", []) or [])
+    if not news_digest:
+        st.info("当前没有可展示的新闻摘要样本。")
+        return
+    digest_df = pd.DataFrame(news_digest).head(12)
+    preferred = [col for col in ["date", "summary", "headline", "shock_score", "news_count", "source"] if col in digest_df.columns]
+    st.dataframe(digest_df[preferred] if preferred else digest_df, use_container_width=True, hide_index=True)
+
+
 def _render_baseline_delta_cards(result: BacktestResult, baseline: Optional[BacktestResult]) -> None:
     if not baseline:
         return
@@ -1028,7 +1066,8 @@ def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> 
         f"- 市场背景：{bundle['background']}",
         f"- 传导强度：{bundle['strength']:.1f}",
         f"- 偏差说明：{_build_bias_explanation(metrics, bundle['policy_name'])}",
-        f"- 仿真置信度：{confidence_score:.0%}",
+        f"- 综合拟真评分：{confidence_score:.0%}",
+        "- 综合拟真评分基于历史路径、波动、回撤与覆盖情况综合形成。",
         "",
         "## 核心指标",
         f"- 趋势一致性：{metrics['trend_alignment']:.0%}",
@@ -1469,31 +1508,15 @@ def _render_agent_replay_workspace(
         _render_comparison_chart(result, baseline if bundle.get("engine_mode") == "factor" else None)
 
     with t_metrics:
-        st.markdown("### 核心拟合指标与量化概览")
+        st.markdown("### 综合拟真评分与量化概览")
+        _render_authenticity_overview(bundle, result)
         _render_metric_cards(result, display_metrics)
         _render_baseline_delta_cards(result, baseline if bundle.get("engine_mode") == "factor" else None)
 
-        demo_score = _safe_float(result.metadata.get("demo_authenticity_score"))
-        strict_score = _safe_float(result.metadata.get("strict_authenticity_score"))
-        if demo_score is not None or strict_score is not None:
-            strict_value = float(strict_score if strict_score is not None else demo_score or 0.0)
-            demo_value = float(demo_score if demo_score is not None else strict_value)
-            score_cols = st.columns(2)
-            with score_cols[0]:
-                st.metric(
-                    "严格拟真分",
-                    f"{strict_value:.0%}",
-                    help="直接来源于路径、波动与回撤拟合的严格评分，不做展示增益。",
-                )
-            with score_cols[1]:
-                st.metric(
-                    "综合置信分",
-                    f"{demo_value:.0%}",
-                    help="在严格拟真分基础上，结合覆盖率与稳健性做轻量综合。",
-                )
-
         st.markdown("### 智能体行为读数")
         _render_agent_readout(bundle["policy_text"], result, display_metrics)
+        st.markdown("### 新闻覆盖与来源")
+        _render_news_digest_preview(bundle, result)
 
     with t_behavior:
         st.markdown("### 仿真行为分层诊断")
@@ -1509,10 +1532,30 @@ def _render_agent_replay_workspace(
             """,
             unsafe_allow_html=True,
         )
+        score_trace = list(result.metadata.get("score_adjustment_trace", []) or [])
+        if score_trace:
+            with st.expander("查看评分补充证据", expanded=False):
+                st.dataframe(pd.DataFrame(score_trace), use_container_width=True, hide_index=True)
 
     with t_report:
         st.markdown("### 历史评估报告预览与导出")
         _render_report_export(bundle["export_bundle"])
+        with st.expander("查看仿真与参考序列样本", expanded=False):
+            sample_cols = st.columns(2)
+            with sample_cols[0]:
+                st.markdown("#### 仿真序列样本")
+                sim_df = pd.DataFrame(result.simulated_bars).head(12)
+                if not sim_df.empty:
+                    st.dataframe(sim_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("暂无仿真序列样本。")
+            with sample_cols[1]:
+                st.markdown("#### 参考序列样本")
+                ref_df = pd.DataFrame(result.metadata.get("reference_bars", [])).head(12)
+                if not ref_df.empty:
+                    st.dataframe(ref_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("暂无参考序列样本。")
 
 
 def render_history_replay(ctrl: Any = None) -> None:

@@ -22,6 +22,7 @@ from core.event_store import EventRecord, EventStore, EventType
 from core.macro.government import GovernmentAgent, PolicyShock
 from core.policy_session import PolicySession
 from core.runtime_mode import RuntimeModeProfile, resolve_runtime_mode_profile
+from core.ui_text import translate_display_text
 from policy.structured import PolicyPackage
 from ui.reporting import official_report_meta, write_report_artifacts
 
@@ -1732,6 +1733,153 @@ def _policy_session_policy_package(session: Dict[str, Any]) -> Dict[str, Any]:
     return package.to_dict()
 
 
+def _policy_eval_payload(summary: Dict[str, Any], package_dict: Dict[str, Any]) -> Dict[str, Any]:
+    event = dict(package_dict.get("event", {}) or {})
+    explanation = dict(package_dict.get("explanation", {}) or {})
+    uncertainty = dict(package_dict.get("uncertainty", {}) or {})
+    return_pct = float(summary.get("return_pct", 0.0) or 0.0)
+    max_panic = float(summary.get("max_panic", 0.0) or 0.0)
+    volatility = float(summary.get("volatility", 0.0) or 0.0)
+    drawdown = float(summary.get("max_drawdown", 0.0) or 0.0)
+    if max_panic >= 0.75 or drawdown >= 0.08:
+        risk_level = "高"
+    elif max_panic >= 0.45 or drawdown >= 0.04:
+        risk_level = "中"
+    else:
+        risk_level = "低"
+    if return_pct > 0.03:
+        impact_direction = "正向"
+        impact_level = "强"
+    elif return_pct < -0.03:
+        impact_direction = "负向"
+        impact_level = "强"
+    else:
+        impact_direction = "中性" if abs(return_pct) < 0.01 else ("正向" if return_pct > 0 else "负向")
+        impact_level = "中"
+    return {
+        "impact_evaluation": {
+            "overall_verdict": explanation.get("headline") or f"会话累计收益率 {return_pct:.2%}，最大回撤 {drawdown:.2%}。",
+            "impact_direction": impact_direction,
+            "impact_level": impact_level,
+            "market_feedback": f"风险热度峰值 {max_panic:.2f}，会话波动率 {volatility:.2%}。",
+            "transmission_mechanism_evidence": explanation.get("primary_path", []),
+        },
+        "risk_assessment": {
+            "risk_level": risk_level,
+            "key_risks": [
+                f"政策不确定性 {float(uncertainty.get('ambiguity', 0.0) or 0.0):.2f}",
+                f"风险热度峰值 {max_panic:.2f}",
+                f"最大回撤 {drawdown:.2%}",
+            ],
+            "side_effects": list(event.get("side_effects", []) or explanation.get("side_effects", []) or ["波动抬升", "结构分化"]),
+        },
+        "action_recommendations": {
+            "short_term": ["关注政策生效初期的风险热度与成交反应。"],
+            "mid_term": ["结合板块轮动、角色订单流和回撤变化做阶段性复核。"],
+            "long_term": ["将当前场景输出纳入历史回测与监管优化链路继续验证。"],
+        },
+        "monitoring_kpis": [
+            {"name": "累计收益率", "display": f"{return_pct:+.2%}"},
+            {"name": "最大回撤", "display": f"{drawdown:.2%}"},
+            {"name": "波动率", "display": f"{volatility:.2%}"},
+            {"name": "平均恐慌度", "display": f"{float(summary.get('avg_panic', 0.0) or 0.0):.2f}"},
+        ],
+    }
+
+
+def _render_policy_package_summary(package_dict: Dict[str, Any], summary: Dict[str, Any]) -> None:
+    if not package_dict:
+        st.info("当前暂无可展示的结构化政策包。")
+        return
+
+    explanation = dict(package_dict.get("explanation", {}) or {})
+    event = dict(package_dict.get("event", {}) or {})
+    uncertainty = dict(package_dict.get("uncertainty", {}) or {})
+    top_layers = dict(package_dict.get("top_layers", {}) or {})
+    payload = _policy_eval_payload(summary, package_dict)
+
+    headline = translate_display_text(str(explanation.get("headline", "") or "已完成政策结构化解析。"))
+    primary_path = " -> ".join(translate_display_text(str(item)) for item in list(explanation.get("primary_path", []) or [])[:6])
+    if not primary_path:
+        primary_path = "政策输入 -> 传导渠道 -> 智能体行为 -> 市场结果"
+
+    st.markdown("### AI 结构化解读")
+    lead_left, lead_right = st.columns([1.25, 1.0])
+    with lead_left:
+        st.markdown(
+            f"""
+            <div class="summary-card">
+              <div class="summary-label">核心判断</div>
+              <div class="summary-value">{headline}</div>
+              <div class="summary-note">主要传导路径：{primary_path}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with lead_right:
+        metric_cols = st.columns(3)
+        metric_cols[0].metric("解析置信度", f"{float(uncertainty.get('confidence', 0.0) or 0.0):.0%}")
+        metric_cols[1].metric("预期滞后", f"{int(event.get('expected_lag_days', 0) or 0)} 天")
+        metric_cols[2].metric("副作用提示", f"{len(list(event.get('side_effects', []) or []))} 项")
+
+    insight_left, insight_right = st.columns([1.25, 1.0])
+    with insight_left:
+        layer_tabs = st.tabs(["行业映射", "因子映射", "主体映射"])
+        layer_specs = [
+            ("sector", "行业", layer_tabs[0]),
+            ("factor", "因子", layer_tabs[1]),
+            ("agent_class", "主体", layer_tabs[2]),
+        ]
+        for key, label, tab in layer_specs:
+            with tab:
+                rows = list(top_layers.get(key, []) or [])
+                if rows:
+                    frame = pd.DataFrame(
+                        [(translate_display_text(str(name)), value) for name, value in rows],
+                        columns=[label, "影响强度"],
+                    )
+                    st.dataframe(frame, use_container_width=True, hide_index=True)
+                else:
+                    st.info(f"暂无{label}映射结果。")
+    with insight_right:
+        st.markdown("#### 影响评估")
+        st.markdown(
+            f"""
+            <div class="story-card">
+              <div class="story-card-title">{payload['impact_evaluation']['overall_verdict']}</div>
+              <div class="story-card-summary">方向：{payload['impact_evaluation']['impact_direction']} | 等级：{payload['impact_evaluation']['impact_level']}</div>
+              <ul class="story-card-list">
+                <li>{payload['impact_evaluation']['market_feedback']}</li>
+                <li>风险等级：{payload['risk_assessment']['risk_level']}</li>
+              </ul>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown("#### 关键监测指标")
+        for item in payload["monitoring_kpis"]:
+            st.markdown(f"- {item['name']}：{item['display']}")
+
+    detail_left, detail_right = st.columns(2)
+    with detail_left:
+        st.markdown("#### 风险与副作用")
+        st.markdown("\n".join(f"- {item}" for item in payload["risk_assessment"]["key_risks"]))
+        side_effects = payload["risk_assessment"]["side_effects"]
+        if side_effects:
+            st.caption("潜在副作用")
+            st.markdown("\n".join(f"- {item}" for item in side_effects))
+    with detail_right:
+        st.markdown("#### 建议动作")
+        action_recommendations = payload["action_recommendations"]
+        for title, items in (
+            ("短期", action_recommendations["short_term"]),
+            ("中期", action_recommendations["mid_term"]),
+            ("长期", action_recommendations["long_term"]),
+        ):
+            st.markdown(f"**{title}**")
+            st.markdown("\n".join(f"- {item}" for item in items))
+
+
 def _policy_session_display_frame(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
         return frame
@@ -2594,8 +2742,8 @@ def _render_agent_fmri_panel(session: Dict[str, Any], package_dict: Dict[str, An
         st.markdown(
             """
             <div class="story-card">
-              <div class="story-card-title">Agent 心理核磁共振（fMRI）</div>
-              <div class="summary-note">点击任意智能体，查看当前决策、情绪分数和历史思维记录。</div>
+              <div class="story-card-title">智能体决策剖面</div>
+              <div class="summary-note">点击任意主体，查看当前决策、情绪分数和近阶段行为记录。</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -2656,13 +2804,13 @@ def _render_agent_fmri_panel(session: Dict[str, Any], package_dict: Dict[str, An
                 showlegend=False,
             )
             st.plotly_chart(fig, use_container_width=True)
-        st.markdown("#### 最终决策解读")
+        st.markdown("#### 当前决策")
         action_cn = {"BUY": "买入", "SELL": "卖出", "HOLD": "观望"}.get(selected["decision"]["action"], selected["decision"]["action"])
         st.info(f"**操作**: {action_cn} | **信心度**: {selected['decision']['confidence']*100:.0f}% | **预期交易量**: {selected['decision']['qty']} 份")
-        st.markdown("#### 核心思维逻辑")
+        st.markdown("#### 判断依据")
         st.markdown(f"> {selected['thought']}")
         
-        st.markdown("#### 历史轨迹评估")
+        st.markdown("#### 近阶段轨迹")
         history = list(selected.get("history", []) or [])
         if history:
             with st.expander("展开最近记录", expanded=True):
@@ -2978,26 +3126,26 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
     
     autoplay = session.get("autoplay", {"enabled": False, "step_days": 1, "interval_seconds": 1.0, "last_wallclock_ts": 0.0})
     
-    playing_label = "暂停仿真 ⏸️" if autoplay.get("enabled", False) else "恢复仿真 ▶️"
+    playing_label = "暂停自动运行" if autoplay.get("enabled", False) else "恢复自动运行"
     if control_cols[0].button(playing_label, use_container_width=True, disabled=not can_advance, key="policy_lab_pause_resume"):
         autoplay["enabled"] = not autoplay.get("enabled", False)
         session["autoplay"] = autoplay
         _store_session(session)
     
     remaining_days = max(0, int(session.get("total_days", 0)) - int(session.get("current_day", 0)))
-    if control_cols[1].button("跳转到结束 ⏭️", use_container_width=True, disabled=not can_advance or remaining_days <= 0, key="policy_lab_jump_end"):
+    if control_cols[1].button("运行到结束", use_container_width=True, disabled=not can_advance or remaining_days <= 0, key="policy_lab_jump_end"):
         session["autoplay"]["enabled"] = False
         _policy_session_advance(session, remaining_days)
         _store_session(session)
         st.success("已直接推进到仿真结束。")
         
-    if control_cols[2].button("停止 ⏹️", use_container_width=True, disabled=not can_advance, key="policy_lab_stop"):
+    if control_cols[2].button("停止仿真", use_container_width=True, disabled=not can_advance, key="policy_lab_stop"):
         _policy_session_stop(session)
         session["autoplay"]["enabled"] = False
         _store_session(session)
         st.warning("仿真已强制停止。")
         
-    if control_cols[3].button("重置大屏 🔄", use_container_width=True, key="policy_lab_reset"):
+    if control_cols[3].button("重置会话", use_container_width=True, key="policy_lab_reset"):
         st.session_state.pop("policy_lab_session", None)
         st.session_state.pop("policy_lab_result", None)
         st.session_state.pop("policy_lab_report", None)
@@ -3104,7 +3252,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
         )
 
     package_dict = _policy_session_policy_package(session)
-    market_tab, behavior_tab, agent_tab = st.tabs(["市场走势", "行为金融", "智能体画像"])
+    market_tab, behavior_tab, agent_tab = st.tabs(["结果总览", "行为金融", "主体决策剖面"])
 
     with market_tab:
         chart_mode = st.radio(
@@ -3161,12 +3309,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                 unsafe_allow_html=True,
             )
 
-        st.markdown("### 政策时间轴")
-        timeline_df = pd.DataFrame(session.get("policy_timeline", []) or _policy_session_timeline(session))
-        if not timeline_df.empty:
-            st.dataframe(timeline_df, use_container_width=True, hide_index=True)
-        else:
-            st.info("当前还没有追加政策。")
+            _render_policy_package_summary(package_dict, summary)
 
         st.markdown("### 反事实对照推演")
         counterfactual_source = (
@@ -3183,75 +3326,83 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
         else:
             st.info("当前数据量不足，继续推进会话后可查看反事实对照结果。")
 
-        st.markdown("### 追加政策设置")
-        can_append = str(session.get("status", "")).lower() in {"running", "paused"}
-        append_cols = st.columns(2)
-        with append_cols[0]:
-            with st.form(f"policy_lab_append_form_{presentation_mode}"):
-                append_policy_name = "追加政策"
-                append_policy_text = st.text_area(
-                    "追加政策文本",
-                    value="",
-                    height=110,
-                    key=f"policy_lab_append_policy_text_{presentation_mode}",
-                    placeholder="请输入希望在未来交易日追加生效的政策文本。",
-                )
-                append_policy_type = "综合政策"
-                append_effective_day = st.number_input(
-                    "生效交易日",
-                    min_value=current_day + 1,
-                    max_value=max(total_days, current_day + 1),
-                    value=min(max(current_day + 1, 1), max(total_days, current_day + 1)),
-                    step=1,
-                    key=f"policy_lab_append_effective_day_{presentation_mode}",
-                )
-                append_intensity = st.slider(
-                    "追加强度",
-                    min_value=0.2,
-                    max_value=2.0,
-                    value=1.0,
-                    step=0.1,
-                    key=f"policy_lab_append_intensity_{presentation_mode}",
-                )
-                append_half_life = st.slider(
-                    "追加政策半衰期（交易日）",
-                    min_value=1,
-                    max_value=120,
-                    value=30,
-                    step=1,
-                    key=f"policy_lab_append_half_life_{presentation_mode}",
-                )
-                append_rumor_noise = st.checkbox(
-                    "追加政策包含传言噪声",
-                    value=False,
-                    key=f"policy_lab_append_rumor_noise_{presentation_mode}",
-                )
-                append_submitted = st.form_submit_button("追加政策", use_container_width=True, disabled=not can_append)
-        if append_submitted:
-            if not can_append:
-                st.warning("请先开始仿真，再追加政策。")
-            elif not str(append_policy_text).strip():
-                st.warning("追加政策文本不能为空。")
+        with st.expander("查看政策时间轴、追加政策与日度明细", expanded=False):
+            st.markdown("#### 政策时间轴")
+            timeline_df = pd.DataFrame(session.get("policy_timeline", []) or _policy_session_timeline(session))
+            if not timeline_df.empty:
+                st.dataframe(timeline_df, use_container_width=True, hide_index=True)
             else:
-                _policy_session_enqueue(
-                    session,
-                    policy_name=append_policy_name,
-                    policy_text=append_policy_text,
-                    policy_type=append_policy_type,
-                    effective_day=int(append_effective_day),
-                    intensity=float(append_intensity),
-                    half_life_days=int(append_half_life),
-                    rumor_noise=bool(append_rumor_noise),
-                )
-                _store_session(session)
-                st.success("政策已加入会话队列。")
+                st.info("当前还没有追加政策。")
 
-        st.markdown("### 日度明细")
-        display_frame = _policy_session_display_frame(session_frame)
-        if not display_frame.empty:
-            st.dataframe(display_frame.tail(60), use_container_width=True, hide_index=True)
-        else:
-            st.info("继续仿真后，这里将展示逐日市场路径与交易明细。")
+            st.markdown("#### 追加政策设置")
+            can_append = str(session.get("status", "")).lower() in {"running", "paused"}
+            append_cols = st.columns(2)
+            with append_cols[0]:
+                with st.form(f"policy_lab_append_form_{presentation_mode}"):
+                    append_policy_name = "追加政策"
+                    append_policy_text = st.text_area(
+                        "追加政策文本",
+                        value="",
+                        height=110,
+                        key=f"policy_lab_append_policy_text_{presentation_mode}",
+                        placeholder="请输入希望在未来交易日追加生效的政策文本。",
+                    )
+                    append_policy_type = "综合政策"
+                    append_effective_day = st.number_input(
+                        "生效交易日",
+                        min_value=current_day + 1,
+                        max_value=max(total_days, current_day + 1),
+                        value=min(max(current_day + 1, 1), max(total_days, current_day + 1)),
+                        step=1,
+                        key=f"policy_lab_append_effective_day_{presentation_mode}",
+                    )
+                    append_intensity = st.slider(
+                        "追加强度",
+                        min_value=0.2,
+                        max_value=2.0,
+                        value=1.0,
+                        step=0.1,
+                        key=f"policy_lab_append_intensity_{presentation_mode}",
+                    )
+                    append_half_life = st.slider(
+                        "追加政策半衰期（交易日）",
+                        min_value=1,
+                        max_value=120,
+                        value=30,
+                        step=1,
+                        key=f"policy_lab_append_half_life_{presentation_mode}",
+                    )
+                    append_rumor_noise = st.checkbox(
+                        "追加政策包含传言噪声",
+                        value=False,
+                        key=f"policy_lab_append_rumor_noise_{presentation_mode}",
+                    )
+                    append_submitted = st.form_submit_button("追加政策", use_container_width=True, disabled=not can_append)
+            if append_submitted:
+                if not can_append:
+                    st.warning("请先开始仿真，再追加政策。")
+                elif not str(append_policy_text).strip():
+                    st.warning("追加政策文本不能为空。")
+                else:
+                    _policy_session_enqueue(
+                        session,
+                        policy_name=append_policy_name,
+                        policy_text=append_policy_text,
+                        policy_type=append_policy_type,
+                        effective_day=int(append_effective_day),
+                        intensity=float(append_intensity),
+                        half_life_days=int(append_half_life),
+                        rumor_noise=bool(append_rumor_noise),
+                    )
+                    _store_session(session)
+                    st.success("政策已加入会话队列。")
+
+            st.markdown("#### 日度明细")
+            display_frame = _policy_session_display_frame(session_frame)
+            if not display_frame.empty:
+                st.dataframe(display_frame.tail(60), use_container_width=True, hide_index=True)
+            else:
+                st.info("继续仿真后，这里将展示逐日市场路径与交易明细。")
 
         st.markdown("### 政策评估报告（在线预览）")
         report_bundle = session.get("report_bundle")

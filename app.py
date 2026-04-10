@@ -39,7 +39,7 @@ from ui import dashboard as dashboard_ui
 
 
 st.set_page_config(
-    page_title="数治观澜 | 政策风动推演沙箱",
+    page_title="数治观澜 | 基于大模型多智能体的金融政策风洞推演沙箱",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -295,7 +295,7 @@ def _render_top_entry_selector() -> None:
             <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle at 10% 20%, rgba(24, 144, 255, 0.15), transparent 60%); pointer-events: none;"></div>
             <h1 style="font-size: 2.8rem; font-weight: 800; color: #ffffff; margin-bottom: 0.2rem; letter-spacing: 2px; text-shadow: 0 0 24px rgba(24,144,255,0.6); display: flex; align-items: center; gap: 12px;">
                 <span style="background: linear-gradient(90deg, #4da6ff, #1890ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">数治观澜</span> 
-                <span style="font-size: 1.5rem; font-weight: 500; color: #8aa0c2; text-shadow: none;">金融政策风动推演沙箱</span>
+            <span style="font-size: 1.5rem; font-weight: 500; color: #8aa0c2; text-shadow: none;">基于大模型多智能体的金融政策风洞推演沙箱</span>
             </h1>
             <div style="font-size: 16px; color: #4da6ff; letter-spacing: 2px; font-weight: 600; text-transform: uppercase;">
                 Civitas Sandbox System

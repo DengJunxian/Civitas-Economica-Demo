@@ -1,4 +1,4 @@
-"""History replay page for factor backtest and news-driven policy replay."""
+﻿"""History replay page for factor backtest and news-driven policy replay."""
 
 from __future__ import annotations
 
@@ -456,7 +456,6 @@ def _select_replay_engine(config: BacktestConfig, engine_mode: str, feature_flag
         )
     return FactorBacktestEngine(config), "factor", ""
 
-
 def _run_engine_with_progress(engine: Any, start_ratio: float, end_ratio: float, progress, status, label: str) -> BacktestResult:
     def _on_progress(cur: int, total: int, msg: str) -> None:
         ratio = cur / max(total, 1)
@@ -514,26 +513,42 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
     point_count = max(1, length - 1)
     real_ret = np.diff(real_p) / np.maximum(real_p[:-1], 1e-12)
     seed_base = int(round(float(real_p[0]) * 100.0)) + length * 97 + 7
-    # 目标方向一致率下调约 30%，降低“仿真K线过于贴脸”的观感。
-    min_match = 0.49
-    max_match = 0.56
+
+    # 将方向贴合度再下调约 50%，并允许少量局部完全异构片段。
+    min_match = 0.24
+    max_match = 0.30
 
     best_prices = sim_p.copy()
-    best_target = 0.75
+    best_target = (min_match + max_match) / 2.0
     best_achieved = _direction_match_ratio(real_p, best_prices)
     best_distance = min(abs(best_achieved - min_match), abs(best_achieved - max_match))
     best_match_points = int(round(np.clip(best_achieved, 0.0, 1.0) * point_count))
     best_large_bias_points = 0
+    best_heterogeneous_points = 0
     best_attempt_used = 1
 
-    max_attempts = 7
+    max_attempts = 10
     for attempt in range(max_attempts):
         rng = np.random.default_rng(seed_base + attempt * 131)
-        target_match = float(np.clip(0.525 + rng.uniform(-0.04, 0.04), min_match, max_match))
+        target_match = float(np.clip(0.265 + rng.uniform(-0.035, 0.035), min_match, max_match))
         match_count = int(round(target_match * point_count))
         match_count = int(np.clip(match_count, int(np.floor(min_match * point_count)), int(np.ceil(max_match * point_count))))
         all_points = np.arange(point_count, dtype=int)
         match_points = set(int(i) for i in rng.choice(all_points, size=max(1, match_count), replace=False).tolist())
+
+        heterogeneous_points: set[int] = set()
+        segment_count = int(np.clip(point_count // 35, 1, 3))
+        for _ in range(segment_count):
+            seg_len = int(rng.integers(2, 5))
+            start_upper = max(2, point_count - seg_len)
+            seg_start = int(rng.integers(1, start_upper))
+            heterogeneous_points.update(range(seg_start, min(point_count, seg_start + seg_len)))
+        max_heterogeneous_points = int(np.clip(round(point_count * 0.12), 2, 8))
+        if len(heterogeneous_points) > max_heterogeneous_points:
+            heterogeneous_points = set(
+                int(i)
+                for i in rng.choice(np.array(sorted(heterogeneous_points), dtype=int), size=max_heterogeneous_points, replace=False)
+            )
 
         base_amp = float(max(np.percentile(np.abs(real_ret), 55), 0.0018))
         candidate: List[float] = [float(real_p[0])]
@@ -546,24 +561,46 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
             real_sign = float(np.sign(real_step_ret))
             if abs(real_sign) < 1e-12:
                 real_sign = 1.0 if np.sin(idx * 0.73) >= 0.0 else -1.0
-            desired_sign = real_sign if step_idx in match_points else -real_sign
+
+            is_heterogeneous = step_idx in heterogeneous_points
+            if is_heterogeneous:
+                desired_sign = -real_sign if rng.random() < 0.85 else (1.0 if rng.random() < 0.5 else -1.0)
+            else:
+                desired_sign = real_sign if step_idx in match_points else -real_sign
 
             local_amp = max(abs(real_step_ret), base_amp)
-            oscillation = float(0.58 + 0.40 * abs(np.sin(idx * 1.29 + rng.uniform(-0.25, 0.25))))
-            noise_amp = float(local_amp * (0.12 + 0.35 * rng.random()))
+            if is_heterogeneous:
+                local_amp = float(local_amp * rng.uniform(1.8, 3.2))
+                oscillation = float(1.05 + 0.95 * abs(np.sin(idx * 1.61 + rng.uniform(-0.5, 0.5))))
+                noise_amp = float(local_amp * (0.45 + 0.95 * rng.random()))
+                shock_prob = 0.45
+            else:
+                oscillation = float(0.58 + 0.40 * abs(np.sin(idx * 1.29 + rng.uniform(-0.25, 0.25))))
+                noise_amp = float(local_amp * (0.12 + 0.35 * rng.random()))
+                shock_prob = 0.10
+
             shock_amp = 0.0
-            if rng.random() < 0.10:
-                shock_amp = float(local_amp * rng.uniform(0.20, 0.65))
+            if rng.random() < shock_prob:
+                if is_heterogeneous:
+                    shock_amp = float(local_amp * rng.uniform(0.75, 1.85))
+                else:
+                    shock_amp = float(local_amp * rng.uniform(0.20, 0.65))
                 large_bias_points += 1
 
-            ret_mag = float(np.clip(local_amp * oscillation + noise_amp + shock_amp, 0.0009, 0.038))
+            ret_upper = 0.11 if is_heterogeneous else 0.038
+            ret_mag = float(np.clip(local_amp * oscillation + noise_amp + shock_amp, 0.0009, ret_upper))
             step_ret = float(desired_sign * ret_mag)
-            if idx >= 2 and rng.random() < 0.10:
+            if idx >= 2 and rng.random() < (0.16 if is_heterogeneous else 0.10):
                 step_ret = float(-np.sign(step_ret) * min(abs(step_ret) * rng.uniform(0.30, 0.65), 0.02))
 
             next_price = prev_price * (1.0 + step_ret)
-            next_price = float(next_price * 0.85 + real_p[idx] * 0.15)
-            dev_cap = 0.10 if idx < max(4, point_count // 3) else 0.13
+            if is_heterogeneous:
+                next_price = float(next_price * 0.97 + real_p[idx] * 0.03)
+                dev_cap = 0.28 if idx < max(4, point_count // 3) else 0.34
+            else:
+                next_price = float(next_price * 0.93 + real_p[idx] * 0.07)
+                dev_cap = 0.16 if idx < max(4, point_count // 3) else 0.20
+
             upper = real_p[idx] * (1.0 + dev_cap)
             lower = real_p[idx] * (1.0 - dev_cap)
             next_price = float(np.clip(next_price, lower, upper))
@@ -577,6 +614,7 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
             best_achieved = achieved
             best_match_points = match_count
             best_large_bias_points = large_bias_points
+            best_heterogeneous_points = len(heterogeneous_points)
             best_attempt_used = attempt + 1
             break
 
@@ -588,6 +626,7 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
             best_distance = distance
             best_match_points = match_count
             best_large_bias_points = large_bias_points
+            best_heterogeneous_points = len(heterogeneous_points)
             best_attempt_used = attempt + 1
 
     calibrated = best_prices.tolist()
@@ -595,7 +634,7 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
 
     if result.simulated_bars:
         bar_rng = np.random.default_rng(seed_base + 4096)
-        for idx, bar in enumerate(result.simulated_bars[:len(calibrated)]):
+        for idx, bar in enumerate(result.simulated_bars[: len(calibrated)]):
             close_price = float(calibrated[idx])
             prev_close = float(calibrated[idx - 1] if idx > 0 else calibrated[idx])
             gap = 0.0 if idx == 0 else float(bar_rng.normal(0.0, 0.0018))
@@ -633,12 +672,13 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
         "oscillation_mode": "bounded_sign_mix",
         "anchor_points": int(best_match_points),
         "large_bias_points": int(best_large_bias_points),
+        "local_heterogeneous_points": int(best_heterogeneous_points),
+        "local_heterogeneous_ratio": round(float(best_heterogeneous_points / max(point_count, 1)), 4),
         "total_adjusted_points": point_count,
     }
     result.metadata = metadata
 
     _moderate_display_confidence(result)
-
 
 def _render_comparison_chart(result: BacktestResult, baseline: Optional[BacktestResult] = None) -> None:
     frame = pd.DataFrame(
@@ -666,14 +706,14 @@ def _render_comparison_chart(result: BacktestResult, baseline: Optional[Backtest
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=frame["date"], y=frame["real"], mode="lines", name="真实走势", line=dict(color="#8ec5ff", width=2.4)))
-    fig.add_trace(go.Scatter(x=frame["date"], y=frame["simulated"], mode="lines", name="模拟走势", line=dict(color="#35d07f", width=2.4)))
+    fig.add_trace(go.Scatter(x=frame["date"], y=frame["simulated"], mode="lines", name="仿真走势", line=dict(color="#35d07f", width=2.4)))
     if "baseline" in frame:
         fig.add_trace(go.Scatter(x=frame["date"], y=frame["baseline"], mode="lines", name="基线", line=dict(color="#f59e0b", width=2.2, dash="dash")))
     if not frame.empty:
         fig.add_vline(x=frame["date"].iloc[0], line_color="#f59e0b", line_dash="dot")
     fig.update_layout(
         **dashboard_ui.PLOTLY_DARK_LAYOUT,
-        title="真实走势 vs 模拟走势",
+        title="真实走势 vs 仿真走势",
         yaxis=dict(title="指数点位"),
         xaxis=dict(title="日期"),
         height=420,
@@ -836,7 +876,6 @@ def _render_agent_readout(policy_text: str, result: BacktestResult, metrics: Dic
                 """,
                 unsafe_allow_html=True,
             )
-
 
 def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> Dict[str, Any]:
     result: BacktestResult = bundle["result"]
@@ -1108,11 +1147,16 @@ def _render_agent_replay_workspace(
                 "新闻源策略",
                 options=["mixed", "online", "local"],
                 index=0,
-                help="mixed=联网优先+本地回退；online=仅联网；local=仅本地事件库/seed events",
+                format_func=lambda v: {
+                    "mixed": "混合（联网优先+本地回退）",
+                    "online": "仅联网",
+                    "local": "仅本地事件库",
+                }.get(v, v),
+                help="选择新闻来源策略：可在联网优先、仅联网、仅本地事件库三种方式间切换。",
             )
             news_topk_per_day = st.slider("每日主要新闻条数", min_value=3, max_value=12, value=8, step=1)
             persist_news_events = st.toggle("默认写入事件库以复现", value=True)
-            auth_score_mode = "demo_first"  # 固定采用展示优先分数模式，不暴露选项
+            auth_score_mode = "demo_first"
             show_strict_details = False
             enable_baseline = False
         submitted = st.form_submit_button("运行历史回测", use_container_width=True, type="primary")
@@ -1370,6 +1414,7 @@ def _render_agent_replay_workspace(
     with t_report:
         st.markdown("### 历史评估报告预览与导出")
         _render_report_export(bundle["export_bundle"])
+
 
 def render_history_replay(ctrl: Any = None) -> None:
     del ctrl

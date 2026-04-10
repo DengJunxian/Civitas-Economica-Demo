@@ -1,5 +1,5 @@
-# file: ui/backtest_panel.py
-"""Historical backtest panel."""
+﻿# file: ui/backtest_panel.py
+"""因子回测面板。"""
 
 from __future__ import annotations
 
@@ -38,9 +38,8 @@ STRATEGY_OPTIONS = {
     "均值回归": "mean_reversion",
     "风险平价": "risk_parity",
     "消息驱动": "news_driven",
-    "组合系统（政策/情绪约束）": "portfolio_system",
+    "组合系统（政策+情绪约束）": "portfolio_system",
 }
-
 
 DEFAULT_HISTORY_BACKTEST_START_DATE = date(2024, 9, 24)
 
@@ -82,10 +81,10 @@ def _render_metrics(result: BacktestResult) -> None:
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("总收益", f"{result.total_return:.2%}")
     c2.metric("年化收益", f"{result.cagr:.2%}")
-    c3.metric("夏普", f"{result.sharpe_ratio:.2f}")
+    c3.metric("夏普比率", f"{result.sharpe_ratio:.2f}")
     c4.metric("最大回撤", f"{result.max_drawdown:.2%}")
     c5.metric("可信度", f"{result.credibility_score:.2f}")
-    c6.metric("IR", f"{result.information_ratio:.2f}")
+    c6.metric("信息比率", f"{result.information_ratio:.2f}")
 
 
 def _render_equity_chart(frame: pd.DataFrame) -> None:
@@ -96,8 +95,8 @@ def _render_equity_chart(frame: pd.DataFrame) -> None:
     fig.add_trace(
         go.Scatter(x=frame["date"], y=frame["benchmark"], mode="lines", name="基准净值", line=dict(width=1.8, color="#2f80ed"))
     )
-    fig.update_layout(template="plotly_dark", height=380, margin=dict(l=10, r=10, t=35, b=10), title="策略 vs 基准")
-    st.plotly_chart(fig, width="stretch", key="backtest_equity_chart")
+    fig.update_layout(template="plotly_dark", height=380, margin=dict(l=10, r=10, t=35, b=10), title="策略净值 vs 基准净值")
+    st.plotly_chart(fig, use_container_width=True, key="backtest_equity_chart")
 
 
 def _render_risk_chart(frame: pd.DataFrame) -> None:
@@ -119,11 +118,11 @@ def _render_risk_chart(frame: pd.DataFrame) -> None:
         template="plotly_dark",
         height=380,
         margin=dict(l=10, r=10, t=35, b=10),
-        title="回撤与仓位",
+        title="回撤与仓位变化",
         yaxis=dict(tickformat=".0%"),
         yaxis2=dict(overlaying="y", side="right", tickformat=".0%", showgrid=False),
     )
-    st.plotly_chart(fig, width="stretch", key="backtest_risk_chart")
+    st.plotly_chart(fig, use_container_width=True, key="backtest_risk_chart")
 
 
 def _result_payload(result: BacktestResult) -> Dict[str, Any]:
@@ -222,10 +221,46 @@ def _run_policy_ab_comparison(
     }
 
 
+def _localize_table(df: pd.DataFrame) -> pd.DataFrame:
+    rename_map = {
+        "date": "日期",
+        "time": "时间",
+        "timestamp": "时间戳",
+        "symbol": "标的",
+        "factor": "因子",
+        "factor_name": "因子名称",
+        "weight": "权重",
+        "score": "评分",
+        "signal": "信号",
+        "position": "仓位",
+        "turnover": "换手率",
+        "price": "价格",
+        "open": "开盘价",
+        "high": "最高价",
+        "low": "最低价",
+        "close": "收盘价",
+        "volume": "成交量",
+        "pnl": "盈亏",
+        "ret": "收益率",
+        "returns": "收益率",
+        "benchmark": "基准",
+        "drawdown": "回撤",
+        "reason": "原因",
+        "action": "动作",
+        "side": "方向",
+        "qty": "数量",
+        "amount": "金额",
+    }
+    return df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+
+
 def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None:
     if show_header:
         st.markdown("## 因子回测")
-        st.caption("支持组合系统策略、因子诊断、政策 A/B 自动对比与量化研究数据导出。")
+        st.info(
+            "因子回测用于验证策略在历史市场中的表现：系统会按你设定的因子规则生成买卖信号，"
+            "在历史价格上模拟交易，输出收益、回撤、风险与成交轨迹，帮助判断策略是否稳定、是否具备可解释性。"
+        )
 
     if "backtest_result" not in st.session_state:
         st.session_state.backtest_result = None
@@ -250,7 +285,7 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
                 else 0,
             )
             benchmark_label = st.selectbox(
-                "基准",
+                "基准指数",
                 options=list(INDEX_OPTIONS.keys()),
                 index=list(INDEX_OPTIONS.values()).index(cfg_state.get("benchmark_symbol", "sh000001"))
                 if cfg_state.get("benchmark_symbol", "sh000001") in INDEX_OPTIONS.values()
@@ -267,7 +302,6 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
             else:
                 start_date = None
                 end_date = None
-                # Streamlit 的 slider 默认值必须与 step 对齐，否则前端会出现告警。
                 raw_period_days = int(cfg_state.get("period_days", _default_period_days_from_anchor()))
                 clipped_period_days = max(180, min(2000, raw_period_days))
                 period_days_default = 180 + round((clipped_period_days - 180) / 10) * 10
@@ -303,12 +337,24 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
             allow_short = st.checkbox("允许做空", value=bool(cfg_state.get("allow_short", False)))
 
         with col_c:
-            commission_bps = st.slider("佣金（bps）", min_value=0.0, max_value=20.0, value=float(cfg_state.get("commission_bps", 2.5)), step=0.1)
-            stamp_bps = st.slider("印花税（bps，卖出）", min_value=0.0, max_value=20.0, value=float(cfg_state.get("stamp_bps", 5.0)), step=0.1)
-            slippage_bps = st.slider("滑点（bps）", min_value=0.0, max_value=40.0, value=float(cfg_state.get("slippage_bps", 5.0)), step=0.5)
-            market_impact = st.slider("冲击系数", min_value=0.0, max_value=0.5, value=float(cfg_state.get("market_impact", 0.05)), step=0.01)
-            policy_shock = st.slider("政策冲击因子", min_value=-1.0, max_value=1.0, value=float(cfg_state.get("policy_shock", 0.0)), step=0.05)
-            sentiment_weight = st.slider("情绪权重", min_value=0.0, max_value=1.0, value=float(cfg_state.get("sentiment_weight", 0.5)), step=0.05)
+            commission_bps = st.slider(
+                "佣金（bps）", min_value=0.0, max_value=20.0, value=float(cfg_state.get("commission_bps", 2.5)), step=0.1
+            )
+            stamp_bps = st.slider(
+                "印花税（bps，仅卖出）", min_value=0.0, max_value=20.0, value=float(cfg_state.get("stamp_bps", 5.0)), step=0.1
+            )
+            slippage_bps = st.slider(
+                "滑点（bps）", min_value=0.0, max_value=40.0, value=float(cfg_state.get("slippage_bps", 5.0)), step=0.5
+            )
+            market_impact = st.slider(
+                "冲击系数", min_value=0.0, max_value=0.5, value=float(cfg_state.get("market_impact", 0.05)), step=0.01
+            )
+            policy_shock = st.slider(
+                "政策冲击因子", min_value=-1.0, max_value=1.0, value=float(cfg_state.get("policy_shock", 0.0)), step=0.05
+            )
+            sentiment_weight = st.slider(
+                "情绪权重", min_value=0.0, max_value=1.0, value=float(cfg_state.get("sentiment_weight", 0.5)), step=0.05
+            )
             civitas_factor_weight = st.slider(
                 "Civitas 因子权重",
                 min_value=0.0,
@@ -317,9 +363,11 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
                 step=0.05,
             )
 
-        export_qlib = st.checkbox("回测后自动导出量化研究数据束", value=bool(cfg_state.get("export_qlib_bundle", False)))
-        qlib_bundle_path = st.text_input("量化研究数据束导出路径", value=str(cfg_state.get("qlib_bundle_path", "outputs/backtest_qlib_bundle")))
-        submitted = st.form_submit_button("运行历史回测", width="stretch")
+        export_qlib = st.checkbox("回测后自动导出量化研究数据包", value=bool(cfg_state.get("export_qlib_bundle", False)))
+        qlib_bundle_path = st.text_input(
+            "量化研究数据包导出路径", value=str(cfg_state.get("qlib_bundle_path", "outputs/backtest_qlib_bundle"))
+        )
+        submitted = st.form_submit_button("运行因子回测", use_container_width=True)
 
     if submitted:
         config = BacktestConfig(
@@ -400,13 +448,13 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
         st.session_state.policy_ab_compare = None
 
         if run_result.total_days > 0:
-            st.success(f"回测完成: {run_result.total_days} 个交易日, {run_result.total_trades} 笔交易")
+            st.success(f"回测完成：{run_result.total_days} 个交易日，{run_result.total_trades} 笔交易")
         else:
             st.error("回测未得到有效结果，请检查参数或数据窗口。")
 
     result: Optional[BacktestResult] = st.session_state.get("backtest_result")
     if not result:
-        st.info("请先配置参数并运行一次回测。")
+        st.info("请先配置参数并运行一次因子回测。")
         return
 
     frame = _to_frame(result)
@@ -423,13 +471,24 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
 
     if result.factor_snapshot:
         st.markdown("### 因子诊断")
-        st.dataframe(pd.DataFrame(result.factor_snapshot).head(20), width="stretch", hide_index=True)
+        factor_df = _localize_table(pd.DataFrame(result.factor_snapshot).head(20))
+        st.dataframe(factor_df, use_container_width=True, hide_index=True)
     if result.trade_log:
         st.markdown("### 交易明细")
-        st.dataframe(pd.DataFrame(result.trade_log).tail(200), width="stretch", hide_index=True)
+        trade_df = _localize_table(pd.DataFrame(result.trade_log).tail(200))
+        st.dataframe(trade_df, use_container_width=True, hide_index=True)
 
-    st.markdown("### 回测报告")
-    st.markdown(BacktestReportGenerator.generate_html_report(result), unsafe_allow_html=True)
+    st.markdown("### 回测报告（中文摘要）")
+    summary = result.get_summary() if hasattr(result, "get_summary") else {}
+    if isinstance(summary, dict) and summary:
+        summary_df = pd.DataFrame([summary])
+        summary_df = _localize_table(summary_df)
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("暂无可展示的摘要信息。")
+
+    with st.expander("查看技术报告（开发用）", expanded=False):
+        st.markdown(BacktestReportGenerator.generate_html_report(result), unsafe_allow_html=True)
 
     perf_export = frame.copy()
     perf_export["date"] = perf_export["date"].dt.strftime("%Y-%m-%d")
@@ -438,11 +497,23 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
 
     dl_col1, dl_col2, dl_col3 = st.columns(3)
     with dl_col1:
-        st.download_button("下载 CSV（绩效序列）", data=perf_csv, file_name="backtest_performance.csv", mime="text/csv", width="stretch")
+        st.download_button(
+            "下载 CSV（绩效序列）",
+            data=perf_csv,
+            file_name="backtest_performance.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
     with dl_col2:
-        st.download_button("下载 JSON（回测摘要）", data=payload_json, file_name="backtest_summary.json", mime="application/json", width="stretch")
+        st.download_button(
+            "下载 JSON（回测摘要）",
+            data=payload_json,
+            file_name="backtest_summary.json",
+            mime="application/json",
+            use_container_width=True,
+        )
     with dl_col3:
-        if st.button("导出量化研究数据束", width="stretch"):
+        if st.button("导出量化研究数据包", use_container_width=True):
             session_backtester: Optional[HistoricalBacktester] = st.session_state.get("backtester")
             if not session_backtester:
                 st.error("未找到回测实例，请先运行回测。")
@@ -450,11 +521,11 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
                 try:
                     target_dir = st.session_state.get("backtest_cfg", {}).get("qlib_bundle_path", "outputs/backtest_qlib_bundle")
                     bundle_path = session_backtester.export_qlib_bundle(target_dir)
-                    st.success(f"已导出到: {bundle_path}")
+                    st.success(f"已导出到：{bundle_path}")
                 except Exception as exc:
-                    st.error(f"导出失败: {exc}")
+                    st.error(f"导出失败：{exc}")
 
-    st.markdown("### 政策 A/B 对比报告")
+    st.markdown("### 政策甲乙对比报告")
     cfg_live = st.session_state.get("backtest_cfg", {})
     base_policy_shock = float(cfg_live.get("policy_shock", 0.0))
     p_col1, p_col2, p_col3 = st.columns(3)
@@ -463,14 +534,14 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
     with p_col2:
         policy_b = st.number_input("政策 B 冲击", value=base_policy_shock + 0.30, step=0.05, key="policy_b_shock_input")
     with p_col3:
-        run_compare = st.button("生成政策 A/B 对比报告", width="stretch")
+        run_compare = st.button("生成政策甲乙对比报告", use_container_width=True)
 
     if run_compare:
         compare_backtester: Optional[HistoricalBacktester] = st.session_state.get("backtester")
         if not compare_backtester:
             st.error("未找到回测实例，请先运行回测。")
         else:
-            with st.spinner("正在生成政策A/B对比回测..."):
+            with st.spinner("正在生成政策甲乙对比回测..."):
                 try:
                     generated_compare_bundle = _run_policy_ab_comparison(
                         base_backtester=compare_backtester,
@@ -478,38 +549,38 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
                         policy_b=float(policy_b),
                     )
                     st.session_state.policy_ab_compare = generated_compare_bundle
-                    st.success(f"已生成政策A/B对比报告，运行ID: {generated_compare_bundle['run_id']}")
+                    st.success(f"已生成政策甲乙对比报告，运行 ID：{generated_compare_bundle['run_id']}")
                 except Exception as exc:
-                    st.error(f"政策A/B自动对比失败: {exc}")
+                    st.error(f"政策甲乙自动对比失败：{exc}")
 
     compare_bundle: Any = st.session_state.get("policy_ab_compare")
     if compare_bundle:
         compare_df = compare_bundle.get("compare_df", pd.DataFrame())
         if isinstance(compare_df, pd.DataFrame) and not compare_df.empty:
-            st.dataframe(compare_df, width="stretch", hide_index=True)
+            st.dataframe(_localize_table(compare_df), use_container_width=True, hide_index=True)
             csv_data = compare_df.to_csv(index=False).encode("utf-8-sig")
             json_data = compare_df.to_json(orient="records", force_ascii=False, indent=2).encode("utf-8")
 
             dl_a, dl_b = st.columns(2)
             with dl_a:
                 st.download_button(
-                    "下载政策A/B对比 CSV",
+                    "下载政策甲乙对比 CSV",
                     data=csv_data,
                     file_name=f"policy_ab_compare_{compare_bundle['run_id']}.csv",
                     mime="text/csv",
-                    width="stretch",
+                    use_container_width=True,
                 )
             with dl_b:
                 st.download_button(
-                    "下载政策A/B对比 JSON",
+                    "下载政策甲乙对比 JSON",
                     data=json_data,
                     file_name=f"policy_ab_compare_{compare_bundle['run_id']}.json",
                     mime="application/json",
-                    width="stretch",
+                    use_container_width=True,
                 )
         files = compare_bundle.get("files", {})
         if files:
             st.caption(
-                "Tear sheet 已写入: "
+                "对比报告文件："
                 f"{files.get('policy_a_html', '')} | {files.get('policy_b_html', '')}"
             )

@@ -507,7 +507,7 @@ def _apply_interval_shape_optimization(
 
     rng = np.random.default_rng(seed)
     optimized = base_prices.copy()
-    interval_count = int(np.clip(n // 70 + 1, 2, 4))
+    interval_count = int(np.clip(n // 65 + 2, 3, 5))
     candidate_starts = np.arange(2, max(3, n - 6), dtype=int)
     rng.shuffle(candidate_starts)
 
@@ -517,7 +517,7 @@ def _apply_interval_shape_optimization(
     for start in candidate_starts.tolist():
         if len(intervals) >= interval_count:
             break
-        span = int(rng.integers(4, 8))
+        span = int(rng.integers(4, 9))
         end = min(n - 2, start + span)
         if end - start < 3:
             continue
@@ -545,18 +545,22 @@ def _apply_interval_shape_optimization(
             )
         )
         amp = max(abs(p1 - p0), abs(p0) * local_ref * float(0.8 + rng.random() * 0.6))
-        wiggle = np.sin((1.3 + rng.random() * 1.2) * np.pi * x + rng.uniform(-0.35, 0.35))
-        jitter = np.cos((2.5 + rng.random() * 1.5) * np.pi * x + rng.uniform(-0.35, 0.35))
-        profile = 0.58 * wiggle + 0.42 * jitter
+        wiggle = np.sin((1.4 + rng.random() * 1.3) * np.pi * x + rng.uniform(-0.35, 0.35))
+        jitter = np.cos((2.7 + rng.random() * 1.6) * np.pi * x + rng.uniform(-0.35, 0.35))
+        profile = 0.56 * wiggle + 0.44 * jitter
         profile[0] = 0.0
         profile[-1] = 0.0
-        candidate = baseline + amp * 0.22 * profile
+        teeth = np.where((np.arange(seg_len + 1) + int(rng.integers(0, 2))) % 2 == 0, 1.0, -1.0)
+        teeth = teeth * (0.6 + 0.4 * np.sin(np.pi * x) ** 2)
+        teeth[0] = 0.0
+        teeth[-1] = 0.0
+        candidate = baseline + amp * (0.17 * profile + 0.08 * teeth)
 
         # Keep the broad trend intact and avoid excessive detachment from real path.
         candidate[0] = segment_base[0]
         candidate[-1] = segment_base[-1]
         for j, idx in enumerate(range(start, end + 1)):
-            cap = 0.22
+            cap = 0.20
             upper = real_prices[idx] * (1.0 + cap)
             lower = real_prices[idx] * (1.0 - cap)
             candidate[j] = float(np.clip(candidate[j], lower, upper))

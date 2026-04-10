@@ -25,6 +25,7 @@ from core.tear_sheet import (
     export_tear_sheet_html,
     export_tear_sheet_json,
 )
+from ui.narrative import render_narrative_block
 
 INDEX_OPTIONS = {
     "上证指数 (sh000001)": "sh000001",
@@ -85,6 +86,12 @@ def _render_metrics(result: BacktestResult) -> None:
     c4.metric("最大回撤", f"{result.max_drawdown:.2%}")
     c5.metric("可信度", f"{result.credibility_score:.2f}")
     c6.metric("信息比率", f"{result.information_ratio:.2f}")
+    render_narrative_block(
+        "回测核心指标解读",
+        result.get_summary(),
+        context="请解释收益、风险、可信度与信息比率的组合表现，判断该策略更偏稳健、激进还是中性。",
+        cache_namespace="backtest_panel_narrative_cache",
+    )
 
 
 def _render_equity_chart(frame: pd.DataFrame) -> None:
@@ -97,6 +104,12 @@ def _render_equity_chart(frame: pd.DataFrame) -> None:
     )
     fig.update_layout(template="plotly_dark", height=380, margin=dict(l=10, r=10, t=35, b=10), title="策略净值 vs 基准净值")
     st.plotly_chart(fig, use_container_width=True, key="backtest_equity_chart")
+    render_narrative_block(
+        "策略净值与基准走势解读",
+        frame[["date", "equity", "benchmark"]].tail(20).assign(date=lambda df: df["date"].astype(str)).to_dict(orient="records"),
+        context="请解释策略净值相对基准的超额表现、优势阶段和劣势阶段。",
+        cache_namespace="backtest_panel_narrative_cache",
+    )
 
 
 def _render_risk_chart(frame: pd.DataFrame) -> None:
@@ -123,6 +136,12 @@ def _render_risk_chart(frame: pd.DataFrame) -> None:
         yaxis2=dict(overlaying="y", side="right", tickformat=".0%", showgrid=False),
     )
     st.plotly_chart(fig, use_container_width=True, key="backtest_risk_chart")
+    render_narrative_block(
+        "回撤与仓位变化解读",
+        frame[["date", "drawdown", "position"]].tail(20).assign(date=lambda df: df["date"].astype(str)).to_dict(orient="records"),
+        context="请解释策略在高回撤阶段是否伴随仓位收缩，风险控制是否有效。",
+        cache_namespace="backtest_panel_narrative_cache",
+    )
 
 
 def _result_payload(result: BacktestResult) -> Dict[str, Any]:
@@ -473,10 +492,22 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
         st.markdown("### 因子诊断")
         factor_df = _localize_table(pd.DataFrame(result.factor_snapshot).head(20))
         st.dataframe(factor_df, use_container_width=True, hide_index=True)
+        render_narrative_block(
+            "因子诊断解读",
+            factor_df.head(10).to_dict(orient="records"),
+            context="请解释当前因子排名、权重和评分对策略行为的驱动作用。",
+            cache_namespace="backtest_panel_narrative_cache",
+        )
     if result.trade_log:
         st.markdown("### 交易明细")
         trade_df = _localize_table(pd.DataFrame(result.trade_log).tail(200))
         st.dataframe(trade_df, use_container_width=True, hide_index=True)
+        render_narrative_block(
+            "交易明细解读",
+            trade_df.head(12).to_dict(orient="records"),
+            context="请概括近期交易方向、换手节奏和执行特征，判断策略是否存在过度交易。",
+            cache_namespace="backtest_panel_narrative_cache",
+        )
 
     st.markdown("### 回测报告（中文摘要）")
     summary = result.get_summary() if hasattr(result, "get_summary") else {}
@@ -484,6 +515,12 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
         summary_df = pd.DataFrame([summary])
         summary_df = _localize_table(summary_df)
         st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        render_narrative_block(
+            "回测摘要解读",
+            summary_df.to_dict(orient="records"),
+            context="请用适合答辩的口径总结这次回测表现，并指出最大的亮点和最大的不确定性。",
+            cache_namespace="backtest_panel_narrative_cache",
+        )
     else:
         st.info("暂无可展示的摘要信息。")
 
@@ -558,6 +595,12 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
         compare_df = compare_bundle.get("compare_df", pd.DataFrame())
         if isinstance(compare_df, pd.DataFrame) and not compare_df.empty:
             st.dataframe(_localize_table(compare_df), use_container_width=True, hide_index=True)
+            render_narrative_block(
+                "政策甲乙对比解读",
+                _localize_table(compare_df).head(12).to_dict(orient="records"),
+                context="请比较政策 A 与政策 B 的收益、风险与稳定性差异，并指出更适合展示的方案。",
+                cache_namespace="backtest_panel_narrative_cache",
+            )
             csv_data = compare_df.to_csv(index=False).encode("utf-8-sig")
             json_data = compare_df.to_json(orient="records", force_ascii=False, indent=2).encode("utf-8")
 

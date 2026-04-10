@@ -10,7 +10,7 @@ import plotly.express as px
 import streamlit as st
 
 from regulator_agent import run_regulatory_closed_loop
-from ui.narrative import narrate_payload
+from ui.narrative import narrate_payload, render_narrative_block
 
 
 REGULATOR_OPTIMIZATION_PAGE_FLAG = "regulator_optimization_page_v1"
@@ -137,6 +137,15 @@ def render_regulator_optimization() -> None:
             st.info("暂无候选动作差分。")
         else:
             st.dataframe(frames["deltas"], use_container_width=True, hide_index=True)
+    render_narrative_block(
+        "监管 A/B 对照解读",
+        {
+            "baseline": frames["baseline"].to_dict(orient="records"),
+            "deltas": frames["deltas"].head(10).to_dict(orient="records"),
+        },
+        context="请解释基线方案与候选动作之间的主要差异，说明哪些指标改善最大、代价最大。",
+        cache_namespace="regulator_opt_narrative_cache",
+    )
 
     st.markdown("### 帕累托前沿")
     pareto_df = frames["pareto"]
@@ -156,6 +165,12 @@ def render_regulator_optimization() -> None:
         fig.update_layout(height=480, margin=dict(l=20, r=20, t=60, b=20))
         st.plotly_chart(fig, use_container_width=True)
         st.dataframe(pareto_df, use_container_width=True, hide_index=True)
+        render_narrative_block(
+            "Pareto 前沿解读",
+            pareto_df.head(12).to_dict(orient="records"),
+            context="请解释稳定性、成本与流动性之间的权衡关系，并指出推荐方案为何位于合理区间。",
+            cache_namespace="regulator_opt_narrative_cache",
+        )
 
     st.markdown("### 推荐方案与证据")
     left, right = st.columns(2)
@@ -182,6 +197,12 @@ def render_regulator_optimization() -> None:
     if not frames["candidates"].empty:
         st.markdown("### 候选方案")
         st.dataframe(frames["candidates"], use_container_width=True, hide_index=True)
+        render_narrative_block(
+            "候选方案清单解读",
+            frames["candidates"].head(12).to_dict(orient="records"),
+            context="请概括候选方案的分布特征，并指出适合答辩重点展示的 1 到 2 个候选动作。",
+            cache_namespace="regulator_opt_narrative_cache",
+        )
 
     export_cols = st.columns(2)
     export_cols[0].download_button(

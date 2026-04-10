@@ -24,6 +24,7 @@ from core.policy_session import PolicySession
 from core.runtime_mode import RuntimeModeProfile, resolve_runtime_mode_profile
 from core.ui_text import translate_display_text
 from policy.structured import PolicyPackage
+from ui.narrative import render_narrative_block
 from ui.reporting import official_report_meta, write_report_artifacts
 
 
@@ -1878,6 +1879,20 @@ def _render_policy_package_summary(package_dict: Dict[str, Any], summary: Dict[s
         ):
             st.markdown(f"**{title}**")
             st.markdown("\n".join(f"- {item}" for item in items))
+    render_narrative_block(
+        "AI 结构化政策解读",
+        {
+            "headline": headline,
+            "primary_path": primary_path,
+            "top_layers": top_layers,
+            "impact_evaluation": payload["impact_evaluation"],
+            "risk_assessment": payload["risk_assessment"],
+            "action_recommendations": payload["action_recommendations"],
+            "monitoring_kpis": payload["monitoring_kpis"],
+        },
+        context="请用比赛展示口径解释这项政策的主要传导路径、预期影响、风险和建议动作。",
+        cache_namespace="policy_lab_structured_narrative_cache",
+    )
 
 
 def _policy_session_display_frame(frame: pd.DataFrame) -> pd.DataFrame:

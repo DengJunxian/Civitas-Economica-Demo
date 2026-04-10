@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import streamlit as st
 
-from ui.narrative import narrate_payload
+from ui.narrative import narrate_payload, render_narrative_block
 
 
 def _safe_get(report: Dict[str, Any], path: list[str], default: float = 0.0) -> float:
@@ -136,6 +136,12 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
         {"指标": "损失厌恶强度均值", "数值": _safe_get(report, ["loss_aversion_intensity", "mean"])},
     ]
     st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+    render_narrative_block(
+        "行为金融关键指标解读",
+        summary_rows,
+        context="请解释羊群效应、处置效应、历史新高效应与回撤分布所反映的市场行为特征。",
+        cache_namespace="behavioral_diag_narrative_cache",
+    )
 
     st.markdown("### 报告解读")
     st.markdown(
@@ -169,6 +175,12 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
                 )
                 st.caption("平均交易意图热力图（按损失厌恶 × 边权重）")
                 st.dataframe(pivot, use_container_width=True)
+            render_narrative_block(
+                "参数敏感性解读",
+                sens_df.head(15).to_dict(orient="records"),
+                context="请解释损失厌恶、参考适应和边权重变化如何影响交易意图与系统稳定性。",
+                cache_namespace="behavioral_diag_narrative_cache",
+            )
         except Exception as exc:
             st.warning(f"参数敏感性文件读取失败：{exc}")
     else:
@@ -191,6 +203,12 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
             st.caption(
                 f"干预是否开启={ab.get('intervention_active', False)}，"
                 f"触发时点={ab.get('intervention_tick', '无')}"
+            )
+            render_narrative_block(
+                "干预前后对照解读",
+                {"rows": rows, "meta": {"intervention_active": ab.get("intervention_active", False), "intervention_tick": ab.get("intervention_tick", "无")}},
+                context="请解释干预前后波动、绝对收益和异常事件率的变化，判断干预是否有效。",
+                cache_namespace="behavioral_diag_narrative_cache",
             )
         except Exception as exc:
             st.warning(f"A/B 报告读取失败：{exc}")

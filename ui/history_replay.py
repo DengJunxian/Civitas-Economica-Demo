@@ -17,6 +17,7 @@ from core.history_news import HistoryNewsService
 from core.news_policy_replay import NewsDrivenPolicyReplayEngine
 from ui.backtest_panel import render_backtest_panel
 from ui import dashboard as dashboard_ui
+from ui.narrative import render_narrative_block
 from ui.policy_lab import _compile_scaled_shock
 from ui.reporting import official_report_meta, write_report_artifacts
 
@@ -820,6 +821,16 @@ def _render_comparison_chart(result: BacktestResult, baseline: Optional[Backtest
     )
     st.plotly_chart(fig, use_container_width=True, key="history_replay_compare_chart")
     dashboard_ui.export_plot_bundle(fig, frame, "history_replay_compare", "history_replay_compare")
+    render_narrative_block(
+        "真实走势与仿真走势对照",
+        {
+            "head": frame.head(8).to_dict(orient="records"),
+            "tail": frame.tail(8).to_dict(orient="records"),
+            "baseline_present": bool(baseline and baseline.simulated_prices),
+        },
+        context="请解释真实走势与仿真走势的贴合程度、偏离时段以及这张图对拟真度的证明意义。",
+        cache_namespace="history_replay_narrative_cache",
+    )
 
 
 def _render_metric_cards(result: BacktestResult, metrics: Dict[str, float]) -> None:
@@ -872,6 +883,17 @@ def _render_authenticity_overview(bundle: Dict[str, Any], result: BacktestResult
                 f"候选新闻：联网 {int(pre_coverage.get('online_candidates', 0) or 0)} 条，"
                 f"本地 {int(pre_coverage.get('local_candidates', 0) or 0)} 条。"
             )
+    render_narrative_block(
+        "综合拟真评分解读",
+        {
+            "score": score,
+            "news_coverage": coverage,
+            "pre_news_coverage": pre_coverage,
+            "strict_authenticity_score": float(result.metadata.get("strict_authenticity_score", 0.0) or 0.0),
+        },
+        context="请解释综合拟真评分为何处于当前水平，新闻覆盖是否足够，以及它对结果可信度意味着什么。",
+        cache_namespace="history_replay_narrative_cache",
+    )
 
 
 def _render_news_digest_preview(bundle: Dict[str, Any], result: BacktestResult) -> None:
@@ -882,6 +904,15 @@ def _render_news_digest_preview(bundle: Dict[str, Any], result: BacktestResult) 
     digest_df = pd.DataFrame(news_digest).head(12)
     preferred = [col for col in ["date", "summary", "headline", "shock_score", "news_count", "source"] if col in digest_df.columns]
     st.dataframe(digest_df[preferred] if preferred else digest_df, use_container_width=True, hide_index=True)
+    render_narrative_block(
+        "新闻覆盖与来源解读",
+        {
+            "news_digest": digest_df.head(8).to_dict(orient="records"),
+            "news_coverage": result.metadata.get("news_coverage", {}),
+        },
+        context="请解释这些新闻如何支撑历史回放，哪些事件最可能驱动市场路径变化。",
+        cache_namespace="history_replay_narrative_cache",
+    )
 
 
 def _render_baseline_delta_cards(result: BacktestResult, baseline: Optional[BacktestResult]) -> None:
@@ -1536,6 +1567,12 @@ def _render_agent_replay_workspace(
         if score_trace:
             with st.expander("查看评分补充证据", expanded=False):
                 st.dataframe(pd.DataFrame(score_trace), use_container_width=True, hide_index=True)
+                render_narrative_block(
+                    "评分补充证据解读",
+                    score_trace[:10],
+                    context="请解释评分补充证据主要修正了哪些判断，以及这些修正如何影响综合拟真评分。",
+                    cache_namespace="history_replay_narrative_cache",
+                )
 
     with t_report:
         st.markdown("### 历史评估报告预览与导出")
@@ -1556,6 +1593,15 @@ def _render_agent_replay_workspace(
                     st.dataframe(ref_df, use_container_width=True, hide_index=True)
                 else:
                     st.info("暂无参考序列样本。")
+            render_narrative_block(
+                "序列样本解读",
+                {
+                    "simulated_bars": pd.DataFrame(result.simulated_bars).head(8).to_dict(orient="records"),
+                    "reference_bars": pd.DataFrame(result.metadata.get("reference_bars", [])).head(8).to_dict(orient="records"),
+                },
+                context="请结合仿真序列与参考序列样本，说明两者在价格区间、成交与波动上的主要差异。",
+                cache_namespace="history_replay_narrative_cache",
+            )
 
 
 def render_history_replay(ctrl: Any = None) -> None:

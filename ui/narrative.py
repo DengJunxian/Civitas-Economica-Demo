@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import hashlib
 import json
 from typing import Any, Dict, List, Tuple
@@ -170,3 +171,54 @@ def narrate_payload(title: str, payload: Any, *, context: str = "", cache_namesp
         text = _fallback_narrative(title, compact, context)
     cache[cache_key] = text
     return text
+
+
+def render_narrative_block(
+    title: str,
+    payload: Any,
+    *,
+    context: str = "",
+    cache_namespace: str = "ui_narrative_cache",
+    label: str = "大模型解读",
+) -> str:
+    text = narrate_payload(title, payload, context=context, cache_namespace=cache_namespace)
+    html_body = _narrative_text_to_html(text)
+    st.markdown(
+        f"""
+        <div class="insight-block">
+          <div class="insight-block-label">{label}</div>
+          <div class="insight-block-title">{title}</div>
+          <div class="insight-block-body">{html_body}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    return text
+
+
+def _narrative_text_to_html(text: str) -> str:
+    lines = [line.strip() for line in str(text or "").splitlines()]
+    chunks: List[str] = []
+    list_items: List[str] = []
+
+    def flush_list() -> None:
+        nonlocal list_items
+        if list_items:
+            chunks.append("<ul>" + "".join(list_items) + "</ul>")
+            list_items = []
+
+    for line in lines:
+        if not line:
+            flush_list()
+            continue
+        if line.startswith("- "):
+            list_items.append(f"<li>{html.escape(line[2:])}</li>")
+            continue
+        flush_list()
+        if line.startswith("**") and line.endswith("**") and len(line) > 4:
+            chunks.append(f"<p><strong>{html.escape(line[2:-2])}</strong></p>")
+            continue
+        safe = html.escape(line).replace("**", "")
+        chunks.append(f"<p>{safe}</p>")
+    flush_list()
+    return "".join(chunks)

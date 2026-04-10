@@ -65,6 +65,9 @@ p, span, div, h1, h2, h3, h4, h5, h6 {
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
   position: relative;
   overflow: hidden;
+  height: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .kpi-card::before {
@@ -85,11 +88,13 @@ p, span, div, h1, h2, h3, h4, h5, h6 {
 
 .kpi-value {
   margin-top: 10px;
-  font-size: 28px;
-  line-height: 1.1;
+  font-size: clamp(18px, 1.8vw, 28px);
+  line-height: 1.25;
   font-weight: 700;
   color: #ffffff;
   text-shadow: 0 0 10px rgba(24, 144, 255, 0.3);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .kpi-note {
@@ -264,11 +269,16 @@ ul[role="listbox"] li {
   color: #e2e8f0;
   min-height: 100%;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+  height: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .story-card-title, .flow-step-label, .ops-card-title {
   color: #ffffff;
   font-weight: 700;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .story-card-summary, .story-card-list, .summary-note, .ops-card-summary, .ops-card-list, .summary-label {
@@ -288,11 +298,58 @@ ul[role="listbox"] li {
 
 .summary-value {
   color: #ffffff;
-  font-size: 24px;
+  font-size: clamp(18px, 1.7vw, 24px);
   font-weight: 700;
   text-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
   margin-top: 6px;
   line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.story-card-summary, .summary-note, .ops-card-summary, .ops-card-list, .story-card-list, .summary-label {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ops-card-list, .story-card-list, .hero-briefing-list {
+  padding-left: 18px;
+}
+
+.insight-block {
+  margin: 12px 0 18px 0;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(24, 144, 255, 0.24);
+  background: linear-gradient(135deg, rgba(15, 30, 55, 0.74), rgba(8, 17, 34, 0.94));
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.insight-block-label {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(24, 144, 255, 0.14);
+  color: #9fd0ff;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.insight-block-title {
+  margin-top: 10px;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.insight-block-body {
+  margin-top: 10px;
+  color: #d7e5f8;
+  line-height: 1.8;
 }
 
 .pulse-card {
@@ -468,6 +525,8 @@ div[data-testid="stExpanderDetails"] {
 
 [data-testid="stMetricValue"] {
   color: #ffffff !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 [data-testid="stDataFrame"] {

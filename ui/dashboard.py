@@ -15,7 +15,7 @@ from plotly.utils import PlotlyJSONEncoder
 import streamlit as st
 
 from core.ui_text import display_risk_alert, translate_display_text, translate_ui_payload
-from ui.narrative import narrate_payload
+from ui.narrative import narrate_payload, render_narrative_block
 
 
 PLOTLY_DARK_LAYOUT = dict(
@@ -66,6 +66,16 @@ def metric_value_text(value: float, as_percent: bool = False) -> str:
     if as_percent:
         return f"{value:.2%}"
     return f"{value:.3f}" if abs(value) < 10 else f"{value:.2f}"
+
+
+def _render_chart_explanation(title: str, payload: Any, context: str, cache_namespace: str = "dashboard_narrative_cache") -> None:
+    render_narrative_block(
+        title,
+        payload,
+        context=context,
+        cache_namespace=cache_namespace,
+        label="API 大模型解读",
+    )
 
 
 def export_plot_bundle(
@@ -165,6 +175,11 @@ def render_kpi_cards(snapshot: Dict[str, Any]) -> None:
                 """,
                 unsafe_allow_html=True,
             )
+    _render_chart_explanation(
+        "核心指标总览",
+        snapshot,
+        "请解释当前流动性、波动、羊群行为与风险预警的综合状态，并指出评委应重点关注的风险信号。",
+    )
 
 
 def render_market_overview(metrics: pd.DataFrame, upto_step: Optional[int], key_prefix: str = "market", title: str = "市场主图与风险追踪") -> go.Figure:
@@ -214,6 +229,21 @@ def render_market_overview(metrics: pd.DataFrame, upto_step: Optional[int], key_
     )
     st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_market_plot")
     export_plot_bundle(fig, frame, f"{key_prefix}_market_overview", f"{key_prefix}_market_overview")
+    if not frame.empty:
+        latest = frame.iloc[-1]
+        _render_chart_explanation(
+            title,
+            {
+                "latest_close": float(latest.get("close", 0.0) or 0.0),
+                "latest_panic_level": float(latest.get("panic_level", 0.0) or 0.0),
+                "max_close": float(frame["close"].max()),
+                "min_close": float(frame["close"].min()),
+                "max_panic_level": float(frame["panic_level"].max()),
+                "avg_panic_level": float(frame["panic_level"].mean()),
+                "sample_size": int(len(frame)),
+            },
+            "请结合价格主走势和风险热度，说明当前市场阶段、风险是否扩散，以及这张图最能证明什么。",
+        )
     return fig
 
 
@@ -253,6 +283,18 @@ def render_ab_world_compare(world_a: pd.DataFrame, world_b: pd.DataFrame, key_pr
     )
     st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_ab_plot")
     export_plot_bundle(fig, merged, f"{key_prefix}_ab_compare", f"{key_prefix}_ab_compare")
+    if not merged.empty:
+        _render_chart_explanation(
+            "A/B 世界对照",
+            {
+                "world_a_end": float(merged["A世界"].iloc[-1]),
+                "world_b_end": float(merged["B世界"].iloc[-1]),
+                "end_gap": float(merged["A世界"].iloc[-1] - merged["B世界"].iloc[-1]),
+                "peak_gap": float((merged["A世界"] - merged["B世界"]).max()),
+                "trough_gap": float((merged["A世界"] - merged["B世界"]).min()),
+            },
+            "请说明政策执行与不执行两条路径的核心差异，以及哪一个阶段最能体现政策效果。",
+        )
     return fig
 
 
@@ -354,6 +396,16 @@ def render_social_network_heatmap(metrics: pd.DataFrame, key_prefix: str = "soci
     st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_social_plot")
     heatmap_df = pd.DataFrame(matrix)
     export_plot_bundle(fig, heatmap_df, f"{key_prefix}_social_heatmap", f"{key_prefix}_social_heatmap")
+    _render_chart_explanation(
+        "社会传播网络热图",
+        {
+            "node_count": int(n),
+            "max_link_strength": float(np.max(matrix)) if matrix.size else 0.0,
+            "avg_link_strength": float(np.mean(matrix)) if matrix.size else 0.0,
+            "panic_seed_mean": float(np.mean(seed)) if len(seed) else 0.0,
+        },
+        "请解释传播强度分布是否集中、是否存在高敏感传播通道，以及这对市场情绪扩散意味着什么。",
+    )
     return fig
 
 
@@ -416,6 +468,17 @@ def render_policy_transmission_chain(chain_payload: Optional[Dict[str, Any]] = N
     st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_chain_plot")
     sankey_df = pd.DataFrame({"source": source, "target": target, "value": value})
     export_plot_bundle(fig, sankey_df, f"{key_prefix}_policy_chain", f"{key_prefix}_policy_chain")
+    _render_chart_explanation(
+        "政策传导链",
+        {
+            "policy": policy_text,
+            "policy_to_macro": value[0],
+            "macro_to_social": value[1],
+            "social_to_industry": value[2],
+            "industry_to_micro": value[3],
+        },
+        "请按传导强度说明政策从宏观到市场微结构的影响路径，并指出哪一环最关键。",
+    )
     return fig
 
 
@@ -464,6 +527,15 @@ def render_risk_event_timeline(metrics: pd.DataFrame, key_prefix: str = "risk") 
     )
     st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_timeline_plot")
     export_plot_bundle(fig, events_df, f"{key_prefix}_timeline", f"{key_prefix}_timeline")
+    _render_chart_explanation(
+        "风险事件时间轴",
+        {
+            "event_count": int(len(events_df)),
+            "highest_risk": float(events_df["value"].max()) if not events_df.empty else 0.0,
+            "events": events_df.head(8).to_dict(orient="records"),
+        },
+        "请解释高风险事件集中在哪些时点、是短时冲击还是持续升温，以及是否需要监管介入。",
+    )
     return fig
 
 
@@ -824,4 +896,167 @@ def render_ai_insight_card(text: str) -> None:
         </div>
         """,
         unsafe_allow_html=True
+    )
+
+
+def render_orderflow_microstructure_panel(
+    role_order_flows: Optional[Mapping[str, float]] = None,
+    microstructure_metrics: Optional[Mapping[str, Any]] = None,
+    *,
+    key_prefix: str = "micro_panel",
+) -> None:
+    """Render role order-flow decomposition and microstructure summary."""
+    st.subheader("角色订单流与微观结构")
+    st.caption("展示不同主体的净买卖拆解，以及价差、深度、冲击和羊群程度等关键微观结构指标。")
+
+    orderflow_df = pd.DataFrame()
+    role_order_flows = dict(role_order_flows or {})
+    if role_order_flows:
+        orderflow_df = pd.DataFrame(
+            [{"role": str(role), "net_flow": float(value)} for role, value in role_order_flows.items()]
+        ).sort_values("net_flow", ascending=False)
+        fig = go.Figure(
+            data=[
+                go.Bar(
+                    x=orderflow_df["role"],
+                    y=orderflow_df["net_flow"],
+                    marker_color=["#16a34a" if value >= 0 else "#ef4444" for value in orderflow_df["net_flow"]],
+                    name="净买卖额",
+                )
+            ]
+        )
+        fig.update_layout(
+            **PLOTLY_DARK_LAYOUT,
+            title="角色净买卖拆解",
+            xaxis_title="角色",
+            yaxis_title="净买卖额",
+            height=320,
+            showlegend=False,
+        )
+        st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_role_flow_plot_v2")
+        export_plot_bundle(fig, orderflow_df, f"{key_prefix}_role_orderflow", f"{key_prefix}_role_orderflow")
+    else:
+        st.info("当前场景暂无角色订单流明细。")
+
+    metrics = dict(microstructure_metrics or {})
+    spread = float(metrics.get("spread", 0.0) or 0.0)
+    spread_pct = float(metrics.get("spread_pct", 0.0) or 0.0)
+    depth_imbalance = float(metrics.get("depth_imbalance", 0.0) or 0.0)
+    impact = float(metrics.get("impact", metrics.get("impact_bps", 0.0)) or 0.0)
+    herding_proxy = float(metrics.get("herding_proxy", 0.0) or 0.0)
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("买卖价差", f"{spread:.4f}")
+    c2.metric("价差占比", f"{spread_pct:.2%}")
+    c3.metric("深度失衡", f"{depth_imbalance:+.3f}")
+    c4.metric("价格冲击", f"{impact:.4f}")
+    c5.metric("羊群程度", f"{herding_proxy:.3f}")
+
+    _render_chart_explanation(
+        "角色订单流与微观结构",
+        {
+            "role_order_flows": orderflow_df.to_dict(orient="records") if not orderflow_df.empty else [],
+            "spread": spread,
+            "spread_pct": spread_pct,
+            "depth_imbalance": depth_imbalance,
+            "impact": impact,
+            "herding_proxy": herding_proxy,
+        },
+        "请解释当前买卖盘是否失衡、谁在主导交易，以及微观结构是否显示出冲击放大或拥挤交易。",
+    )
+
+
+def render_financial_health_dashboard(metrics_dict: Dict[str, Any], key_prefix: str = "health") -> None:
+    st.markdown("### 实时异常指标监测", help="通过速度仪表盘直观反映市场在恐慌、羊群效应和深度失衡三个维度的状态。")
+
+    panic = float(metrics_dict.get("panic_level", 0.0) or 0.0)
+    csad = float(metrics_dict.get("csad", 0.0) or 0.0)
+    imb = float(metrics_dict.get("depth_imbalance", 0.0) or 0.0)
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Indicator(
+            mode="gauge+number",
+            value=panic,
+            title={"text": "恐慌指数", "font": {"size": 14, "color": "#8aa0c2"}},
+            gauge={
+                "axis": {"range": [0, 1]},
+                "bar": {"color": "rgba(250, 140, 22, 0.8)", "line": {"width": 0}},
+                "steps": [
+                    {"range": [0, 0.35], "color": "rgba(34, 197, 94, 0.2)"},
+                    {"range": [0.35, 0.7], "color": "rgba(250, 140, 22, 0.2)"},
+                    {"range": [0.7, 1.0], "color": "rgba(245, 34, 45, 0.3)"},
+                ],
+                "threshold": {"line": {"color": "#f5222d", "width": 3}, "thickness": 0.75, "value": 0.8},
+            },
+            domain={"row": 0, "column": 0},
+        )
+    )
+    fig.add_trace(
+        go.Indicator(
+            mode="gauge+number",
+            value=csad,
+            number={"valueformat": ".3f"},
+            title={"text": "羊群效应（CSAD）", "font": {"size": 14, "color": "#8aa0c2"}},
+            gauge={
+                "axis": {"range": [0, 0.15]},
+                "bar": {"color": "rgba(138, 43, 226, 0.8)", "line": {"width": 0}},
+                "steps": [
+                    {"range": [0, 0.05], "color": "rgba(34, 197, 94, 0.2)"},
+                    {"range": [0.05, 0.1], "color": "rgba(250, 140, 22, 0.2)"},
+                    {"range": [0.1, 0.15], "color": "rgba(245, 34, 45, 0.3)"},
+                ],
+            },
+            domain={"row": 0, "column": 1},
+        )
+    )
+    fig.add_trace(
+        go.Indicator(
+            mode="gauge+number",
+            value=imb,
+            number={"valueformat": "+.2f"},
+            title={"text": "深度失衡", "font": {"size": 14, "color": "#8aa0c2"}},
+            gauge={
+                "axis": {"range": [-1, 1]},
+                "bar": {"color": "#1890ff", "line": {"width": 0}},
+                "steps": [
+                    {"range": [-1, -0.4], "color": "rgba(245, 34, 45, 0.2)"},
+                    {"range": [-0.4, 0.4], "color": "rgba(34, 197, 94, 0.2)"},
+                    {"range": [0.4, 1.0], "color": "rgba(24, 144, 255, 0.2)"},
+                ],
+            },
+            domain={"row": 0, "column": 2},
+        )
+    )
+    fig.update_layout(
+        **{
+            **dict(PLOTLY_DARK_LAYOUT),
+            "grid": {"rows": 1, "columns": 3, "pattern": "independent"},
+            "height": 220,
+            "margin": dict(l=10, r=10, t=30, b=10),
+        }
+    )
+
+    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_health_gauges_v2")
+    _render_chart_explanation(
+        "实时异常指标监测",
+        {
+            "panic_level": panic,
+            "csad": csad,
+            "depth_imbalance": imb,
+        },
+        "请解释恐慌、羊群效应和深度失衡是否同时抬升，以及市场当前更接近平稳、修复还是预警状态。",
+    )
+
+
+def render_ai_insight_card(text: str) -> None:
+    st.markdown(
+        f"""
+        <div class="insight-block" style="animation: insight-pulse 3.5s infinite;">
+            <div class="insight-block-label">API 大模型解读</div>
+            <div class="insight-block-title">智能前瞻与状态点评</div>
+            <div class="insight-block-body">{text}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )

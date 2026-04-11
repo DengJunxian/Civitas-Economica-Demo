@@ -13,6 +13,10 @@ yfinance>=0.2.40
 httpx>=0.27.0
 tenacity>=8.2.0
 scipy>=1.11.0
+pydantic>=2.12.0
+pyarrow>=23.0.0
+feedparser>=6.0.11
+chromadb>=1.5.0
 pytest>=7.0.0
 pytest-asyncio>=1.0.0
 nest_asyncio>=1.5.0
@@ -33,3 +37,7 @@ reportlab>=4.0.0
 # PyPortfolioOpt>=1.5.5
 # ndlib>=5.1.1
 # EoN>=1.2
+
+# Optional local inference backends (install on demand):
+# llama-cpp-python>=0.3.0
+# vllm>=0.10.0

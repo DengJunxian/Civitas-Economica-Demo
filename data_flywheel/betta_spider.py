@@ -1,5 +1,6 @@
 # file: data_flywheel/betta_spider.py
 import logging
+import os
 import time
 from typing import List
 
@@ -12,6 +13,7 @@ from data_flywheel.sources.rss_source import RssSource
 from data_flywheel.nlp_processor import NlpProcessor
 from data_flywheel.event_graph_store import EventGraphStore
 from data_flywheel.seed_store import SeedStore
+from core.runtime_paths import resolve_runtime_path, running_under_pytest
 
 logger = logging.getLogger(__name__)
 _RSS_IMPORT_WARNED = False
@@ -43,16 +45,32 @@ class BettaSpider:
         self.nlp = NlpProcessor(model_router=router)
 
         # 3. 挂载持久化存储
-        store_path = "data/seed_events.jsonl"
+        store_path = resolve_runtime_path("data/seed_events.jsonl", env_var="CIVITAS_SEED_STORE_PATH")
         if config_paths and "output_path" in config_paths:
              store_path = config_paths["output_path"]
+        self._reset_test_artifacts_if_needed(store_path)
         self.store = SeedStore(store_path)
-        graph_path = "data/event_graph.graphml"
+        graph_path = resolve_runtime_path("data/event_graph.graphml", env_var="CIVITAS_EVENT_GRAPH_PATH")
         if config_paths and "graph_path" in config_paths:
             graph_path = config_paths["graph_path"]
         self.event_graph = EventGraphStore(graph_path=graph_path)
 
         logger.info(f"BettaSpider initialized with {len(self.sources)} sources.")
+
+    @staticmethod
+    def _reset_test_artifacts_if_needed(path_like) -> None:
+        """仅在 pytest 下清理显式测试输出，避免旧样本污染当前断言。"""
+
+        if not running_under_pytest():
+            return
+        target = str(path_like or "").strip()
+        if not target:
+            return
+        normalized = target.replace("\\", "/").lower()
+        if not normalized.startswith("tests/"):
+            return
+        if os.path.isfile(target):
+            os.remove(target)
 
     def _init_sources(self, config: dict):
         """根据配置初始化数据源列表"""

@@ -1,29 +1,64 @@
-# AI_TOOL_DISCLOSURE
+# AI 工具与能力披露
 
-## Scope
-This document discloses AI-assisted components and usage boundaries in Civitas-Economica-Demo.
+## 1. 文档目的
 
-## AI Usage Categories
-| Category | Where Used | Purpose | Determinism Controls |
+本文件用于说明项目中 AI 能力的使用范围、作用位置、可复现措施和人工监督边界，便于比赛提交与答辩时清晰区分：
+
+- 第三方 AI 能力做了什么
+- 项目自研逻辑做了什么
+- 系统如何保证现场可演示、可解释、可复现
+
+## 2. AI 使用位置
+
+| 类别 | 位置 | 作用 | 复现控制 |
 | --- | --- | --- | --- |
-| LLM-driven smart agents | `agents/brain.py`, `agents/trader_agent.py` | Narrative reasoning, decision support | Seeded fallbacks + feature flags |
-| Structured policy parsing | `policy/structured.py`, `ui/policy_lab.py` | Convert policy text to structured channels | Parser mode + config hash |
-| Behavioral diagnostics | `core/behavioral_finance.py`, `ui/history_replay.py` | Stylized-facts realism scoring | Fixed seed + snapshot metadata |
-| Regulator optimization support | `regulator_agent.py` | Policy action search under objectives | Seed + action-space hash |
+| 大模型驱动智能体 | `agents/brain.py`、`agents/trader_agent.py` | 生成观点、辅助决策、形成行为分歧 | 在线失败自动回退、本地种子与特征开关 |
+| 政策结构化解析 | `policy/structured.py`、`ui/policy_lab.py` | 把自然语言政策转成结构化冲击通道 | 解析模式、配置哈希、回退规则 |
+| 行为金融与真实性解读 | `core/behavioral_finance.py`、`ui/history_replay.py` | 输出风格化事实、拟真评分与解释文本 | 固定种子、快照元数据、报告持久化 |
+| 监管优化支持 | `regulator_agent.py` | 在目标约束下搜索更优监管动作 | 动作空间哈希、特征开关、种子控制 |
 
-## AI Tooling Principles
-1. Feature flags gate high-risk pathways by default.
-2. Legacy interfaces remain available for UI/API compatibility.
-3. Experiments must emit reproducibility metadata:
+## 3. 第三方 AI 能力负责的部分
+
+- 提供在线大模型推理能力。
+- 在需要时生成自然语言解释、摘要和辅助分析文本。
+- 为部分结构化字段提供智能补充或兜底解释。
+
+第三方 AI 能力不直接负责：
+
+- 市场撮合逻辑
+- 历史数据组织
+- 行为金融指标计算
+- 监管优化目标设计
+- 比赛材料导出结构
+
+## 4. 项目自研实现的部分
+
+- 政策冲击结构化建模
+- 多智能体行为组织与会话式仿真
+- 市场撮合与微观结构模拟
+- 历史回测与政策新闻联动
+- 行为金融指标与真实性诊断
+- 比赛展示页面、报告导出与答辩材料生成
+
+## 5. 稳定性与可复现措施
+
+1. 高风险 AI 路径默认通过特征开关控制。
+2. 系统支持“在线优先，失败自动回退离线”的演示策略。
+3. 实验与导出材料可记录以下元数据：
    - `git commit`
    - `config hash`
    - `seed`
    - `dataset snapshot id`
+4. 无 API Key 时仍可使用内置场景完成核心演示。
 
-## Human Oversight
-- Final policy recommendations are support outputs, not autonomous mandates.
-- Structured reports expose mechanism chain for review:
-  `policy -> transmission -> behavior -> matching -> market result`.
+## 6. 人工监督边界
 
-## Change Log Requirement
-- Any newly added AI-driven module must update this disclosure and corresponding tests.
+- 系统输出用于辅助分析和答辩展示，不构成真实投资建议。
+- 最终政策含义解释与比赛材料表述需由团队人工复核。
+- 报告中保留了“政策 -> 传导 -> 行为 -> 撮合 -> 市场结果”的证据链，便于追溯与人工检查。
+
+## 7. 维护要求
+
+- 新增 AI 相关模块时，必须同步更新本披露文件。
+- 若引入新的第三方模型平台或本地推理链路，需补充其用途、边界与复现方式。
+- 若答辩口径发生变化，应先更新此文件，再更新 README 与比赛材料。

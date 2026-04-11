@@ -1,99 +1,106 @@
-# User Manual
+# 用户手册
 
-## 1. Who this is for
+## 1. 适用对象
 
-This manual is written for competition reviewers, instructors, and new team members who need to run and demonstrate the system quickly.
+本文档面向以下使用者：
 
-## 2. Primary entry point
+- 比赛评委：需要在最短时间内启动系统并完成核心演示。
+- 指导教师：需要核对作品完整性、技术路径和展示闭环。
+- 新成员：需要快速理解系统入口、主页面和推荐操作路径。
 
-- Main UI: `app.py`
-- Recommended launch command: `python -m streamlit run app.py --server.port 8501`
-- Recommended shortcut: `scripts\start_competition_demo.bat`
-- Runtime default: online API first, per-request fallback to offline when API fails
+## 2. 推荐启动方式
 
-## 3. Main pages
+- 主入口：`app.py`
+- 推荐命令：`python -m streamlit run app.py --server.port 8501`
+- 推荐脚本：`scripts\start_competition_demo.ps1` 或 `scripts\start_competition_demo.bat`
+- 默认运行策略：在线 API 优先，单次调用失败自动回退离线兜底
 
-### 答辩模式
+说明：
 
-- Purpose: fastest competition showcase path
-- Best for: first 3 to 5 minutes of the defense
-- Inputs: built-in scenario packs from `demo_scenarios/`
-- Outputs: KPI cards, narration, A/B comparison, exported competition materials
+- 比赛现场优先使用 `app.py`，不建议直接使用 `python main.py` 进行主演示。
+- 未配置大模型 API Key 时，系统仍可使用内置场景完成离线演示。
 
-### 专家模式
+## 3. 四个主入口页面
 
-- Purpose: show the structured evidence flow behind decisions
-- Best for: explaining why the result is not a black box
-- Outputs: decision evidence flow, LOB view, propagation view, policy chain, risk timeline
+### 3.1 总览首页
 
-### 历史回测
+- 作用：30 秒内讲清作品定位、AI 应用闭环、代表性结果和推荐演示路径。
+- 适合场景：答辩开场、评委快速理解系统价值。
+- 可展示内容：KPI 卡片、市场主图、政策传导链、比赛亮点。
 
-- Purpose: show that the logic can be evaluated beyond a single scripted scenario
-- Best for: answering "how do you validate effectiveness?"
+### 3.2 政策试验台
 
-### 行为金融诊断
+- 作用：输入政策文本并发起仿真，展示从政策到市场结果的主链路。
+- 适合场景：核心功能演示。
+- 可展示内容：政策输入、仿真参数、结果总览、行为金融、主体决策剖面、报告导出。
 
-- Purpose: explain CSAD, panic heat, herding, and market behavior signals
-- Best for: answering "why did the system produce this result?"
+### 3.3 历史回测
 
-### 系统说明
+- 作用：选取历史时间窗口，自动提取新闻与政策摘要，并与真实市场走势对比。
+- 适合场景：回答“系统如何验证有效性”和“为什么说拟真”。
+- 可展示内容：走势对比、指标解读、行为诊断、历史评估报告。
 
-- Purpose: show the architecture, workflow, and engineering structure
-- Best for: quick technical summary when judges ask for implementation details
+### 3.4 高级分析
 
-## 4. Recommended demo operation sequence
+- 作用：集中展示 AI 证据链、行为诊断、监管优化与研究验证能力。
+- 适合场景：评委追问、技术亮点展开。
+- 可展示内容：
+  - `AI 决策证据`
+  - `行为与风险诊断`
+  - `监管优化与 A/B`
+  - `研究验证与材料`
 
-1. Open the app and stay on the home page for orientation.
-2. Enter `答辩模式`.
-3. Choose `tax_cut_liquidity_boost` or `regulator_stabilization_intervention`.
-4. Start auto-play and explain the KPI changes.
-5. Switch to `专家模式`.
-6. Switch to `行为金融诊断`.
-7. Switch to `历史回测`.
-8. Return to the sidebar and generate competition materials.
+## 4. 推荐演示顺序
 
-## 5. What gets exported
+1. 打开系统后先停留在 `总览首页`，说明作品定位和 AI 闭环。
+2. 进入 `政策试验台`，使用默认政策文本直接开始仿真。
+3. 展示结果总览中的市场路径、KPI、政策传导过程。
+4. 切换到 `历史回测`，说明系统具备历史验证能力，而不是单纯演示界面。
+5. 进入 `高级分析`，展示 AI 证据链、行为金融指标和监管优化。
+6. 在合适节点导出比赛材料或报告。
 
-When you click the competition material export action, the system generates files under `outputs/competition_materials/`.
+## 5. 政策试验台操作说明
 
-- `competition_summary.md`
-- `design_outline.md`
-- `demo_script_10min.md`
-- `figures/index.json`
+`政策试验台` 使用会话式仿真，而不是一次性批处理。
 
-## 6. Policy Lab session controls
+常见操作包括：
 
-`政策试验台` uses a session-style simulation flow rather than a one-shot batch run.
+- `开始推演`：基于当前政策文本启动仿真。
+- `继续 1 天`：推进 1 个模拟交易日。
+- `继续 5 天`：推进 5 个模拟交易日。
+- `运行到结束`：执行剩余交易日直到当前会话结束。
+- `自动逐日运行`：在当前页面内按模拟交易日自动播放。
 
-- `继续 1 天`: advances the current policy session by 1 simulated trading day.
-- `继续 5 天`: advances by 5 simulated trading days.
-- `运行到结束`: finishes the remaining simulated trading days in the current session.
-- `自动逐日运行`: auto-plays the session day by day inside the page.
+重要说明：
 
-Important clarification:
+- `自动逐日运行` 是页面内的模拟播放，不是操作系统级定时任务。
+- 仿真会话开始后，可以随时暂停、恢复、切换回手动推进或追加政策。
+- 页面顶部的三阶段卡片适合用来讲解“政策注入 -> 情绪扩散 -> 撮合落地”的传导过程。
 
-- `自动逐日运行` is simulated business-day playback.
-- It is not an operating-system cron job or a real-world once-per-day scheduler.
-- You can stop the session, switch back to manual stepping, or append a future policy while the same session is still active.
+## 6. 导出物说明
 
-The top area of the page is designed for demonstration:
+点击导出按钮后，系统会在 `outputs/competition_materials/` 等目录下生成比赛相关材料。
 
-- Session KPI strip
-- Three-stage transmission cards: policy injection, sentiment diffusion, matching outcome
-- Quote banner and market path chart
+常见导出内容包括：
 
-This is the recommended speaking order when judges ask how a policy becomes an index move.
+- 比赛摘要
+- 设计说明骨架
+- 10 分钟演示脚本
+- 图表索引
+- 政策评估报告 / 历史回测报告
 
-## 7. Recommended talking points during operation
+若环境安装了 `python-docx` 与 `reportlab`，系统还可导出 `docx` 与 `pdf`。
 
-- The AI part is not only text generation; it influences structured decisions and simulation outcomes.
-- The order matching path is isolated from the reasoning path.
-- The system can still demonstrate its core value without an internet connection.
-- The exported materials make the project easier to hand off and review.
+## 7. 现场答辩时建议强调的点
 
-## 8. What not to do during the defense
+- AI 不仅参与文本生成，还影响结构化决策、仿真过程和证据输出。
+- 系统支持离线兜底，现场不依赖云端接口也能完成完整演示。
+- 项目不仅能“展示”，还能“验证”与“导出”，工程闭环更完整。
+- 多格式报告和比赛材料导出降低了评委复核和团队交付成本。
 
-- Do not use `python main.py` as the primary entry point in front of judges.
-- Do not rely on live API calls for the first showcase.
-- Do not click incomplete auxiliary scenario folders.
-- Do not spend time scrolling raw logs or long reasoning text.
+## 8. 比赛现场不建议做的事
+
+- 不要把 `main.py` 当作评委首个入口。
+- 不要把在线 API 调用成功作为首轮演示前提。
+- 不要优先点击辅助场景或未准备好的实验脚本。
+- 不要在答辩现场长时间滚动日志或展示冗长推理文本。

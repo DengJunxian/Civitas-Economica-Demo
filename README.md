@@ -16,10 +16,10 @@
 
 推荐首次演示顺序：
 
-1. 进入 `系统说明`，用 1 分钟理解项目定位与页面结构。
+1. 进入 `总览首页`，用 1 分钟理解项目定位与页面结构。
 2. 进入 `政策试验台`，直接运行默认模板展示主功能。
-3. 进入 `历史智能回测`，切换查看智能因子回测与历史智能体回放，说明项目具备验证能力而非单纯演示界面。
-4. 进入 `高级分析` 或 `真实性报告`，回答“为什么可信”“哪里像真、哪里不像真”。
+3. 进入 `历史回测`，切换查看智能因子回测与历史智能体回放，说明项目具备验证能力而非单纯演示界面。
+4. 进入 `高级分析`，回答“为什么可信”“哪里像真、哪里不像真”。
 5. 需要总结时，点击导出比赛材料。
 
 ## 三、硬件环境和操作系统
@@ -54,7 +54,11 @@
 | 可视化 | Plotly、Matplotlib | 见 `requirements-lock.txt` | 图表展示与导出 |
 | 多智能体建模 | Mesa | 3.4.2（锁定环境） | 智能体建模与仿真 |
 | 数据分析 | pandas、numpy、scipy、networkx | 见 `requirements-lock.txt` | 指标计算与图结构分析 |
+| 数据模型与校验 | pydantic | 见 `requirements-lock.txt` | 严格数据模型与参数校验 |
+| 向量记忆 | chromadb | 见 `requirements-lock.txt` | 智能体记忆存储与检索 |
+| 列式存储 | pyarrow | 见 `requirements-lock.txt` | Event Store 的 Parquet 读写 |
 | 金融数据 | AkShare、yfinance | 见 `requirements-lock.txt` | 指数/市场数据支持 |
+| RSS 解析 | feedparser | 见 `requirements-lock.txt` | 新闻源抓取与本地回放 |
 | 文档导出 | python-docx、reportlab、kaleido | 见依赖文件 | 导出 Word / PDF / PNG |
 | C++ 编译 | Visual Studio Build Tools 2022 | MSVC v143 | 仅在重编译扩展时需要 |
 | 版本管理 | Git | 任意稳定版 | 获取与提交工程 |
@@ -81,6 +85,10 @@ yfinance>=0.2.40
 httpx>=0.27.0
 tenacity>=8.2.0
 scipy>=1.11.0
+pydantic>=2.12.0
+pyarrow>=23.0.0
+feedparser>=6.0.11
+chromadb>=1.5.0
 pytest>=7.0.0
 pytest-asyncio>=1.0.0
 nest_asyncio>=1.5.0
@@ -93,6 +101,13 @@ reportlab>=4.0.0
 ```
 
 比赛复现实测环境锁定在 `requirements-lock.txt` 中，推荐评委优先使用该文件安装，以减少环境差异。
+
+可选推理能力说明：
+
+- `DEEPSEEK_API_KEY`、`ZHIPU_API_KEY`：在线推理能力，可不配置。
+- `CIVITAS_LOCAL_MODEL_PATH`：本地模型路径，可不配置。
+- `CIVITAS_VLLM_MODEL`：高配模式下的 vLLM 模型名，可不配置。
+- `llama-cpp-python`、`vllm`：仅在本地模型或高配推理模式下按需安装，不属于最小复现必需依赖。
 
 ## 五、运行环境和安装说明
 
@@ -172,6 +187,7 @@ python main.py
 - `main.py` 更适合开发调试，不建议作为评委首选入口。
 - 默认策略为“在线 API 优先，单次调用失败自动回退离线”。
 - 无 API Key 时会自动进入离线兜底模式。
+- 若仅用于比赛演示，推荐直接使用离线模式与内置场景，避免现场依赖外网稳定性。
 
 ### 6. 浏览器访问
 
@@ -235,10 +251,10 @@ requirements-lock.txt         锁定依赖
 推荐演示流程：
 
 1. 启动 `app.py`。
-2. 在 `系统说明` 中快速说明项目定位。
+2. 在 `总览首页` 中快速说明项目定位。
 3. 切换到 `政策试验台` 运行默认模板。
-4. 切换到 `历史回放` 说明验证能力。
-5. 切换到 `高级分析` 或 `真实性报告` 展示证据链和行为金融指标。
+4. 切换到 `历史回测` 说明验证能力。
+5. 切换到 `高级分析` 展示证据链和行为金融指标。
 6. 导出比赛材料或报告。
 
 ### 政策试验台会话控制补充
@@ -266,15 +282,40 @@ pytest -q
 powershell -ExecutionPolicy Bypass -File scripts\check_competition_delivery.ps1 -FullTest -ReportPath outputs/competition_materials/latest_check.json
 ```
 
-本次复核结果：
+本次最新复核结果：
 
 - `python -m pip check`：通过
 - `python -m compileall ...`：通过
-- `pytest -q`：`308 passed`
-- `scripts/check_competition_delivery.ps1`：通过
+- `pytest -q`：当前已知为 `342 passed / 1 failed` 后修复目标用例，后续应以本轮重新生成的验收报告为准
+- `scripts/check_competition_delivery.ps1`：曾在全量测试失败时同步失败，符合“失败即阻断”的预期
 - `python -m streamlit run app.py --server.headless true --server.port 8501`：启动成功，页面可访问
+- 浏览器自动化烟测：已实测打开 `总览首页 / 政策试验台 / 历史回测 / 高级分析`，未见明显控制台报错
 
-## 九、常见问题
+说明：
+
+- 请不要把固定测试通过数字直接写入比赛材料正文，应优先引用最新生成的《工程验收报告》或机器验收 JSON。
+- 若执行测试后发现 `data/` 或 `outputs/` 下有新变更，请先检查是否属于测试副作用工件。
+
+## 九、第三方能力与项目自研边界
+
+### 第三方能力负责什么
+
+- Streamlit：承载 Web 页面框架
+- Plotly / Matplotlib：承载图表展示
+- python-docx / reportlab：承载正式文档导出
+- AkShare / yfinance / feedparser：承载外部数据抓取与解析
+- DeepSeek / 智谱等在线模型：承载外部推理能力
+- ChromaDB：承载向量记忆存储
+
+### 项目自研负责什么
+
+- 政策文本到结构化冲击的映射
+- 多智能体行为组织与市场仿真
+- 市场撮合与微观结构建模
+- 历史回测与真实性验证逻辑
+- 行为金融指标、监管优化与比赛材料导出
+- 页面组织、答辩闭环和离线兜底策略
+## 十、常见问题
 
 ### 1. 页面无法打开
 
@@ -295,7 +336,7 @@ powershell -ExecutionPolicy Bypass -File scripts\check_competition_delivery.ps1 
 - 优先检查网络连接。
 - 若只做比赛答辩，可直接使用内置场景完成展示。
 
-## 十、提交建议
+## 十一、提交建议
 
 比赛提交时建议至少包含以下内容：
 
@@ -307,6 +348,6 @@ powershell -ExecutionPolicy Bypass -File scripts\check_competition_delivery.ps1 
 - `scripts/check_competition_delivery.ps1`
 - 桌面输出的《设计说明书》《项目作品小结》《README（桌面版）》
 
-## 十一、免责声明
+## 十二、免责声明
 
 本项目仅供教学、科研、竞赛展示与仿真分析使用，不构成任何投资建议。

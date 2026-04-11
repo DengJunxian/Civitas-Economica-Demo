@@ -1,32 +1,65 @@
-# THIRD_PARTY_OPEN_SOURCE_DISCLOSURE
+# 第三方开源与外部组件披露
 
-## Purpose
-This file tracks third-party open-source components used in Civitas-Economica-Demo for reproducible contest delivery.
+## 1. 文档目的
 
-## Core Dependencies (Runtime)
-| Component | License | Usage Scope | Notes |
+本文件用于说明项目运行与交付过程中依赖的第三方开源组件、用途边界和归属方式，便于比赛材料中明确区分：
+
+- 第三方依赖提供了哪些基础能力
+- 项目自研代码完成了哪些核心功能
+
+## 2. 运行时核心依赖
+
+| 组件 | 许可证 | 用途 | 说明 |
 | --- | --- | --- | --- |
-| Python | PSF | Runtime platform | Main execution runtime |
-| NumPy | BSD-3-Clause | Numerical computing | Vectorized simulation/math |
-| pandas | BSD-3-Clause | DataFrame pipeline | Backtest/replay/event store IO |
-| Streamlit | Apache-2.0 | UI runtime | Interactive dashboards |
-| Plotly | MIT | Visualization | UI charts and export bundles |
-| reportlab | BSD | PDF export | Reporting pipeline |
-| python-docx | MIT | DOCX export | Formal report generation |
-| pyarrow | Apache-2.0 | Parquet IO | Event Store storage format |
-| pytest | MIT | Testing | Unit/integration/regression suites |
+| Python | PSF | 主运行时 | 项目基础解释器 |
+| NumPy | BSD-3-Clause | 数值计算 | 仿真、指标计算、数组处理 |
+| pandas | BSD-3-Clause | 数据处理 | 回测、事件存储、报表整理 |
+| Streamlit | Apache-2.0 | Web 界面 | 比赛展示页面运行框架 |
+| Plotly | MIT | 可视化 | 图表展示与导出 |
+| reportlab | BSD | PDF 导出 | 正式报告 PDF 输出 |
+| python-docx | MIT | DOCX 导出 | 正式文档导出 |
+| pyarrow | Apache-2.0 | Parquet 支持 | 事件存储与列式数据读写 |
+| pytest | MIT | 测试框架 | 单元测试与集成验证 |
+| pydantic | MIT | 数据校验 | 智能体与结构化数据模型校验 |
+| chromadb | Apache-2.0 | 向量记忆存储 | 认知记忆与检索能力支撑 |
 
-## External Data / Service Tooling
-| Component | License / Terms | Usage Scope | Notes |
+## 3. 外部数据与服务组件
+
+| 组件 | 许可证 / 条款 | 用途 | 说明 |
 | --- | --- | --- | --- |
-| AkShare | MIT | Market data adapter | Optional fallback provider |
-| yfinance | Apache-2.0 | Market data adapter | Optional fallback provider |
+| AkShare | MIT | 市场数据适配 | 指数与市场数据获取 |
+| yfinance | Apache-2.0 | 市场数据适配 | 备用行情来源 |
+| feedparser | BSD-2-Clause | RSS 解析 | 新闻源读取 |
+| OpenAI / DeepSeek / 智谱等模型接口 | 平台服务条款 | 在线推理 | 仅在配置 API Key 时启用 |
 
-## Internal Attribution Rule
-- `core/*`, `agents/*`, `ui/*` under this repository are treated as project source.
-- Reused OSS libraries are dependency-level only unless explicitly copied into source.
+## 4. 自研代码边界
 
-## Maintenance Checklist
-1. Update this file when adding/removing dependency packages.
-2. Verify license compatibility before contest submission.
-3. Keep dependency lockfiles consistent with this disclosure.
+仓库内以下目录视为项目自研主体：
+
+- `core/`
+- `agents/`
+- `ui/`
+- `engine/`
+- `policy/`
+- `data_flywheel/`
+- `scripts/`
+
+这些目录实现了项目核心能力，包括：
+
+- 政策结构化解析
+- 多智能体行为与仿真
+- 市场撮合与微观结构
+- 历史回测与真实性验证
+- AI 证据链与比赛交付导出
+
+## 5. 使用原则
+
+1. 第三方组件提供的是基础工具能力，不代表项目核心逻辑由第三方完成。
+2. 若直接复制、改写或嵌入外部源码，需在比赛材料中单独标注来源。
+3. 新增依赖时，需同步更新本文件与锁定依赖文件。
+
+## 6. 提交前检查清单
+
+1. 核对依赖文件与本披露文件是否一致。
+2. 核对许可证是否与比赛提交要求兼容。
+3. 明确比赛材料中“第三方工具能力”和“团队自研实现”的边界表述。

@@ -5,7 +5,7 @@
 <key id="d2" for="node" attr.name="source" attr.type="string"/>
 <key id="d1" for="node" attr.name="title" attr.type="string"/>
 <key id="d0" for="node" attr.name="kind" attr.type="string"/>
-<graph edgedefault="directed"><node id="event::863754ee-e708-413c-93a0-c13e488bc631">
+<graph edgedefault="directed"><node id="event::3509e155-91a7-4b6f-8e7e-fc9b7bc7c653">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
@@ -18,7 +18,7 @@
   <data key="d0">topic</data>
   <data key="d3">monetary_policy</data>
 </node>
-<node id="event::e4a9504f-4407-49d8-8737-20b60cf3bebf">
+<node id="event::098695fa-bfec-47d6-8fe0-9ef980eeaf57">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
@@ -27,7 +27,7 @@
   <data key="d0">topic</data>
   <data key="d3">uncategorized</data>
 </node>
-<node id="event::1958a2a5-f348-456f-a3c2-b611b77332f8">
+<node id="event::1145c955-2dff-4878-b728-7a321ac6613c">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
@@ -36,12 +36,12 @@
   <data key="d0">topic</data>
   <data key="d3">real_estate</data>
 </node>
-<node id="event::cd260cd0-f3e1-46cf-9644-bc51ea51c92c">
+<node id="event::cc969f69-2c2c-417a-9c06-a80ca0460241">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::d713ce70-7fb0-4010-b22b-a2274bad44b5">
+<node id="event::4b268aca-124b-4019-8d77-95452a39872c">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
@@ -50,2473 +50,1517 @@
   <data key="d0">topic</data>
   <data key="d3">global_macro</data>
 </node>
-<node id="event::fd13a630-6cef-430c-ac21-f6d5818951c0">
+<node id="event::d88d8d4c-8517-4df0-9391-c90fe2f6471f">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::dff975ce-5479-4df6-8239-0c1a9886294f">
+<node id="event::e68a66f8-8558-4f03-b105-dd2c3bc63627">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::0cc828b3-e9a8-4ee4-a379-cab0bc8129a1">
+<node id="event::f6e47de4-be0e-46cb-8003-a0ee6ab47351">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::fae89de6-5906-4275-a5c5-3adad64cef31">
+<node id="event::281b4ff0-2f16-4c08-8feb-8aa2eb206dc7">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::55abd775-24a0-458a-b8dd-0e02c986614f">
+<node id="event::dfc2c272-878e-4dbc-9244-1c47e3f12cb0">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::13865d14-2d4e-4c49-8e5c-ae3339c76460">
+<node id="event::da5e24d0-dc62-4ee7-a8d9-6e18fa0ca9dd">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::34adea1e-e501-4c29-a17b-6b3876adaf26">
+<node id="event::a6d2ff78-2779-41cc-9be4-1bf409450ec1">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::04a6dac7-c04d-486f-8d1a-7dbaa8582274">
+<node id="event::468bec88-faa1-4e94-8918-210afb42953f">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::92e2bd65-7b90-4408-9bda-45319b56832e">
+<node id="event::18baa46c-2f95-4668-9717-5d957bd9fb6b">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::d65ec597-968f-431c-b3c4-0ba89881f377">
+<node id="event::41bb555b-7e8a-4cdd-96ff-15bb77a7826f">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::4bfbf1b3-62e3-435d-8f2d-8850a34b0b9d">
+<node id="event::d03cb4eb-5097-4134-892d-3c5a294931e5">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::c754c94f-fd3b-41c1-96f0-26e5865bdcd5">
+<node id="event::b973d0cb-2808-4639-8f2f-ccc2097a6f29">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::c83752bf-e455-40ea-8c5d-c9cc3920b7ad">
+<node id="event::98de94f0-d045-442b-abdc-fa5778c0c9b3">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::e5912b85-3349-44be-a321-877fc197da36">
+<node id="event::6868a9d1-61ee-4bc4-b7d0-d48ae19a7d17">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::09e10917-825a-4efa-9105-bda07eedd1da">
+<node id="event::a7e8acc2-6e67-4495-8e5f-6020d4fac475">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::8f86860f-38e4-4069-93af-fa2d64708fc9">
+<node id="event::1a023c47-0516-4e82-9d46-3afe9a518a03">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::9a99c470-c307-4a89-b74d-359d87473399">
+<node id="event::e06c347a-8cd1-46bb-ace0-16f33937ae1f">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::aa6bdf01-234a-417c-bbb4-c2279575fca9">
+<node id="event::166beb4c-1303-4ef8-98e9-56180582644c">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::8bcf4870-3c56-48b3-a959-f2b7940aa053">
+<node id="event::4bbb994b-26b1-4860-975b-27a06993af09">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::db0e2c9a-1d62-4901-8fff-b2eb726c9fa1">
+<node id="event::da5816f9-3b91-4b2f-8f55-588b7c7ca0e6">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::05c1e63c-29cb-426b-8f2c-bbca42588116">
+<node id="event::ae44f4a2-4c84-4160-94c8-4c063d110b39">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::6e90d547-dfe9-4c4f-9396-a968c29c3df7">
+<node id="event::6ec8c510-3323-43f4-b9be-ced0a8316f7a">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::b1103baf-bb64-474c-9741-e74e1f881e9d">
+<node id="event::259d5bca-2500-4a74-9d8e-d4a196f2a234">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::3335c62f-1268-4b86-80b9-2114cd1b4506">
+<node id="event::5c6daa08-8dd7-45fc-b771-bff85cd5639b">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::e359ebe9-f49f-4e7b-b722-272057940543">
+<node id="event::dc40e278-0d42-4bbf-94d8-d8f630d93c02">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::377b18e2-ebdf-4e12-91ca-074bafc41b73">
+<node id="event::a72c1957-c1f1-4970-93e3-8c9f2e91916f">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::9f45f8b0-2a33-4700-a9b6-eb8d1575ec74">
+<node id="event::ed092d07-3f37-4328-8ce2-83d82d8d302a">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::125a9f07-efe2-4208-9646-3e09692685ff">
+<node id="event::15d5c435-3d9f-47dc-b63b-ffbbd5e2248a">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::66236640-ebc0-44a2-b0c8-64cffe5192ee">
+<node id="event::fcb29cc7-3a2b-4d47-a78b-1f6575af2af3">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::53631ac8-93ce-47ce-aef3-43fe855fad0e">
+<node id="event::d99b70ed-3c22-4a4b-ab61-51b8ca6d85bf">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::e6df4979-592b-4c77-b161-0c4bf7ccc6e6">
+<node id="event::c2148594-f175-404e-a05d-7380095d8f30">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::03ebe36b-8a6d-44bf-badf-9f5b75ed5907">
+<node id="event::90d24c1a-ca28-46d5-af2f-c973857e3db5">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::624d18b0-a310-4802-b6d5-b739eda88f69">
+<node id="event::574cbd72-1feb-40db-93f2-47cd442f6918">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::257cee06-b47b-45fd-930c-ede1a8fa0b84">
+<node id="event::ac4267c2-f3e8-4f85-ae7c-c5a641548e53">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::e6485c38-5979-47e9-a65a-d95b2de8698c">
+<node id="event::ab59717b-48cb-452c-8703-5cbcba16dff2">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::a667d566-3ba0-4cb9-88e8-d7b0f570b6ac">
+<node id="event::177df5f6-f107-487f-bd7f-7f73b1040327">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::202610d3-2fb3-47c4-aa91-6ef911cf6202">
+<node id="event::28adc9f7-d356-45de-b4c4-b34cd4cbafc6">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::e88a9fd1-889d-4776-a600-c54615a7a6ca">
+<node id="event::dd2fc539-01f3-43dc-b4b0-1083176587b4">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::8de31543-6ff5-401c-912b-9eb096bb8416">
+<node id="event::cc1b893f-f26f-4deb-ba75-161ac8303a1c">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::9c99e2f1-9e59-4914-a5da-c33480930eed">
+<node id="event::4ecf4c89-c619-4819-9477-5829a8a3a3ff">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::67b4f3ad-e7c2-4c6c-ac79-e4b605cc1b25">
+<node id="event::5afa6cbe-3962-4a09-99b2-15649c1da885">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::435e6a81-e88c-41a2-830f-bf452d933137">
+<node id="event::42dae15a-109b-4c7c-a780-9e04187c5736">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::fd39eb24-0386-4768-9455-59e88a83e49a">
+<node id="event::2ddfdd1f-234d-4c1d-9f73-fb8a407083ef">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::731aee8f-3d1e-4336-81fa-82f8f273c12f">
+<node id="event::25c8dfa2-8132-4ce7-a492-dfba91109510">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::f7e0e13c-c6aa-4a82-8ce1-7e57c66c8af3">
+<node id="event::068d4ae4-cf55-4750-ae9b-7b4289ffcea7">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::3d169aab-1e64-4cc6-9b22-68cfc41a5504">
+<node id="event::0d734819-5ae3-4260-bc1c-8ed20308755c">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::2051fdcc-ec7c-4256-af19-fe0d3874878e">
+<node id="event::3aac0a01-1d18-4db1-904a-533e0e4c828e">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::f9cd3027-f268-405e-88f0-09b576edb1c1">
+<node id="event::a320f069-c08d-48db-9f07-f271f744c902">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::441d177f-ecb2-4bad-a983-37b5c7d1c5d4">
+<node id="event::43ad980e-dd9d-47c3-a02e-2de4eeccf4cd">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::6468a618-6918-412b-989b-90a2978610c3">
+<node id="event::575cce22-917a-429b-bb1b-b809ecc17fa2">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::c7ecbe72-ed9a-4e10-a5f0-50071fce6034">
+<node id="event::63aebd7f-4a01-445f-be57-bf54a47650b6">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::4bd3f04a-2e44-4a84-a436-1c7235ce55cc">
+<node id="event::b75bae4f-308e-43fc-8123-d7c66cb50d84">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::064fbd7c-bc3f-4806-aea7-40ab18767a59">
+<node id="event::88e8b1b3-bb75-4d32-b747-3f3b791921d9">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::8dd7418a-ae58-4ff3-bd1d-7ff36c383ae8">
+<node id="event::c9f64240-5999-4daf-8aff-0212b97a3eb8">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::6b0db3fd-ab8d-42ec-887f-f678675c39fc">
+<node id="event::52ffc690-076c-4660-b482-6c6506bc138e">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::81bcd6a4-934d-450c-9dc0-548a68a6c944">
+<node id="event::d81bf3a7-e604-4a93-bfcd-7a7ededc7bf8">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::92a85d45-613d-4bc3-b4c4-ec57ed3a9314">
+<node id="event::0347d425-72b3-4f12-bcb8-04ad91c9d370">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::3cdbcc0d-4493-4b4b-b6ab-4c7e4593830f">
+<node id="event::714f8a92-dc92-4afb-916c-51b59c8f517c">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::5c67cfb9-7190-4a18-8771-264e712694e9">
+<node id="event::9451075a-67e8-4b21-8538-16dce3668ddd">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::b0347d4f-389f-460b-9e0b-325e120e190d">
+<node id="event::187e788f-84c6-43f8-b07f-05553a5030bd">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::77e5a052-cdef-44cf-9832-05c038667bf5">
+<node id="event::b0b000fa-2c41-4884-adc1-ddcc7d14b638">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::3907a8ad-afe8-4aad-8c55-22eed6aada95">
+<node id="event::82da3f02-c425-4856-968c-3ade7e9e0b28">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::b2fd5793-18f1-418d-a661-d9efd5d903b8">
+<node id="event::09c8ff5d-2977-4d8d-a935-ccfdcc514742">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::5e663e76-1213-42ed-a61e-3630003010c7">
+<node id="event::f4a0b65f-5af3-4292-a059-0cad0ed9680b">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::fcbb4db9-74b3-44bb-9306-7b50d41fd2c6">
+<node id="event::4dc8f567-976c-4080-8df6-df996816984a">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::ef8d0a88-ddf4-4559-a21b-85da496c8ecd">
+<node id="event::90190de8-4245-41ae-94f6-e476e58997b2">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::16d998a0-3676-49c2-aef8-c9cb2fc0c7b6">
+<node id="event::4af56cae-9d7c-4482-952e-8d7645316017">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::3d8bbf55-3846-4ba4-8dc8-99811d58e477">
+<node id="event::40ed6992-0b40-45f6-b603-26cc3270b8ff">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::dd37f93e-e96f-46b4-b557-44be09bb53fc">
+<node id="event::a5e73815-87c4-4d6b-a61f-3d98ef2e8c0d">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::4da8e58b-ad6c-4ff0-9cdf-03308425cf0b">
+<node id="event::920551d3-cc91-4ced-bb60-271f36b612ad">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::1f279a40-29b5-4ae8-b72c-c229cb9aec82">
+<node id="event::9c162be3-b2bf-4e8e-a99d-f9a49215ac9c">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::0bad3fb3-2fc2-40a3-a019-473dc92929ce">
+<node id="event::4833f757-4274-4879-8315-0eeb76cd540a">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::00d2d9f3-c115-4e75-a0bf-9dc8a98d2c32">
+<node id="event::629cc203-9cde-4517-ae39-d083556de764">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::ab6e0a9c-0477-4ed2-8073-6e186ee1449f">
+<node id="event::95b59db8-b9c8-4c58-bb60-35d860aac000">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::109376db-3c37-491e-bfc2-de0b160c345c">
+<node id="event::aaf66c15-7771-4ecd-87aa-946dbdb69e97">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::36dc3e27-d9c8-4f40-b919-1f476275d227">
+<node id="event::e5410bc4-e7a9-45bb-9e0d-fe28fa8b7cb9">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::2ca3ec30-f9d2-43f0-9cf4-1750a5456447">
+<node id="event::a38ba8ab-0cdf-453f-b3b3-fc5b5972baff">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::036aa4d9-3284-45fd-abfa-47e71a1b52fe">
+<node id="event::92ccd978-f581-490b-b881-68689d48247c">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::ea6cb5ee-ab75-418e-a3a8-0bbe15adcee4">
+<node id="event::77d042f2-7327-47d6-9e13-82c0c183399b">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::10dbe0c6-49df-4808-bb9b-fd823569f9da">
+<node id="event::32200adb-fba7-4ea1-a32d-cffaa65d58b1">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::a5194c82-7560-4c5d-a0f7-769835d05101">
+<node id="event::f34592ce-163a-4cec-a9d3-0a99743cf78b">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::a3217f95-809b-48c2-afe7-eb11e366c203">
+<node id="event::a6bc1678-1808-45cf-9398-d0896473c1fa">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::9724bb80-ebda-4c1d-9bf3-f971506e6627">
+<node id="event::7c939a73-b2d7-4c09-a039-10941a385428">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::55823c3d-1d7d-4a4b-b942-18fd58a26f24">
+<node id="event::b2a95fe4-cbc6-4f9a-95d5-7af6ccaf1b48">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::643be8a9-798d-4799-adef-a9a110fb76a7">
+<node id="event::79c5ac38-ffb7-4035-a12e-7ea06ce51abd">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::05ee456c-7136-4251-a8eb-c867e6f4479d">
+<node id="event::53fc2d1c-b2bf-499a-a966-203a05d0aae5">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::ea553b1b-2749-4300-845e-461b229c43d3">
+<node id="event::3f930a7d-cf7e-473e-b27b-35a3563f3f1b">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::732fce4c-055d-4fcb-849c-43cd733a91f0">
+<node id="event::800165b3-7841-4f8f-b33c-08374ad2061d">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::96d4ace9-571b-40c0-8de3-4b901794aa4e">
+<node id="event::578585d2-921c-4b9a-9ae7-d25a8b6b0a96">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::fb169c13-a81d-4347-8767-8af4c41a4661">
+<node id="event::5ad90fb9-b505-43aa-8b25-c067a36a7527">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::d6436025-2006-4731-b865-1080c7ed0410">
+<node id="event::eb748a27-9176-499f-8d3a-b11d397e1cb9">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::c2ee7357-5597-424d-91ef-c989dfe6c04a">
+<node id="event::110e67b7-5992-4ff3-92a3-a4bb5ece8614">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::57a77729-0f15-467e-8c70-9cc7b2ab7d8d">
+<node id="event::24661a50-ef5c-4e3d-a37e-70b0a4a346eb">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::6baaace6-4a11-46b9-b8b0-85b8dc03f4ef">
+<node id="event::66be5906-1189-4604-9403-18dfa1173e9c">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::1d40477a-f695-4ba9-b7ce-2e4825f2042e">
+<node id="event::32809877-5dbb-4859-a8d9-594bf5c9223e">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::fae9ecc0-ed5a-412e-814f-da6eb9b27181">
+<node id="event::9853539b-0646-49d9-a374-6371e5c09654">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::6a37ac74-b548-4315-8e47-d714f728cc20">
+<node id="event::e0249876-611b-4755-ad35-e80646830c64">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::32393769-d64e-49f8-a900-c94e5e57877e">
+<node id="event::2f341821-5301-433e-910f-62959a11d457">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::0107c750-5eb3-4053-8b5d-20313d9beba8">
+<node id="event::495bb71d-81a6-456e-a347-b04152c219b6">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::54b0a855-a918-4e42-965d-7d787412aa04">
+<node id="event::0251ca42-059a-4c09-8e50-407a29245ac8">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::e03d19b2-5a1d-4741-95e2-582f0358dc04">
+<node id="event::7730171e-e6d3-467c-b8a1-18c8cb36e55d">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::7413319a-ddf2-4945-8cad-425cdd8e887b">
+<node id="event::317e4cbc-afdf-44a4-8267-95d96bbda4c6">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::a78232f3-f152-4cf4-b7e4-a767811d0772">
+<node id="event::72d9fdd3-4321-45cb-8e38-0266e020ade0">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::71758af7-70ce-4ae7-8748-ea6224f79afa">
+<node id="event::91f92bf0-ea18-44e0-a67a-a8a538b9c58d">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::a5543b23-ac67-4bf6-8db1-c01c5c382446">
+<node id="event::64d05d7e-1081-4659-b7dd-0f46f9463632">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::38c786cc-f244-4d08-8c3f-17ea154879da">
+<node id="event::28e96310-5048-4152-a594-2dceaedc0f06">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::bc413582-9dc7-4a43-8c08-df792c473836">
+<node id="event::5a65fc07-d24b-4a06-98a5-5e15974e1c22">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::f3f9a195-2d89-4716-8a14-8fb4e8f8a5a9">
+<node id="event::428bfaab-2aa2-42a6-9bbe-058361523d31">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::8773c79e-d57f-4cb6-a760-4218fc566e21">
+<node id="event::8943684d-172a-4fd8-acd4-5cf5a2e1b504">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::f341ec32-84b3-4cd2-9720-67450cc50224">
+<node id="event::8aad95ce-c098-468c-a7c2-9271bccc0e22">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::8c9d2af5-0e93-4a1c-abc5-2d3600feee88">
+<node id="event::b02014b1-450e-4919-9728-a17adfd08360">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::1723cbaf-43b1-456b-b6a1-575597c2d3c7">
+<node id="event::cd4583e5-ae61-45ac-b50c-6c70a440cdef">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::d80a598b-77a3-4d16-917c-6eced1357df2">
+<node id="event::5b62e878-7b47-4c75-96ac-a7b968cf7cb5">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::19dc00c4-fa0d-4e24-a9a2-0535ddfba71c">
+<node id="event::d1b07904-f307-444f-b369-0aba5e08cffc">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::c3096021-2b29-458d-ab59-6e2b85af1178">
+<node id="event::2ea17531-8140-44d5-95ce-da436bc9a1e9">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::7cd51d96-5858-4cb9-b5f3-8a0d919dd2aa">
+<node id="event::37d1b93e-1f14-41a8-92c0-52508e0c9352">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::c43ab925-891c-4ffe-b514-e475114721d7">
+<node id="event::86e70361-1f9d-4838-83ab-d5b1d4b4ed22">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::d23c8409-a741-43b9-ab4a-e3e02290e864">
+<node id="event::39ed7bbb-82c7-4e40-adbb-0480819361d9">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::4e73c620-d654-4963-b8f7-516e7d63e76f">
+<node id="event::4325bf13-967f-4423-89c6-1b5cf1dbdffd">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::a43b9ac4-e93b-4f9c-b0f7-7b411021556f">
+<node id="event::57aa7891-60f6-48d2-bcb4-0b1e195ae888">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::bd7f32e7-261d-4be5-8c09-6d9d90c5e175">
+<node id="event::0ba98810-eb86-450f-b424-3e43053e189d">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::98d2cd46-0b89-45dc-bb04-4e023beb4d34">
+<node id="event::b85ce2cc-09bc-4981-8205-94c3d8fb96f9">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::5b3959de-6546-41b5-b08d-8f9e54d8b58f">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::2e072b38-4177-4819-b42f-0502147fa6cd">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::118cee27-f139-4759-afd4-9de35082bb57">
+<node id="event::723e0855-b1d4-4f00-a1d5-79dcab668be6">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::297377f3-f392-4e5f-b7ac-76dcd0470ced">
+<node id="event::863b261e-71c0-4459-9789-8e8c2084212d">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::b8bee2f6-d622-4c64-bb96-91806d820265">
+<node id="event::9497a33b-0c70-460a-8661-35bbbd86793b">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::c9131c57-f3ba-4aab-a272-2fbe7b49d402">
+<node id="event::2593594e-ccb8-403a-8fe5-349fad04c4c4">
   <data key="d0">event</data>
   <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
   <data key="d2">财联社电报</data>
 </node>
-<node id="event::7fd08db9-c4a2-4f9c-aded-c4f648b007b2">
+<node id="event::927281bf-4dfc-4563-b53d-33212ea80330">
   <data key="d0">event</data>
   <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
   <data key="d2">东方财富网</data>
 </node>
-<node id="event::caaaf7d2-38b8-4dfd-8a35-95b9fc7b7364">
+<node id="event::497f1e9e-7287-488e-b45b-0967c8cf077a">
   <data key="d0">event</data>
   <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
   <data key="d2">同花顺财经</data>
 </node>
-<node id="event::0614fcc2-0c20-4e86-8f01-00ca9088b1a3">
+<node id="event::4b48e794-c865-422f-a72d-caac7a9ebd57">
   <data key="d0">event</data>
   <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
   <data key="d2">证监会发布</data>
 </node>
-<node id="event::4f73541d-6008-454a-9fd9-8486cf8cac7b">
+<node id="event::75388f2a-94ed-4e80-9ad4-a1df3878191f">
   <data key="d0">event</data>
   <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
   <data key="d2">新浪财经</data>
 </node>
-<node id="event::12e15eb4-81c5-402f-9964-e1cdde7caf1a">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::e31cb0aa-bbf3-4c34-a73f-0cd0eac02f45">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::522f7f89-d3f7-4859-955f-13d5bcc284e4">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::87a7568e-eb8e-46b7-b784-93825f9b1ee5">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::ca038180-f22a-40ca-843a-3c830ded6542">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<node id="event::8922b65f-2c8b-4a03-acec-4a9ff9ce3af5">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::33983763-61dc-4e4c-9fbe-4a7d2bfdc325">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::2835e9f0-a447-42f5-98ad-26730ea0c325">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::d2ad91e3-7371-4244-85eb-027b94505320">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::17228ffb-5f97-48ef-83d9-1652945b6f2d">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<node id="event::5a6ea218-b5c9-4954-adc3-585e0e78c84a">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::6d9e6b08-6c4d-42c2-82b0-1af93ddc6a78">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::e0b89ae6-53d6-4565-9d40-1d36363600de">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::8381a04d-9bfc-4ee9-8505-ba22fde0ddaa">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::4dbd591c-833e-4d6d-8875-a42dbef23971">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<node id="event::cb30969c-ec07-4a2a-8ddb-57cc41417cdd">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::64f751bd-a269-4a28-8c68-b8b531216543">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::8d206abb-9a4f-4e0a-81ec-2decb7a88f6c">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::ee6d4f00-f993-4db3-9709-9ff8118167a5">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::447d7674-d201-4e99-80d0-531b19765798">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<node id="event::611764d3-8f1f-487c-ab08-7d968b501b9e">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::05996fab-7977-46ab-904a-100febe96ec4">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::6767d088-ced0-41b2-84da-c086c0685a7d">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::f6541883-b93f-4d13-9ccd-62a790e22657">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::c65419ac-fdec-45a3-9d6f-e40a842b8ca1">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::51896fdb-4605-4dfb-ae81-7e377b0decfb">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::aa6aae61-9475-4c12-ae4b-6c373a79bf3b">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<node id="event::0f607a65-1b3c-4c86-b820-75e3b8d7f0d0">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::55173359-158c-4eec-906f-acc85b978d17">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::e3e38831-bac4-493f-8da1-2767d33e0d29">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::ff299f49-82db-454e-9469-a539ded6d797">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::9f6641f0-e76a-4043-af65-7dc9ef90502d">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<node id="event::126c8b30-b18f-4313-9a13-bf880826ce5b">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::6a0a591f-1a83-4c4a-b97c-12e610e57c67">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::d9473c0c-5e1d-4bf2-8123-40b95093bd3b">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::57374373-6e3b-4c0a-bd14-79db0147c7ba">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::c115ab57-55d2-4af4-a6ac-ee1fd5b8dad6">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<node id="event::c6f6999e-2cb8-41b6-b289-72fe63227a5c">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::4e549a82-c645-46a7-b565-62fd7455be24">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::24581c31-9a45-45dc-89ea-82198a8e9b34">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::4b0714f2-b59a-4c1c-8ede-a3132420e6c1">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::6133afe9-8cfb-4803-8257-52c6427e15b9">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<node id="event::4f8af1aa-5bb9-4897-9cac-a9397f242980">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::4e487072-2197-4e02-8b88-e2970b350685">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::0db7eaa8-027f-403b-b382-93cecf61fbee">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::1485a803-58d4-4a83-999f-abfc2aaf311e">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::087c3729-1872-4735-a1ab-f777ade07c76">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<node id="event::65ed0e54-5ef2-464e-906b-634b58e3e262">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::ca6cd78a-653d-4da7-a68e-b6867c3e0814">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::c08e2c72-9241-4cc1-a78f-a4b1ea143aa7">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::47d6dd97-4194-488f-a484-bf091d8e3d71">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::90a58e59-6b92-4f01-b689-de0fd64778e9">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<node id="event::473a9289-0f31-4df7-bea8-539c21ef6133">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::ce5c2be5-9805-42f4-a98a-d0e15f4db70f">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::aafe4c96-4bdd-4751-b138-711c00603421">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::914f676d-bd04-4ca9-a0a9-715b3e50f88e">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::20a2b623-b437-4fcb-941b-a101a1033f99">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<node id="event::c6af9603-50f0-48ef-91bf-d7cefbc6a436">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::2541d474-ea74-4f1c-892c-32a63efecfec">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::e1c9417b-546b-453f-b148-daebedac78e1">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::b5d5c0e2-186b-4c4b-89f0-6046d3654844">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::acd70379-6b63-4d1d-8ff3-b87fab852110">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<node id="event::b8522a4a-e483-4478-9d2e-d78aae6e0ee4">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::666993a5-760d-4b33-96df-d14e894456c2">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::42663873-5c45-458e-be24-8166023399b6">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::43c3c388-3104-4452-89d7-880110be481e">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::12ba7fdc-3ab1-463f-82b7-642a09f50779">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<node id="event::700ba101-f97f-4ad4-8a9e-52ed50a2c601">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::b549f044-8a74-4265-a691-18696a3fa62e">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::8b9376f1-b82f-41fd-a28a-420d0b017612">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::a038cdff-f80a-4781-b887-26060272baa2">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::d1ff9a29-bd58-468a-8946-8f58da9b751c">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<node id="event::b11c1e6c-b0ff-4eb5-9bbf-e897f34019ab">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::b392ebcd-159f-4071-b6cd-f4a31cbe2e19">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::ea6478f9-dcec-4f79-8d7f-f21fc66558f1">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::2bedb2f7-c41a-4643-82a5-e3113ff8771b">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::27f7c31a-fe4d-48d7-af4f-ea69b24507dd">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<node id="event::a48f3da9-3381-4db8-9970-af577df85cc5">
-  <data key="d0">event</data>
-  <data key="d1">央行：下调金融机构存款准备金率0.5个百分点</data>
-  <data key="d2">财联社电报</data>
-</node>
-<node id="event::2644620b-8aa4-44db-9821-9e2e5d5902db">
-  <data key="d0">event</data>
-  <data key="d1">国家新闻出版署发布新规征求意见稿，网络游戏板块重挫</data>
-  <data key="d2">东方财富网</data>
-</node>
-<node id="event::c515fc01-2ff2-4d8c-854d-fc904a40d2ea">
-  <data key="d0">event</data>
-  <data key="d1">重磅利好！房地产调控优化，多地取消限购</data>
-  <data key="d2">同花顺财经</data>
-</node>
-<node id="event::7aebc6dc-213a-4da3-b235-6637d6faf688">
-  <data key="d0">event</data>
-  <data key="d1">上交所：对某量化私募机构采取限制交易措施</data>
-  <data key="d2">证监会发布</data>
-</node>
-<node id="event::ea2e884f-9845-4d9d-bda1-b5ab19474977">
-  <data key="d0">event</data>
-  <data key="d1">美国非农就业数据远超预期，美联储降息预期大幅降温</data>
-  <data key="d2">新浪财经</data>
-</node>
-<edge source="event::863754ee-e708-413c-93a0-c13e488bc631" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::863754ee-e708-413c-93a0-c13e488bc631" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::e4a9504f-4407-49d8-8737-20b60cf3bebf" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::1958a2a5-f348-456f-a3c2-b611b77332f8" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::cd260cd0-f3e1-46cf-9644-bc51ea51c92c" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::d713ce70-7fb0-4010-b22b-a2274bad44b5" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::d713ce70-7fb0-4010-b22b-a2274bad44b5" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::d713ce70-7fb0-4010-b22b-a2274bad44b5" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::fd13a630-6cef-430c-ac21-f6d5818951c0" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::fd13a630-6cef-430c-ac21-f6d5818951c0" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::dff975ce-5479-4df6-8239-0c1a9886294f" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::0cc828b3-e9a8-4ee4-a379-cab0bc8129a1" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::fae89de6-5906-4275-a5c5-3adad64cef31" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::55abd775-24a0-458a-b8dd-0e02c986614f" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::55abd775-24a0-458a-b8dd-0e02c986614f" target="topic::monetary_policy">
+<edge source="event::3509e155-91a7-4b6f-8e7e-fc9b7bc7c653" target="topic::banking_finance">
   <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::55abd775-24a0-458a-b8dd-0e02c986614f" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::13865d14-2d4e-4c49-8e5c-ae3339c76460" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::13865d14-2d4e-4c49-8e5c-ae3339c76460" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::34adea1e-e501-4c29-a17b-6b3876adaf26" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::04a6dac7-c04d-486f-8d1a-7dbaa8582274" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::92e2bd65-7b90-4408-9bda-45319b56832e" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::d65ec597-968f-431c-b3c4-0ba89881f377" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::d65ec597-968f-431c-b3c4-0ba89881f377" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::d65ec597-968f-431c-b3c4-0ba89881f377" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::4bfbf1b3-62e3-435d-8f2d-8850a34b0b9d" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::4bfbf1b3-62e3-435d-8f2d-8850a34b0b9d" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::c754c94f-fd3b-41c1-96f0-26e5865bdcd5" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::c83752bf-e455-40ea-8c5d-c9cc3920b7ad" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::e5912b85-3349-44be-a321-877fc197da36" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::09e10917-825a-4efa-9105-bda07eedd1da" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::09e10917-825a-4efa-9105-bda07eedd1da" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::09e10917-825a-4efa-9105-bda07eedd1da" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::8f86860f-38e4-4069-93af-fa2d64708fc9" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::8f86860f-38e4-4069-93af-fa2d64708fc9" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::9a99c470-c307-4a89-b74d-359d87473399" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::aa6bdf01-234a-417c-bbb4-c2279575fca9" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::8bcf4870-3c56-48b3-a959-f2b7940aa053" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::db0e2c9a-1d62-4901-8fff-b2eb726c9fa1" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::db0e2c9a-1d62-4901-8fff-b2eb726c9fa1" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::db0e2c9a-1d62-4901-8fff-b2eb726c9fa1" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::05c1e63c-29cb-426b-8f2c-bbca42588116" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::05c1e63c-29cb-426b-8f2c-bbca42588116" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::6e90d547-dfe9-4c4f-9396-a968c29c3df7" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::b1103baf-bb64-474c-9741-e74e1f881e9d" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::3335c62f-1268-4b86-80b9-2114cd1b4506" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::e359ebe9-f49f-4e7b-b722-272057940543" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::e359ebe9-f49f-4e7b-b722-272057940543" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::e359ebe9-f49f-4e7b-b722-272057940543" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::377b18e2-ebdf-4e12-91ca-074bafc41b73" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::377b18e2-ebdf-4e12-91ca-074bafc41b73" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::9f45f8b0-2a33-4700-a9b6-eb8d1575ec74" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::125a9f07-efe2-4208-9646-3e09692685ff" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::66236640-ebc0-44a2-b0c8-64cffe5192ee" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::53631ac8-93ce-47ce-aef3-43fe855fad0e" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::53631ac8-93ce-47ce-aef3-43fe855fad0e" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::53631ac8-93ce-47ce-aef3-43fe855fad0e" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::e6df4979-592b-4c77-b161-0c4bf7ccc6e6" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::e6df4979-592b-4c77-b161-0c4bf7ccc6e6" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::03ebe36b-8a6d-44bf-badf-9f5b75ed5907" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::624d18b0-a310-4802-b6d5-b739eda88f69" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::257cee06-b47b-45fd-930c-ede1a8fa0b84" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::e6485c38-5979-47e9-a65a-d95b2de8698c" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::e6485c38-5979-47e9-a65a-d95b2de8698c" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::e6485c38-5979-47e9-a65a-d95b2de8698c" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::a667d566-3ba0-4cb9-88e8-d7b0f570b6ac" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::a667d566-3ba0-4cb9-88e8-d7b0f570b6ac" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::202610d3-2fb3-47c4-aa91-6ef911cf6202" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::e88a9fd1-889d-4776-a600-c54615a7a6ca" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::8de31543-6ff5-401c-912b-9eb096bb8416" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::9c99e2f1-9e59-4914-a5da-c33480930eed" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::9c99e2f1-9e59-4914-a5da-c33480930eed" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::9c99e2f1-9e59-4914-a5da-c33480930eed" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::67b4f3ad-e7c2-4c6c-ac79-e4b605cc1b25" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::67b4f3ad-e7c2-4c6c-ac79-e4b605cc1b25" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::435e6a81-e88c-41a2-830f-bf452d933137" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::fd39eb24-0386-4768-9455-59e88a83e49a" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::731aee8f-3d1e-4336-81fa-82f8f273c12f" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::f7e0e13c-c6aa-4a82-8ce1-7e57c66c8af3" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::f7e0e13c-c6aa-4a82-8ce1-7e57c66c8af3" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::f7e0e13c-c6aa-4a82-8ce1-7e57c66c8af3" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::3d169aab-1e64-4cc6-9b22-68cfc41a5504" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::3d169aab-1e64-4cc6-9b22-68cfc41a5504" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::2051fdcc-ec7c-4256-af19-fe0d3874878e" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::f9cd3027-f268-405e-88f0-09b576edb1c1" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::441d177f-ecb2-4bad-a983-37b5c7d1c5d4" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::6468a618-6918-412b-989b-90a2978610c3" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::6468a618-6918-412b-989b-90a2978610c3" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::6468a618-6918-412b-989b-90a2978610c3" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::c7ecbe72-ed9a-4e10-a5f0-50071fce6034" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::c7ecbe72-ed9a-4e10-a5f0-50071fce6034" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::4bd3f04a-2e44-4a84-a436-1c7235ce55cc" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::064fbd7c-bc3f-4806-aea7-40ab18767a59" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::8dd7418a-ae58-4ff3-bd1d-7ff36c383ae8" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::6b0db3fd-ab8d-42ec-887f-f678675c39fc" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::6b0db3fd-ab8d-42ec-887f-f678675c39fc" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::6b0db3fd-ab8d-42ec-887f-f678675c39fc" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::81bcd6a4-934d-450c-9dc0-548a68a6c944" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::81bcd6a4-934d-450c-9dc0-548a68a6c944" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::92a85d45-613d-4bc3-b4c4-ec57ed3a9314" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::3cdbcc0d-4493-4b4b-b6ab-4c7e4593830f" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::5c67cfb9-7190-4a18-8771-264e712694e9" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::b0347d4f-389f-460b-9e0b-325e120e190d" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::b0347d4f-389f-460b-9e0b-325e120e190d" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::b0347d4f-389f-460b-9e0b-325e120e190d" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::77e5a052-cdef-44cf-9832-05c038667bf5" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::77e5a052-cdef-44cf-9832-05c038667bf5" target="topic::monetary_policy">
+<edge source="event::3509e155-91a7-4b6f-8e7e-fc9b7bc7c653" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::3907a8ad-afe8-4aad-8c55-22eed6aada95" target="topic::uncategorized">
+<edge source="event::098695fa-bfec-47d6-8fe0-9ef980eeaf57" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::b2fd5793-18f1-418d-a661-d9efd5d903b8" target="topic::real_estate">
+<edge source="event::1145c955-2dff-4878-b728-7a321ac6613c" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::5e663e76-1213-42ed-a61e-3630003010c7" target="topic::uncategorized">
+<edge source="event::cc969f69-2c2c-417a-9c06-a80ca0460241" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::fcbb4db9-74b3-44bb-9306-7b50d41fd2c6" target="topic::global_macro">
+<edge source="event::4b268aca-124b-4019-8d77-95452a39872c" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::fcbb4db9-74b3-44bb-9306-7b50d41fd2c6" target="topic::monetary_policy">
+<edge source="event::4b268aca-124b-4019-8d77-95452a39872c" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::fcbb4db9-74b3-44bb-9306-7b50d41fd2c6" target="topic::banking_finance">
+<edge source="event::4b268aca-124b-4019-8d77-95452a39872c" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::ef8d0a88-ddf4-4559-a21b-85da496c8ecd" target="topic::banking_finance">
+<edge source="event::d88d8d4c-8517-4df0-9391-c90fe2f6471f" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::ef8d0a88-ddf4-4559-a21b-85da496c8ecd" target="topic::monetary_policy">
+<edge source="event::d88d8d4c-8517-4df0-9391-c90fe2f6471f" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::16d998a0-3676-49c2-aef8-c9cb2fc0c7b6" target="topic::uncategorized">
+<edge source="event::e68a66f8-8558-4f03-b105-dd2c3bc63627" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::3d8bbf55-3846-4ba4-8dc8-99811d58e477" target="topic::real_estate">
+<edge source="event::f6e47de4-be0e-46cb-8003-a0ee6ab47351" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::dd37f93e-e96f-46b4-b557-44be09bb53fc" target="topic::uncategorized">
+<edge source="event::281b4ff0-2f16-4c08-8feb-8aa2eb206dc7" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::4da8e58b-ad6c-4ff0-9cdf-03308425cf0b" target="topic::global_macro">
+<edge source="event::dfc2c272-878e-4dbc-9244-1c47e3f12cb0" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::4da8e58b-ad6c-4ff0-9cdf-03308425cf0b" target="topic::monetary_policy">
+<edge source="event::dfc2c272-878e-4dbc-9244-1c47e3f12cb0" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::4da8e58b-ad6c-4ff0-9cdf-03308425cf0b" target="topic::banking_finance">
+<edge source="event::dfc2c272-878e-4dbc-9244-1c47e3f12cb0" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::1f279a40-29b5-4ae8-b72c-c229cb9aec82" target="topic::banking_finance">
+<edge source="event::da5e24d0-dc62-4ee7-a8d9-6e18fa0ca9dd" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::1f279a40-29b5-4ae8-b72c-c229cb9aec82" target="topic::monetary_policy">
+<edge source="event::da5e24d0-dc62-4ee7-a8d9-6e18fa0ca9dd" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::0bad3fb3-2fc2-40a3-a019-473dc92929ce" target="topic::uncategorized">
+<edge source="event::a6d2ff78-2779-41cc-9be4-1bf409450ec1" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::00d2d9f3-c115-4e75-a0bf-9dc8a98d2c32" target="topic::real_estate">
+<edge source="event::468bec88-faa1-4e94-8918-210afb42953f" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::ab6e0a9c-0477-4ed2-8073-6e186ee1449f" target="topic::uncategorized">
+<edge source="event::18baa46c-2f95-4668-9717-5d957bd9fb6b" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::109376db-3c37-491e-bfc2-de0b160c345c" target="topic::global_macro">
+<edge source="event::41bb555b-7e8a-4cdd-96ff-15bb77a7826f" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::109376db-3c37-491e-bfc2-de0b160c345c" target="topic::monetary_policy">
+<edge source="event::41bb555b-7e8a-4cdd-96ff-15bb77a7826f" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::109376db-3c37-491e-bfc2-de0b160c345c" target="topic::banking_finance">
+<edge source="event::41bb555b-7e8a-4cdd-96ff-15bb77a7826f" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::36dc3e27-d9c8-4f40-b919-1f476275d227" target="topic::banking_finance">
+<edge source="event::d03cb4eb-5097-4134-892d-3c5a294931e5" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::36dc3e27-d9c8-4f40-b919-1f476275d227" target="topic::monetary_policy">
+<edge source="event::d03cb4eb-5097-4134-892d-3c5a294931e5" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::2ca3ec30-f9d2-43f0-9cf4-1750a5456447" target="topic::uncategorized">
+<edge source="event::b973d0cb-2808-4639-8f2f-ccc2097a6f29" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::036aa4d9-3284-45fd-abfa-47e71a1b52fe" target="topic::real_estate">
+<edge source="event::98de94f0-d045-442b-abdc-fa5778c0c9b3" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::ea6cb5ee-ab75-418e-a3a8-0bbe15adcee4" target="topic::uncategorized">
+<edge source="event::6868a9d1-61ee-4bc4-b7d0-d48ae19a7d17" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::10dbe0c6-49df-4808-bb9b-fd823569f9da" target="topic::global_macro">
+<edge source="event::a7e8acc2-6e67-4495-8e5f-6020d4fac475" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::10dbe0c6-49df-4808-bb9b-fd823569f9da" target="topic::monetary_policy">
+<edge source="event::a7e8acc2-6e67-4495-8e5f-6020d4fac475" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::10dbe0c6-49df-4808-bb9b-fd823569f9da" target="topic::banking_finance">
+<edge source="event::a7e8acc2-6e67-4495-8e5f-6020d4fac475" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::a5194c82-7560-4c5d-a0f7-769835d05101" target="topic::banking_finance">
+<edge source="event::1a023c47-0516-4e82-9d46-3afe9a518a03" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::a5194c82-7560-4c5d-a0f7-769835d05101" target="topic::monetary_policy">
+<edge source="event::1a023c47-0516-4e82-9d46-3afe9a518a03" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::a3217f95-809b-48c2-afe7-eb11e366c203" target="topic::uncategorized">
+<edge source="event::e06c347a-8cd1-46bb-ace0-16f33937ae1f" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::9724bb80-ebda-4c1d-9bf3-f971506e6627" target="topic::real_estate">
+<edge source="event::166beb4c-1303-4ef8-98e9-56180582644c" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::55823c3d-1d7d-4a4b-b942-18fd58a26f24" target="topic::uncategorized">
+<edge source="event::4bbb994b-26b1-4860-975b-27a06993af09" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::643be8a9-798d-4799-adef-a9a110fb76a7" target="topic::global_macro">
+<edge source="event::da5816f9-3b91-4b2f-8f55-588b7c7ca0e6" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::643be8a9-798d-4799-adef-a9a110fb76a7" target="topic::monetary_policy">
+<edge source="event::da5816f9-3b91-4b2f-8f55-588b7c7ca0e6" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::643be8a9-798d-4799-adef-a9a110fb76a7" target="topic::banking_finance">
+<edge source="event::da5816f9-3b91-4b2f-8f55-588b7c7ca0e6" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::05ee456c-7136-4251-a8eb-c867e6f4479d" target="topic::banking_finance">
+<edge source="event::ae44f4a2-4c84-4160-94c8-4c063d110b39" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::05ee456c-7136-4251-a8eb-c867e6f4479d" target="topic::monetary_policy">
+<edge source="event::ae44f4a2-4c84-4160-94c8-4c063d110b39" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::ea553b1b-2749-4300-845e-461b229c43d3" target="topic::uncategorized">
+<edge source="event::6ec8c510-3323-43f4-b9be-ced0a8316f7a" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::732fce4c-055d-4fcb-849c-43cd733a91f0" target="topic::real_estate">
+<edge source="event::259d5bca-2500-4a74-9d8e-d4a196f2a234" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::96d4ace9-571b-40c0-8de3-4b901794aa4e" target="topic::uncategorized">
+<edge source="event::5c6daa08-8dd7-45fc-b771-bff85cd5639b" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::fb169c13-a81d-4347-8767-8af4c41a4661" target="topic::global_macro">
+<edge source="event::dc40e278-0d42-4bbf-94d8-d8f630d93c02" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::fb169c13-a81d-4347-8767-8af4c41a4661" target="topic::monetary_policy">
+<edge source="event::dc40e278-0d42-4bbf-94d8-d8f630d93c02" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::fb169c13-a81d-4347-8767-8af4c41a4661" target="topic::banking_finance">
+<edge source="event::dc40e278-0d42-4bbf-94d8-d8f630d93c02" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::d6436025-2006-4731-b865-1080c7ed0410" target="topic::banking_finance">
+<edge source="event::a72c1957-c1f1-4970-93e3-8c9f2e91916f" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::d6436025-2006-4731-b865-1080c7ed0410" target="topic::monetary_policy">
+<edge source="event::a72c1957-c1f1-4970-93e3-8c9f2e91916f" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::c2ee7357-5597-424d-91ef-c989dfe6c04a" target="topic::uncategorized">
+<edge source="event::ed092d07-3f37-4328-8ce2-83d82d8d302a" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::57a77729-0f15-467e-8c70-9cc7b2ab7d8d" target="topic::real_estate">
+<edge source="event::15d5c435-3d9f-47dc-b63b-ffbbd5e2248a" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::6baaace6-4a11-46b9-b8b0-85b8dc03f4ef" target="topic::uncategorized">
+<edge source="event::fcb29cc7-3a2b-4d47-a78b-1f6575af2af3" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::1d40477a-f695-4ba9-b7ce-2e4825f2042e" target="topic::global_macro">
+<edge source="event::d99b70ed-3c22-4a4b-ab61-51b8ca6d85bf" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::1d40477a-f695-4ba9-b7ce-2e4825f2042e" target="topic::monetary_policy">
+<edge source="event::d99b70ed-3c22-4a4b-ab61-51b8ca6d85bf" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::1d40477a-f695-4ba9-b7ce-2e4825f2042e" target="topic::banking_finance">
+<edge source="event::d99b70ed-3c22-4a4b-ab61-51b8ca6d85bf" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::fae9ecc0-ed5a-412e-814f-da6eb9b27181" target="topic::banking_finance">
+<edge source="event::c2148594-f175-404e-a05d-7380095d8f30" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::fae9ecc0-ed5a-412e-814f-da6eb9b27181" target="topic::monetary_policy">
+<edge source="event::c2148594-f175-404e-a05d-7380095d8f30" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::6a37ac74-b548-4315-8e47-d714f728cc20" target="topic::uncategorized">
+<edge source="event::90d24c1a-ca28-46d5-af2f-c973857e3db5" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::32393769-d64e-49f8-a900-c94e5e57877e" target="topic::real_estate">
+<edge source="event::574cbd72-1feb-40db-93f2-47cd442f6918" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::0107c750-5eb3-4053-8b5d-20313d9beba8" target="topic::uncategorized">
+<edge source="event::ac4267c2-f3e8-4f85-ae7c-c5a641548e53" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::54b0a855-a918-4e42-965d-7d787412aa04" target="topic::global_macro">
+<edge source="event::ab59717b-48cb-452c-8703-5cbcba16dff2" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::54b0a855-a918-4e42-965d-7d787412aa04" target="topic::monetary_policy">
+<edge source="event::ab59717b-48cb-452c-8703-5cbcba16dff2" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::54b0a855-a918-4e42-965d-7d787412aa04" target="topic::banking_finance">
+<edge source="event::ab59717b-48cb-452c-8703-5cbcba16dff2" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::e03d19b2-5a1d-4741-95e2-582f0358dc04" target="topic::banking_finance">
+<edge source="event::177df5f6-f107-487f-bd7f-7f73b1040327" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::e03d19b2-5a1d-4741-95e2-582f0358dc04" target="topic::monetary_policy">
+<edge source="event::177df5f6-f107-487f-bd7f-7f73b1040327" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::7413319a-ddf2-4945-8cad-425cdd8e887b" target="topic::uncategorized">
+<edge source="event::28adc9f7-d356-45de-b4c4-b34cd4cbafc6" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::a78232f3-f152-4cf4-b7e4-a767811d0772" target="topic::real_estate">
+<edge source="event::dd2fc539-01f3-43dc-b4b0-1083176587b4" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::71758af7-70ce-4ae7-8748-ea6224f79afa" target="topic::uncategorized">
+<edge source="event::cc1b893f-f26f-4deb-ba75-161ac8303a1c" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::a5543b23-ac67-4bf6-8db1-c01c5c382446" target="topic::global_macro">
+<edge source="event::4ecf4c89-c619-4819-9477-5829a8a3a3ff" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::a5543b23-ac67-4bf6-8db1-c01c5c382446" target="topic::monetary_policy">
+<edge source="event::4ecf4c89-c619-4819-9477-5829a8a3a3ff" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::a5543b23-ac67-4bf6-8db1-c01c5c382446" target="topic::banking_finance">
+<edge source="event::4ecf4c89-c619-4819-9477-5829a8a3a3ff" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::38c786cc-f244-4d08-8c3f-17ea154879da" target="topic::banking_finance">
+<edge source="event::5afa6cbe-3962-4a09-99b2-15649c1da885" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::38c786cc-f244-4d08-8c3f-17ea154879da" target="topic::monetary_policy">
+<edge source="event::5afa6cbe-3962-4a09-99b2-15649c1da885" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::bc413582-9dc7-4a43-8c08-df792c473836" target="topic::uncategorized">
+<edge source="event::42dae15a-109b-4c7c-a780-9e04187c5736" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::f3f9a195-2d89-4716-8a14-8fb4e8f8a5a9" target="topic::real_estate">
+<edge source="event::2ddfdd1f-234d-4c1d-9f73-fb8a407083ef" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::8773c79e-d57f-4cb6-a760-4218fc566e21" target="topic::uncategorized">
+<edge source="event::25c8dfa2-8132-4ce7-a492-dfba91109510" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::f341ec32-84b3-4cd2-9720-67450cc50224" target="topic::global_macro">
+<edge source="event::068d4ae4-cf55-4750-ae9b-7b4289ffcea7" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::f341ec32-84b3-4cd2-9720-67450cc50224" target="topic::monetary_policy">
+<edge source="event::068d4ae4-cf55-4750-ae9b-7b4289ffcea7" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::f341ec32-84b3-4cd2-9720-67450cc50224" target="topic::banking_finance">
+<edge source="event::068d4ae4-cf55-4750-ae9b-7b4289ffcea7" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::8c9d2af5-0e93-4a1c-abc5-2d3600feee88" target="topic::banking_finance">
+<edge source="event::0d734819-5ae3-4260-bc1c-8ed20308755c" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::8c9d2af5-0e93-4a1c-abc5-2d3600feee88" target="topic::monetary_policy">
+<edge source="event::0d734819-5ae3-4260-bc1c-8ed20308755c" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::1723cbaf-43b1-456b-b6a1-575597c2d3c7" target="topic::uncategorized">
+<edge source="event::3aac0a01-1d18-4db1-904a-533e0e4c828e" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::d80a598b-77a3-4d16-917c-6eced1357df2" target="topic::real_estate">
+<edge source="event::a320f069-c08d-48db-9f07-f271f744c902" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::19dc00c4-fa0d-4e24-a9a2-0535ddfba71c" target="topic::uncategorized">
+<edge source="event::43ad980e-dd9d-47c3-a02e-2de4eeccf4cd" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::c3096021-2b29-458d-ab59-6e2b85af1178" target="topic::global_macro">
+<edge source="event::575cce22-917a-429b-bb1b-b809ecc17fa2" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::c3096021-2b29-458d-ab59-6e2b85af1178" target="topic::monetary_policy">
+<edge source="event::575cce22-917a-429b-bb1b-b809ecc17fa2" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::c3096021-2b29-458d-ab59-6e2b85af1178" target="topic::banking_finance">
+<edge source="event::575cce22-917a-429b-bb1b-b809ecc17fa2" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::7cd51d96-5858-4cb9-b5f3-8a0d919dd2aa" target="topic::banking_finance">
+<edge source="event::63aebd7f-4a01-445f-be57-bf54a47650b6" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::7cd51d96-5858-4cb9-b5f3-8a0d919dd2aa" target="topic::monetary_policy">
+<edge source="event::63aebd7f-4a01-445f-be57-bf54a47650b6" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::c43ab925-891c-4ffe-b514-e475114721d7" target="topic::uncategorized">
+<edge source="event::b75bae4f-308e-43fc-8123-d7c66cb50d84" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::d23c8409-a741-43b9-ab4a-e3e02290e864" target="topic::real_estate">
+<edge source="event::88e8b1b3-bb75-4d32-b747-3f3b791921d9" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::4e73c620-d654-4963-b8f7-516e7d63e76f" target="topic::uncategorized">
+<edge source="event::c9f64240-5999-4daf-8aff-0212b97a3eb8" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::a43b9ac4-e93b-4f9c-b0f7-7b411021556f" target="topic::global_macro">
+<edge source="event::52ffc690-076c-4660-b482-6c6506bc138e" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::a43b9ac4-e93b-4f9c-b0f7-7b411021556f" target="topic::monetary_policy">
+<edge source="event::52ffc690-076c-4660-b482-6c6506bc138e" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::a43b9ac4-e93b-4f9c-b0f7-7b411021556f" target="topic::banking_finance">
+<edge source="event::52ffc690-076c-4660-b482-6c6506bc138e" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::bd7f32e7-261d-4be5-8c09-6d9d90c5e175" target="topic::banking_finance">
+<edge source="event::d81bf3a7-e604-4a93-bfcd-7a7ededc7bf8" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::bd7f32e7-261d-4be5-8c09-6d9d90c5e175" target="topic::monetary_policy">
+<edge source="event::d81bf3a7-e604-4a93-bfcd-7a7ededc7bf8" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::98d2cd46-0b89-45dc-bb04-4e023beb4d34" target="topic::uncategorized">
+<edge source="event::0347d425-72b3-4f12-bcb8-04ad91c9d370" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::5b3959de-6546-41b5-b08d-8f9e54d8b58f" target="topic::banking_finance">
+<edge source="event::714f8a92-dc92-4afb-916c-51b59c8f517c" target="topic::real_estate">
   <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::5b3959de-6546-41b5-b08d-8f9e54d8b58f" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::2e072b38-4177-4819-b42f-0502147fa6cd" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::118cee27-f139-4759-afd4-9de35082bb57" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::297377f3-f392-4e5f-b7ac-76dcd0470ced" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::b8bee2f6-d622-4c64-bb96-91806d820265" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::b8bee2f6-d622-4c64-bb96-91806d820265" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::b8bee2f6-d622-4c64-bb96-91806d820265" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::c9131c57-f3ba-4aab-a272-2fbe7b49d402" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::c9131c57-f3ba-4aab-a272-2fbe7b49d402" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::7fd08db9-c4a2-4f9c-aded-c4f648b007b2" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::caaaf7d2-38b8-4dfd-8a35-95b9fc7b7364" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::0614fcc2-0c20-4e86-8f01-00ca9088b1a3" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::4f73541d-6008-454a-9fd9-8486cf8cac7b" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::4f73541d-6008-454a-9fd9-8486cf8cac7b" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::4f73541d-6008-454a-9fd9-8486cf8cac7b" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::12e15eb4-81c5-402f-9964-e1cdde7caf1a" target="topic::banking_finance">
+<edge source="event::9451075a-67e8-4b21-8538-16dce3668ddd" target="topic::uncategorized">
   <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::12e15eb4-81c5-402f-9964-e1cdde7caf1a" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::e31cb0aa-bbf3-4c34-a73f-0cd0eac02f45" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::522f7f89-d3f7-4859-955f-13d5bcc284e4" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::87a7568e-eb8e-46b7-b784-93825f9b1ee5" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::ca038180-f22a-40ca-843a-3c830ded6542" target="topic::global_macro">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::ca038180-f22a-40ca-843a-3c830ded6542" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::ca038180-f22a-40ca-843a-3c830ded6542" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::8922b65f-2c8b-4a03-acec-4a9ff9ce3af5" target="topic::banking_finance">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::8922b65f-2c8b-4a03-acec-4a9ff9ce3af5" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::33983763-61dc-4e4c-9fbe-4a7d2bfdc325" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
-</edge>
-<edge source="event::2835e9f0-a447-42f5-98ad-26730ea0c325" target="topic::real_estate">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::d2ad91e3-7371-4244-85eb-027b94505320" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::17228ffb-5f97-48ef-83d9-1652945b6f2d" target="topic::global_macro">
+<edge source="event::187e788f-84c6-43f8-b07f-05553a5030bd" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::17228ffb-5f97-48ef-83d9-1652945b6f2d" target="topic::monetary_policy">
+<edge source="event::187e788f-84c6-43f8-b07f-05553a5030bd" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::17228ffb-5f97-48ef-83d9-1652945b6f2d" target="topic::banking_finance">
+<edge source="event::187e788f-84c6-43f8-b07f-05553a5030bd" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::5a6ea218-b5c9-4954-adc3-585e0e78c84a" target="topic::banking_finance">
+<edge source="event::b0b000fa-2c41-4884-adc1-ddcc7d14b638" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::5a6ea218-b5c9-4954-adc3-585e0e78c84a" target="topic::monetary_policy">
+<edge source="event::b0b000fa-2c41-4884-adc1-ddcc7d14b638" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::6d9e6b08-6c4d-42c2-82b0-1af93ddc6a78" target="topic::uncategorized">
+<edge source="event::82da3f02-c425-4856-968c-3ade7e9e0b28" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::e0b89ae6-53d6-4565-9d40-1d36363600de" target="topic::real_estate">
+<edge source="event::09c8ff5d-2977-4d8d-a935-ccfdcc514742" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::8381a04d-9bfc-4ee9-8505-ba22fde0ddaa" target="topic::uncategorized">
+<edge source="event::f4a0b65f-5af3-4292-a059-0cad0ed9680b" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::4dbd591c-833e-4d6d-8875-a42dbef23971" target="topic::global_macro">
+<edge source="event::4dc8f567-976c-4080-8df6-df996816984a" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::4dbd591c-833e-4d6d-8875-a42dbef23971" target="topic::monetary_policy">
+<edge source="event::4dc8f567-976c-4080-8df6-df996816984a" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::4dbd591c-833e-4d6d-8875-a42dbef23971" target="topic::banking_finance">
+<edge source="event::4dc8f567-976c-4080-8df6-df996816984a" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::cb30969c-ec07-4a2a-8ddb-57cc41417cdd" target="topic::banking_finance">
+<edge source="event::90190de8-4245-41ae-94f6-e476e58997b2" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::cb30969c-ec07-4a2a-8ddb-57cc41417cdd" target="topic::monetary_policy">
+<edge source="event::90190de8-4245-41ae-94f6-e476e58997b2" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::64f751bd-a269-4a28-8c68-b8b531216543" target="topic::uncategorized">
+<edge source="event::4af56cae-9d7c-4482-952e-8d7645316017" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::8d206abb-9a4f-4e0a-81ec-2decb7a88f6c" target="topic::real_estate">
+<edge source="event::40ed6992-0b40-45f6-b603-26cc3270b8ff" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::ee6d4f00-f993-4db3-9709-9ff8118167a5" target="topic::uncategorized">
+<edge source="event::a5e73815-87c4-4d6b-a61f-3d98ef2e8c0d" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::447d7674-d201-4e99-80d0-531b19765798" target="topic::global_macro">
+<edge source="event::920551d3-cc91-4ced-bb60-271f36b612ad" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::447d7674-d201-4e99-80d0-531b19765798" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::447d7674-d201-4e99-80d0-531b19765798" target="topic::banking_finance">
+<edge source="event::920551d3-cc91-4ced-bb60-271f36b612ad" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::611764d3-8f1f-487c-ab08-7d968b501b9e" target="topic::banking_finance">
+<edge source="event::920551d3-cc91-4ced-bb60-271f36b612ad" target="topic::banking_finance">
   <data key="d4">has_topic</data>
-  <data key="d5">0.6988057880877978</data>
-</edge>
-<edge source="event::611764d3-8f1f-487c-ab08-7d968b501b9e" target="topic::monetary_policy">
-  <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
-</edge>
-<edge source="event::05996fab-7977-46ab-904a-100febe96ec4" target="topic::uncategorized">
-  <data key="d4">has_topic</data>
-  <data key="d5">0.2</data>
 </edge>
-<edge source="event::6767d088-ced0-41b2-84da-c086c0685a7d" target="topic::banking_finance">
+<edge source="event::9c162be3-b2bf-4e8e-a99d-f9a49215ac9c" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::6767d088-ced0-41b2-84da-c086c0685a7d" target="topic::monetary_policy">
+<edge source="event::9c162be3-b2bf-4e8e-a99d-f9a49215ac9c" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::f6541883-b93f-4d13-9ccd-62a790e22657" target="topic::uncategorized">
+<edge source="event::4833f757-4274-4879-8315-0eeb76cd540a" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::c65419ac-fdec-45a3-9d6f-e40a842b8ca1" target="topic::real_estate">
+<edge source="event::629cc203-9cde-4517-ae39-d083556de764" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::51896fdb-4605-4dfb-ae81-7e377b0decfb" target="topic::uncategorized">
+<edge source="event::95b59db8-b9c8-4c58-bb60-35d860aac000" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::aa6aae61-9475-4c12-ae4b-6c373a79bf3b" target="topic::global_macro">
+<edge source="event::aaf66c15-7771-4ecd-87aa-946dbdb69e97" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::aa6aae61-9475-4c12-ae4b-6c373a79bf3b" target="topic::monetary_policy">
+<edge source="event::aaf66c15-7771-4ecd-87aa-946dbdb69e97" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::aa6aae61-9475-4c12-ae4b-6c373a79bf3b" target="topic::banking_finance">
+<edge source="event::aaf66c15-7771-4ecd-87aa-946dbdb69e97" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::0f607a65-1b3c-4c86-b820-75e3b8d7f0d0" target="topic::banking_finance">
+<edge source="event::e5410bc4-e7a9-45bb-9e0d-fe28fa8b7cb9" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::0f607a65-1b3c-4c86-b820-75e3b8d7f0d0" target="topic::monetary_policy">
+<edge source="event::e5410bc4-e7a9-45bb-9e0d-fe28fa8b7cb9" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::55173359-158c-4eec-906f-acc85b978d17" target="topic::uncategorized">
+<edge source="event::a38ba8ab-0cdf-453f-b3b3-fc5b5972baff" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::e3e38831-bac4-493f-8da1-2767d33e0d29" target="topic::real_estate">
+<edge source="event::92ccd978-f581-490b-b881-68689d48247c" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::ff299f49-82db-454e-9469-a539ded6d797" target="topic::uncategorized">
+<edge source="event::77d042f2-7327-47d6-9e13-82c0c183399b" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::9f6641f0-e76a-4043-af65-7dc9ef90502d" target="topic::global_macro">
+<edge source="event::32200adb-fba7-4ea1-a32d-cffaa65d58b1" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::9f6641f0-e76a-4043-af65-7dc9ef90502d" target="topic::monetary_policy">
+<edge source="event::32200adb-fba7-4ea1-a32d-cffaa65d58b1" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::9f6641f0-e76a-4043-af65-7dc9ef90502d" target="topic::banking_finance">
+<edge source="event::32200adb-fba7-4ea1-a32d-cffaa65d58b1" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::126c8b30-b18f-4313-9a13-bf880826ce5b" target="topic::banking_finance">
+<edge source="event::f34592ce-163a-4cec-a9d3-0a99743cf78b" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::126c8b30-b18f-4313-9a13-bf880826ce5b" target="topic::monetary_policy">
+<edge source="event::f34592ce-163a-4cec-a9d3-0a99743cf78b" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::6a0a591f-1a83-4c4a-b97c-12e610e57c67" target="topic::uncategorized">
+<edge source="event::a6bc1678-1808-45cf-9398-d0896473c1fa" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::d9473c0c-5e1d-4bf2-8123-40b95093bd3b" target="topic::real_estate">
+<edge source="event::7c939a73-b2d7-4c09-a039-10941a385428" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::57374373-6e3b-4c0a-bd14-79db0147c7ba" target="topic::uncategorized">
+<edge source="event::b2a95fe4-cbc6-4f9a-95d5-7af6ccaf1b48" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::c115ab57-55d2-4af4-a6ac-ee1fd5b8dad6" target="topic::global_macro">
+<edge source="event::79c5ac38-ffb7-4035-a12e-7ea06ce51abd" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::c115ab57-55d2-4af4-a6ac-ee1fd5b8dad6" target="topic::monetary_policy">
+<edge source="event::79c5ac38-ffb7-4035-a12e-7ea06ce51abd" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::c115ab57-55d2-4af4-a6ac-ee1fd5b8dad6" target="topic::banking_finance">
+<edge source="event::79c5ac38-ffb7-4035-a12e-7ea06ce51abd" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::c6f6999e-2cb8-41b6-b289-72fe63227a5c" target="topic::banking_finance">
+<edge source="event::53fc2d1c-b2bf-499a-a966-203a05d0aae5" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::c6f6999e-2cb8-41b6-b289-72fe63227a5c" target="topic::monetary_policy">
+<edge source="event::53fc2d1c-b2bf-499a-a966-203a05d0aae5" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::4e549a82-c645-46a7-b565-62fd7455be24" target="topic::uncategorized">
+<edge source="event::3f930a7d-cf7e-473e-b27b-35a3563f3f1b" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::24581c31-9a45-45dc-89ea-82198a8e9b34" target="topic::real_estate">
+<edge source="event::800165b3-7841-4f8f-b33c-08374ad2061d" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::4b0714f2-b59a-4c1c-8ede-a3132420e6c1" target="topic::uncategorized">
+<edge source="event::578585d2-921c-4b9a-9ae7-d25a8b6b0a96" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::6133afe9-8cfb-4803-8257-52c6427e15b9" target="topic::global_macro">
+<edge source="event::5ad90fb9-b505-43aa-8b25-c067a36a7527" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::6133afe9-8cfb-4803-8257-52c6427e15b9" target="topic::monetary_policy">
+<edge source="event::5ad90fb9-b505-43aa-8b25-c067a36a7527" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::6133afe9-8cfb-4803-8257-52c6427e15b9" target="topic::banking_finance">
+<edge source="event::5ad90fb9-b505-43aa-8b25-c067a36a7527" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::4f8af1aa-5bb9-4897-9cac-a9397f242980" target="topic::banking_finance">
+<edge source="event::eb748a27-9176-499f-8d3a-b11d397e1cb9" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::4f8af1aa-5bb9-4897-9cac-a9397f242980" target="topic::monetary_policy">
+<edge source="event::eb748a27-9176-499f-8d3a-b11d397e1cb9" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::4e487072-2197-4e02-8b88-e2970b350685" target="topic::uncategorized">
+<edge source="event::110e67b7-5992-4ff3-92a3-a4bb5ece8614" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::0db7eaa8-027f-403b-b382-93cecf61fbee" target="topic::real_estate">
+<edge source="event::24661a50-ef5c-4e3d-a37e-70b0a4a346eb" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::1485a803-58d4-4a83-999f-abfc2aaf311e" target="topic::uncategorized">
+<edge source="event::66be5906-1189-4604-9403-18dfa1173e9c" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::087c3729-1872-4735-a1ab-f777ade07c76" target="topic::global_macro">
+<edge source="event::32809877-5dbb-4859-a8d9-594bf5c9223e" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::087c3729-1872-4735-a1ab-f777ade07c76" target="topic::monetary_policy">
+<edge source="event::32809877-5dbb-4859-a8d9-594bf5c9223e" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::087c3729-1872-4735-a1ab-f777ade07c76" target="topic::banking_finance">
+<edge source="event::32809877-5dbb-4859-a8d9-594bf5c9223e" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::65ed0e54-5ef2-464e-906b-634b58e3e262" target="topic::banking_finance">
+<edge source="event::9853539b-0646-49d9-a374-6371e5c09654" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::65ed0e54-5ef2-464e-906b-634b58e3e262" target="topic::monetary_policy">
+<edge source="event::9853539b-0646-49d9-a374-6371e5c09654" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::ca6cd78a-653d-4da7-a68e-b6867c3e0814" target="topic::uncategorized">
+<edge source="event::e0249876-611b-4755-ad35-e80646830c64" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::c08e2c72-9241-4cc1-a78f-a4b1ea143aa7" target="topic::real_estate">
+<edge source="event::2f341821-5301-433e-910f-62959a11d457" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::47d6dd97-4194-488f-a484-bf091d8e3d71" target="topic::uncategorized">
+<edge source="event::495bb71d-81a6-456e-a347-b04152c219b6" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::90a58e59-6b92-4f01-b689-de0fd64778e9" target="topic::global_macro">
+<edge source="event::0251ca42-059a-4c09-8e50-407a29245ac8" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::90a58e59-6b92-4f01-b689-de0fd64778e9" target="topic::monetary_policy">
+<edge source="event::0251ca42-059a-4c09-8e50-407a29245ac8" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::90a58e59-6b92-4f01-b689-de0fd64778e9" target="topic::banking_finance">
+<edge source="event::0251ca42-059a-4c09-8e50-407a29245ac8" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::473a9289-0f31-4df7-bea8-539c21ef6133" target="topic::banking_finance">
+<edge source="event::7730171e-e6d3-467c-b8a1-18c8cb36e55d" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::473a9289-0f31-4df7-bea8-539c21ef6133" target="topic::monetary_policy">
+<edge source="event::7730171e-e6d3-467c-b8a1-18c8cb36e55d" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::ce5c2be5-9805-42f4-a98a-d0e15f4db70f" target="topic::uncategorized">
+<edge source="event::317e4cbc-afdf-44a4-8267-95d96bbda4c6" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::aafe4c96-4bdd-4751-b138-711c00603421" target="topic::real_estate">
+<edge source="event::72d9fdd3-4321-45cb-8e38-0266e020ade0" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::914f676d-bd04-4ca9-a0a9-715b3e50f88e" target="topic::uncategorized">
+<edge source="event::91f92bf0-ea18-44e0-a67a-a8a538b9c58d" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::20a2b623-b437-4fcb-941b-a101a1033f99" target="topic::global_macro">
+<edge source="event::64d05d7e-1081-4659-b7dd-0f46f9463632" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::20a2b623-b437-4fcb-941b-a101a1033f99" target="topic::monetary_policy">
+<edge source="event::64d05d7e-1081-4659-b7dd-0f46f9463632" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::20a2b623-b437-4fcb-941b-a101a1033f99" target="topic::banking_finance">
+<edge source="event::64d05d7e-1081-4659-b7dd-0f46f9463632" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::c6af9603-50f0-48ef-91bf-d7cefbc6a436" target="topic::banking_finance">
+<edge source="event::28e96310-5048-4152-a594-2dceaedc0f06" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::c6af9603-50f0-48ef-91bf-d7cefbc6a436" target="topic::monetary_policy">
+<edge source="event::28e96310-5048-4152-a594-2dceaedc0f06" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::2541d474-ea74-4f1c-892c-32a63efecfec" target="topic::uncategorized">
+<edge source="event::5a65fc07-d24b-4a06-98a5-5e15974e1c22" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::e1c9417b-546b-453f-b148-daebedac78e1" target="topic::real_estate">
+<edge source="event::428bfaab-2aa2-42a6-9bbe-058361523d31" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::b5d5c0e2-186b-4c4b-89f0-6046d3654844" target="topic::uncategorized">
+<edge source="event::8943684d-172a-4fd8-acd4-5cf5a2e1b504" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::acd70379-6b63-4d1d-8ff3-b87fab852110" target="topic::global_macro">
+<edge source="event::8aad95ce-c098-468c-a7c2-9271bccc0e22" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::acd70379-6b63-4d1d-8ff3-b87fab852110" target="topic::monetary_policy">
+<edge source="event::8aad95ce-c098-468c-a7c2-9271bccc0e22" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::acd70379-6b63-4d1d-8ff3-b87fab852110" target="topic::banking_finance">
+<edge source="event::8aad95ce-c098-468c-a7c2-9271bccc0e22" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::b8522a4a-e483-4478-9d2e-d78aae6e0ee4" target="topic::banking_finance">
+<edge source="event::b02014b1-450e-4919-9728-a17adfd08360" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::b8522a4a-e483-4478-9d2e-d78aae6e0ee4" target="topic::monetary_policy">
+<edge source="event::b02014b1-450e-4919-9728-a17adfd08360" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::666993a5-760d-4b33-96df-d14e894456c2" target="topic::uncategorized">
+<edge source="event::cd4583e5-ae61-45ac-b50c-6c70a440cdef" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::42663873-5c45-458e-be24-8166023399b6" target="topic::real_estate">
+<edge source="event::5b62e878-7b47-4c75-96ac-a7b968cf7cb5" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::43c3c388-3104-4452-89d7-880110be481e" target="topic::uncategorized">
+<edge source="event::d1b07904-f307-444f-b369-0aba5e08cffc" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::12ba7fdc-3ab1-463f-82b7-642a09f50779" target="topic::global_macro">
+<edge source="event::2ea17531-8140-44d5-95ce-da436bc9a1e9" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::12ba7fdc-3ab1-463f-82b7-642a09f50779" target="topic::monetary_policy">
+<edge source="event::2ea17531-8140-44d5-95ce-da436bc9a1e9" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::12ba7fdc-3ab1-463f-82b7-642a09f50779" target="topic::banking_finance">
+<edge source="event::2ea17531-8140-44d5-95ce-da436bc9a1e9" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::700ba101-f97f-4ad4-8a9e-52ed50a2c601" target="topic::banking_finance">
+<edge source="event::37d1b93e-1f14-41a8-92c0-52508e0c9352" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::700ba101-f97f-4ad4-8a9e-52ed50a2c601" target="topic::monetary_policy">
+<edge source="event::37d1b93e-1f14-41a8-92c0-52508e0c9352" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::b549f044-8a74-4265-a691-18696a3fa62e" target="topic::uncategorized">
+<edge source="event::86e70361-1f9d-4838-83ab-d5b1d4b4ed22" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::8b9376f1-b82f-41fd-a28a-420d0b017612" target="topic::real_estate">
+<edge source="event::39ed7bbb-82c7-4e40-adbb-0480819361d9" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::a038cdff-f80a-4781-b887-26060272baa2" target="topic::uncategorized">
+<edge source="event::4325bf13-967f-4423-89c6-1b5cf1dbdffd" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::d1ff9a29-bd58-468a-8946-8f58da9b751c" target="topic::global_macro">
+<edge source="event::57aa7891-60f6-48d2-bcb4-0b1e195ae888" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::d1ff9a29-bd58-468a-8946-8f58da9b751c" target="topic::monetary_policy">
+<edge source="event::57aa7891-60f6-48d2-bcb4-0b1e195ae888" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::d1ff9a29-bd58-468a-8946-8f58da9b751c" target="topic::banking_finance">
+<edge source="event::57aa7891-60f6-48d2-bcb4-0b1e195ae888" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::b11c1e6c-b0ff-4eb5-9bbf-e897f34019ab" target="topic::banking_finance">
+<edge source="event::0ba98810-eb86-450f-b424-3e43053e189d" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::b11c1e6c-b0ff-4eb5-9bbf-e897f34019ab" target="topic::monetary_policy">
+<edge source="event::0ba98810-eb86-450f-b424-3e43053e189d" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::b392ebcd-159f-4071-b6cd-f4a31cbe2e19" target="topic::uncategorized">
+<edge source="event::b85ce2cc-09bc-4981-8205-94c3d8fb96f9" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::ea6478f9-dcec-4f79-8d7f-f21fc66558f1" target="topic::real_estate">
+<edge source="event::723e0855-b1d4-4f00-a1d5-79dcab668be6" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::2bedb2f7-c41a-4643-82a5-e3113ff8771b" target="topic::uncategorized">
+<edge source="event::863b261e-71c0-4459-9789-8e8c2084212d" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::27f7c31a-fe4d-48d7-af4f-ea69b24507dd" target="topic::global_macro">
+<edge source="event::9497a33b-0c70-460a-8661-35bbbd86793b" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::27f7c31a-fe4d-48d7-af4f-ea69b24507dd" target="topic::monetary_policy">
+<edge source="event::9497a33b-0c70-460a-8661-35bbbd86793b" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::27f7c31a-fe4d-48d7-af4f-ea69b24507dd" target="topic::banking_finance">
+<edge source="event::9497a33b-0c70-460a-8661-35bbbd86793b" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::a48f3da9-3381-4db8-9970-af577df85cc5" target="topic::banking_finance">
+<edge source="event::2593594e-ccb8-403a-8fe5-349fad04c4c4" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::a48f3da9-3381-4db8-9970-af577df85cc5" target="topic::monetary_policy">
+<edge source="event::2593594e-ccb8-403a-8fe5-349fad04c4c4" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::2644620b-8aa4-44db-9821-9e2e5d5902db" target="topic::uncategorized">
+<edge source="event::927281bf-4dfc-4563-b53d-33212ea80330" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::c515fc01-2ff2-4d8c-854d-fc904a40d2ea" target="topic::real_estate">
+<edge source="event::497f1e9e-7287-488e-b45b-0967c8cf077a" target="topic::real_estate">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::7aebc6dc-213a-4da3-b235-6637d6faf688" target="topic::uncategorized">
+<edge source="event::4b48e794-c865-422f-a72d-caac7a9ebd57" target="topic::uncategorized">
   <data key="d4">has_topic</data>
   <data key="d5">0.2</data>
 </edge>
-<edge source="event::ea2e884f-9845-4d9d-bda1-b5ab19474977" target="topic::global_macro">
+<edge source="event::75388f2a-94ed-4e80-9ad4-a1df3878191f" target="topic::global_macro">
   <data key="d4">has_topic</data>
   <data key="d5">0.6988057880877978</data>
 </edge>
-<edge source="event::ea2e884f-9845-4d9d-bda1-b5ab19474977" target="topic::monetary_policy">
+<edge source="event::75388f2a-94ed-4e80-9ad4-a1df3878191f" target="topic::monetary_policy">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>
-<edge source="event::ea2e884f-9845-4d9d-bda1-b5ab19474977" target="topic::banking_finance">
+<edge source="event::75388f2a-94ed-4e80-9ad4-a1df3878191f" target="topic::banking_finance">
   <data key="d4">has_topic</data>
   <data key="d5">0.4511883639059735</data>
 </edge>

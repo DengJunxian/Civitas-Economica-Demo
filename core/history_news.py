@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 import pandas as pd
 
 from core.event_store import EventRecord, EventStore, EventType
+from core.runtime_paths import resolve_runtime_path
 
 try:
     import akshare as ak
@@ -129,8 +130,16 @@ class HistoryNewsService:
         local_cache_path: str | Path = "data/history_news_cache.jsonl",
     ) -> None:
         self.event_store = event_store or EventStore()
-        self.seed_store_path = Path(seed_store_path)
-        self.local_cache_path = Path(local_cache_path)
+        self.seed_store_path = (
+            resolve_runtime_path(seed_store_path, env_var="CIVITAS_SEED_STORE_PATH")
+            if str(seed_store_path) == "data/seed_events.jsonl"
+            else Path(seed_store_path)
+        )
+        self.local_cache_path = (
+            resolve_runtime_path(local_cache_path, env_var="CIVITAS_HISTORY_NEWS_CACHE_PATH")
+            if str(local_cache_path) == "data/history_news_cache.jsonl"
+            else Path(local_cache_path)
+        )
 
     def build_news_bundle(
         self,

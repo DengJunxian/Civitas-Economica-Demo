@@ -21,6 +21,7 @@ from core.data.market_data_provider import MarketDataProvider, MarketDataQuery
 from core.event_store import EventRecord, EventStore, EventType
 from core.macro.government import GovernmentAgent, PolicyShock
 from core.policy_session import PolicySession
+from core.runtime_paths import resolve_runtime_path
 from core.runtime_mode import RuntimeModeProfile, resolve_runtime_mode_profile
 from core.ui_text import translate_display_text
 from policy.structured import PolicyPackage
@@ -38,7 +39,7 @@ POLICY_TYPE_OPTIONS = {
 }
 
 TEMPLATE_LIBRARY_PATH = Path("data") / "policy_templates.json"
-POLICY_REPORT_DIR = Path("outputs") / "policy_reports"
+POLICY_REPORT_DIR = resolve_runtime_path(Path("outputs") / "policy_reports", env_var="CIVITAS_POLICY_REPORT_DIR")
 CONTROL_MODE_OPTIONS = [
     "不设置对照组",
     "无政策基线",

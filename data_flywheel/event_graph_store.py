@@ -11,11 +11,16 @@ import os
 
 import networkx as nx
 
+from core.runtime_paths import resolve_runtime_path
+
 
 class EventGraphStore:
     def __init__(self, graph_path: str = "data/event_graph.graphml"):
-        self.graph_path = graph_path
-        graph_dir = os.path.dirname(graph_path)
+        if str(graph_path) == "data/event_graph.graphml":
+            self.graph_path = str(resolve_runtime_path(graph_path, env_var="CIVITAS_EVENT_GRAPH_PATH"))
+        else:
+            self.graph_path = graph_path
+        graph_dir = os.path.dirname(self.graph_path)
         if graph_dir:
             os.makedirs(graph_dir, exist_ok=True)
 
@@ -123,4 +128,3 @@ class EventGraphStore:
             return float(value)
         except (TypeError, ValueError):
             return default
-

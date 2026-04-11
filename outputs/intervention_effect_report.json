@@ -3,7 +3,7 @@
   "intervention_tick": null,
   "before": {
     "volatility": 0.0,
-    "mean_abs_return": 19.799668325041456,
+    "mean_abs_return": 0.0,
     "abuse_event_rate": 0.0
   },
   "after": {
@@ -13,7 +13,7 @@
   },
   "delta": {
     "volatility": 0.0,
-    "mean_abs_return": -19.799668325041456,
+    "mean_abs_return": 0.0,
     "abuse_event_rate": 0.0
   }
 }

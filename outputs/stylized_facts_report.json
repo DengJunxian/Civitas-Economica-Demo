@@ -1,11 +1,12 @@
 {
   "csad": {
-    "mean": 19.799668325041456,
-    "std": 0.0,
+    "mean": 0.03945488846612541,
+    "std": 0.6328879845482787,
     "herding_regression": {
-      "gamma1": 0.0,
-      "gamma2": 0.0,
-      "herding_detected": false
+      "gamma1": 1.0000000000000009,
+      "gamma2": 2.842170943040401e-14,
+      "herding_detected": false,
+      "strength": 0.0
     }
   },
   "pgr_plr": {
@@ -18,44 +19,44 @@
     "paper_losses": 0.0
   },
   "volatility_clustering": {
-    "abs_return_lag1_autocorr": 0.0,
-    "squared_return_lag1_autocorr": 0.0,
-    "volatility_level": 0.0
+    "abs_return_lag1_autocorr": 0.8939124502681056,
+    "squared_return_lag1_autocorr": 0.9798359208951832,
+    "volatility_level": 0.6330547303805565
   },
   "drawdown_distribution": {
-    "mean_drawdown": 0.0,
-    "max_drawdown": 0.0,
-    "median_drawdown": 0.0,
-    "q90_drawdown": 0.0,
-    "count": 0.0
+    "mean_drawdown": -0.03495075323907153,
+    "max_drawdown": -0.09410003994933791,
+    "median_drawdown": -0.034129810285907336,
+    "q90_drawdown": -0.007020097193494745,
+    "count": 313.0
   },
   "all_time_high_effect": {
-    "ath_hit_rate": 1.0,
-    "mean_return_on_ath": 19.799668325041456,
-    "mean_return_off_ath": 0.0,
-    "ath_outperformance": 19.799668325041456
+    "ath_hit_rate": 0.15633423180592992,
+    "mean_return_on_ath": 0.23621705677614546,
+    "mean_return_off_ath": -0.0002920879640694752,
+    "ath_outperformance": 0.23650914474021495
   },
   "loss_aversion_intensity": {
-    "mean": 2.3144,
-    "p90": 2.3144,
-    "n_obs": 1
+    "mean": 2.25,
+    "p90": 2.25,
+    "n_obs": 371
   },
   "volatility clustering": {
-    "abs_return_lag1_autocorr": 0.0,
-    "squared_return_lag1_autocorr": 0.0,
-    "volatility_level": 0.0
+    "abs_return_lag1_autocorr": 0.8939124502681056,
+    "squared_return_lag1_autocorr": 0.9798359208951832,
+    "volatility_level": 0.6330547303805565
   },
   "drawdown distribution": {
-    "mean_drawdown": 0.0,
-    "max_drawdown": 0.0,
-    "median_drawdown": 0.0,
-    "q90_drawdown": 0.0,
-    "count": 0.0
+    "mean_drawdown": -0.03495075323907153,
+    "max_drawdown": -0.09410003994933791,
+    "median_drawdown": -0.034129810285907336,
+    "q90_drawdown": -0.007020097193494745,
+    "count": 313.0
   },
   "all_time_high effect": {
-    "ath_hit_rate": 1.0,
-    "mean_return_on_ath": 19.799668325041456,
-    "mean_return_off_ath": 0.0,
-    "ath_outperformance": 19.799668325041456
+    "ath_hit_rate": 0.15633423180592992,
+    "mean_return_on_ath": 0.23621705677614546,
+    "mean_return_off_ath": -0.0002920879640694752,
+    "ath_outperformance": 0.23650914474021495
   }
 }

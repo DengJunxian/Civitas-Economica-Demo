@@ -6,6 +6,7 @@ from typing import List, Optional
 from datetime import datetime
 
 from data_flywheel.schemas import SeedEvent
+from core.runtime_paths import resolve_runtime_path
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,10 @@ class SeedStore:
     """
 
     def __init__(self, file_path: str = "data/seed_events.jsonl"):
-        self.file_path = file_path
+        if str(file_path) == "data/seed_events.jsonl":
+            self.file_path = str(resolve_runtime_path(file_path, env_var="CIVITAS_SEED_STORE_PATH"))
+        else:
+            self.file_path = file_path
         self._ensure_dir()
 
     def _ensure_dir(self):

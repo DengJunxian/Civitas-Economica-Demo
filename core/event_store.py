@@ -20,6 +20,8 @@ import json
 
 import pandas as pd
 
+from core.runtime_paths import resolve_runtime_path
+
 
 class EventType(str, Enum):
     MARKET_BAR = "market_bar"
@@ -152,7 +154,7 @@ class EventStore:
     """Parquet-backed event store with snapshot/scenario manifests."""
 
     def __init__(self, root_dir: str | Path = "data/event_store") -> None:
-        self.root_dir = Path(root_dir)
+        self.root_dir = resolve_runtime_path(root_dir, env_var="CIVITAS_EVENT_STORE_ROOT")
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
     def _dataset_root(self, dataset_version: str) -> Path:
@@ -451,4 +453,3 @@ __all__ = [
     "ScenarioManifest",
     "SnapshotManifest",
 ]
-

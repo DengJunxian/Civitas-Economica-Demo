@@ -38,6 +38,7 @@ from core.exchange.evolution import (
     hhi_from_shares,
     phase_change_score,
 )
+from core.runtime_paths import resolve_runtime_path
 from core.macro.bank import BankAgent
 from core.macro.firm import FirmAgent, FirmSignal
 from core.macro.government import GovernmentAgent, PolicyShock
@@ -251,7 +252,10 @@ class MarketEnvironment:
         self.policy_transmission_history: List[Dict[str, Any]] = []
         self._last_social_mean: float = 0.0
         self.stylized_facts_tracker = StylizedFactsTracker(prices=[self.current_price])
-        self.stylized_facts_report_path = Path("outputs") / "stylized_facts_report.json"
+        self.stylized_facts_report_path = resolve_runtime_path(
+            Path("outputs") / "stylized_facts_report.json",
+            env_var="CIVITAS_STYLIZED_FACTS_REPORT_PATH",
+        )
         self._agent_reference_points: Dict[str, Any] = {}
         self._agent_risk_appetite: Dict[str, float] = {}
         self._agent_behavioral_state: Dict[str, Dict[str, float]] = {}
@@ -263,9 +267,18 @@ class MarketEnvironment:
             seed=42,
         )
         self.ecology_tracker = EcologyMetricsTracker()
-        self.ecology_metrics_path = Path("outputs") / "ecology_metrics.csv"
-        self.market_abuse_report_path = Path("outputs") / "market_abuse_report.json"
-        self.intervention_effect_report_path = Path("outputs") / "intervention_effect_report.json"
+        self.ecology_metrics_path = resolve_runtime_path(
+            Path("outputs") / "ecology_metrics.csv",
+            env_var="CIVITAS_ECOLOGY_METRICS_PATH",
+        )
+        self.market_abuse_report_path = resolve_runtime_path(
+            Path("outputs") / "market_abuse_report.json",
+            env_var="CIVITAS_MARKET_ABUSE_REPORT_PATH",
+        )
+        self.intervention_effect_report_path = resolve_runtime_path(
+            Path("outputs") / "intervention_effect_report.json",
+            env_var="CIVITAS_INTERVENTION_EFFECT_REPORT_PATH",
+        )
         self.abuse_sandbox = MarketAbuseSandbox()
         self._abuse_event_count_series: List[int] = []
         self._intervention_tick: Optional[int] = None

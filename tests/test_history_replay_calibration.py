@@ -21,21 +21,23 @@ def test_moderate_calibration_uses_mixed_profile_and_large_bias_points() -> None
 
     profile = dict(result.metadata.get("calibration_mix_profile", {}) or {})
     assert profile["total_adjusted_points"] == 30
-    assert 0.70 <= float(profile["achieved_direction_match"]) <= 0.80
-    assert 0.70 <= float(profile["target_direction_match"]) <= 0.80
+    assert 0.60 <= float(profile["achieved_direction_match"]) <= 0.72
+    assert 0.60 <= float(profile["target_direction_match"]) <= 0.72
     assert int(profile["anchor_points"]) >= 1
+    assert int(profile["local_heterogeneous_points"]) >= 3
 
     calibrated = np.asarray(result.simulated_prices, dtype=float)
     real = np.asarray(real_prices, dtype=float)
     real_ret = np.diff(real) / np.maximum(real[:-1], 1e-9)
     sim_ret = np.diff(calibrated) / np.maximum(calibrated[:-1], 1e-9)
     sign_match = float(np.mean(np.sign(real_ret) == np.sign(sim_ret)))
-    assert 0.70 <= sign_match <= 0.80
+    assert 0.60 <= sign_match <= 0.72
+    assert abs(float(profile["achieved_direction_match"]) - sign_match) <= 0.05
 
     rel_dev = np.abs(calibrated[1:] - real[1:]) / np.maximum(real[1:], 1e-9)
-    assert float(np.max(rel_dev)) >= 0.004
-    assert int(np.sum(rel_dev >= 0.003)) >= 6
-    assert float(np.median(rel_dev)) <= 0.06
+    assert float(np.max(rel_dev)) >= 0.02
+    assert int(np.sum(rel_dev >= 0.006)) >= 10
+    assert float(np.median(rel_dev)) <= 0.10
 
     bars = result.simulated_bars
     assert bars
@@ -47,3 +49,8 @@ def test_moderate_calibration_uses_mixed_profile_and_large_bias_points() -> None
         dtype=float,
     )
     assert float(np.median(intraday_span)) >= 0.002
+
+    shape_meta = dict(result.metadata.get("presentation_shape_optimization", {}) or {})
+    assert shape_meta.get("enabled") is True
+    assert shape_meta.get("mode") == "interval_morphology_on_agent_simulation_base"
+    assert int(shape_meta.get("interval_count", 0)) >= 1

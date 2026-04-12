@@ -502,14 +502,14 @@ def _apply_interval_shape_optimization(
     *,
     seed: int,
 ) -> tuple[np.ndarray, List[Dict[str, Any]]]:
-    """Keep coarse trend while reshaping local morphology on small intervals."""
+    """Keep interval-level trend anchors while breaking local wave resemblance."""
     n = int(min(base_prices.size, real_prices.size))
     if n < 14:
         return base_prices.copy(), []
 
     rng = np.random.default_rng(seed)
     optimized = base_prices.copy()
-    interval_count = int(np.clip(n // 65 + 2, 3, 5))
+    interval_count = int(np.clip(n // 45 + 3, 4, 7))
     candidate_starts = np.arange(2, max(3, n - 6), dtype=int)
     rng.shuffle(candidate_starts)
 
@@ -519,7 +519,7 @@ def _apply_interval_shape_optimization(
     for start in candidate_starts.tolist():
         if len(intervals) >= interval_count:
             break
-        span = int(rng.integers(4, 9))
+        span = int(rng.integers(5, 12))
         end = min(n - 2, start + span)
         if end - start < 3:
             continue
@@ -539,30 +539,41 @@ def _apply_interval_shape_optimization(
                 coarse_dir = 1.0 if rng.random() < 0.5 else -1.0
 
         x = np.linspace(0.0, 1.0, seg_len + 1)
-        baseline = p0 + (p1 - p0) * x
         local_ref = float(
             max(
                 np.mean(np.abs(np.diff(segment_real) / np.maximum(segment_real[:-1], 1e-9))),
                 0.0025,
             )
         )
-        amp = max(abs(p1 - p0), abs(p0) * local_ref * float(0.8 + rng.random() * 0.6))
-        wiggle = np.sin((1.4 + rng.random() * 1.3) * np.pi * x + rng.uniform(-0.35, 0.35))
-        jitter = np.cos((2.7 + rng.random() * 1.6) * np.pi * x + rng.uniform(-0.35, 0.35))
-        profile = 0.56 * wiggle + 0.44 * jitter
-        profile[0] = 0.0
-        profile[-1] = 0.0
-        teeth = np.where((np.arange(seg_len + 1) + int(rng.integers(0, 2))) % 2 == 0, 1.0, -1.0)
-        teeth = teeth * (0.6 + 0.4 * np.sin(np.pi * x) ** 2)
-        teeth[0] = 0.0
-        teeth[-1] = 0.0
-        candidate = baseline + amp * (0.17 * profile + 0.08 * teeth)
+        drift = (p1 - p0) / max(seg_len, 1)
+        jagged_scale = max(abs(p0) * local_ref * float(0.9 + rng.random() * 1.7), abs(drift) * float(1.8 + rng.random() * 1.5))
 
-        # Keep the broad trend intact and avoid excessive detachment from real path.
+        increments = np.full(seg_len, drift, dtype=float)
+        teeth_sign = np.where((np.arange(seg_len) + int(rng.integers(0, 2))) % 2 == 0, 1.0, -1.0)
+        increments += teeth_sign * jagged_scale * (0.20 + 0.28 * rng.random(seg_len))
+        increments += rng.normal(0.0, jagged_scale * 0.22, size=seg_len)
+
+        hetero_count = int(np.clip(rng.integers(1, max(2, seg_len // 2 + 1)), 1, max(1, seg_len - 1)))
+        hetero_steps = rng.choice(np.arange(seg_len, dtype=int), size=hetero_count, replace=False)
+        for step in hetero_steps.tolist():
+            flip = -coarse_dir if abs(coarse_dir) > 1e-12 else (-1.0 if rng.random() < 0.5 else 1.0)
+            shock = jagged_scale * float(0.55 + rng.random() * 1.15)
+            increments[step] += flip * shock
+
+        increments -= np.mean(increments) - drift
+        candidate = np.empty(seg_len + 1, dtype=float)
+        candidate[0] = p0
+        candidate[1:] = p0 + np.cumsum(increments)
+        endpoint_gap = candidate[-1] - p1
+        candidate -= endpoint_gap * x
+        candidate[0] = p0
+        candidate[-1] = p1
+
+        # Keep the broad trend intact while allowing more local dissimilarity.
         candidate[0] = segment_base[0]
         candidate[-1] = segment_base[-1]
         for j, idx in enumerate(range(start, end + 1)):
-            cap = 0.20
+            cap = 0.30 if j not in (0, seg_len) else 0.22
             upper = real_prices[idx] * (1.0 + cap)
             lower = real_prices[idx] * (1.0 - cap)
             candidate[j] = float(np.clip(candidate[j], lower, upper))
@@ -577,6 +588,8 @@ def _apply_interval_shape_optimization(
                 "end_index": int(end),
                 "length": int(seg_len + 1),
                 "coarse_trend": "up" if coarse_dir > 0 else "down",
+                "shape_mode": "trend_anchor_jagged",
+                "heterogeneous_steps": int(hetero_count),
             }
         )
 
@@ -603,9 +616,9 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
     real_ret = np.diff(real_p) / np.maximum(real_p[:-1], 1e-12)
     seed_base = int(round(float(real_p[0]) * 100.0)) + length * 97 + 7
 
-    # 保持中等偏高拟真度，适合比赛展示，也与测试断言保持一致。
-    min_match = 0.70
-    max_match = 0.80
+    # 更强调大趋势相近、局部形态异构，避免展示上过度贴近真实浪形。
+    min_match = 0.60
+    max_match = 0.72
 
     best_prices = sim_p.copy()
     best_target = (min_match + max_match) / 2.0
@@ -619,27 +632,27 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
     max_attempts = 10
     for attempt in range(max_attempts):
         rng = np.random.default_rng(seed_base + attempt * 131)
-        target_match = float(np.clip(0.75 + rng.uniform(-0.05, 0.05), min_match, max_match))
+        target_match = float(np.clip(0.66 + rng.uniform(-0.06, 0.06), min_match, max_match))
         match_count = int(round(target_match * point_count))
         match_count = int(np.clip(match_count, int(np.floor(min_match * point_count)), int(np.ceil(max_match * point_count))))
         all_points = np.arange(point_count, dtype=int)
         match_points = set(int(i) for i in rng.choice(all_points, size=max(1, match_count), replace=False).tolist())
 
         heterogeneous_points: set[int] = set()
-        segment_count = int(np.clip(point_count // 60, 1, 2))
+        segment_count = int(np.clip(point_count // 35, 2, 4))
         for _ in range(segment_count):
-            seg_len = int(rng.integers(1, 4))
+            seg_len = int(rng.integers(2, 6))
             start_upper = max(2, point_count - seg_len)
             seg_start = int(rng.integers(1, start_upper))
             heterogeneous_points.update(range(seg_start, min(point_count, seg_start + seg_len)))
-        max_heterogeneous_points = int(np.clip(round(point_count * 0.07), 1, 4))
+        max_heterogeneous_points = int(np.clip(round(point_count * 0.16), 3, 8))
         if len(heterogeneous_points) > max_heterogeneous_points:
             heterogeneous_points = set(
                 int(i)
                 for i in rng.choice(np.array(sorted(heterogeneous_points), dtype=int), size=max_heterogeneous_points, replace=False)
             )
 
-        base_amp = float(max(np.percentile(np.abs(real_ret), 55), 0.0018))
+        base_amp = float(max(np.percentile(np.abs(real_ret), 58), 0.0020))
         candidate: List[float] = [float(real_p[0])]
         large_bias_points = 0
 
@@ -659,36 +672,36 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
 
             local_amp = max(abs(real_step_ret), base_amp)
             if is_heterogeneous:
-                local_amp = float(local_amp * rng.uniform(1.8, 3.2))
-                oscillation = float(1.05 + 0.95 * abs(np.sin(idx * 1.61 + rng.uniform(-0.5, 0.5))))
-                noise_amp = float(local_amp * (0.45 + 0.95 * rng.random()))
-                shock_prob = 0.45
+                local_amp = float(local_amp * rng.uniform(2.2, 4.0))
+                oscillation = float(1.10 + 1.05 * abs(np.sin(idx * 1.91 + rng.uniform(-0.8, 0.8))))
+                noise_amp = float(local_amp * (0.65 + 1.10 * rng.random()))
+                shock_prob = 0.55
             else:
-                oscillation = float(0.58 + 0.40 * abs(np.sin(idx * 1.29 + rng.uniform(-0.25, 0.25))))
-                noise_amp = float(local_amp * (0.12 + 0.35 * rng.random()))
-                shock_prob = 0.10
+                oscillation = float(0.52 + 0.52 * abs(np.sin(idx * 1.47 + rng.uniform(-0.45, 0.45))))
+                noise_amp = float(local_amp * (0.18 + 0.48 * rng.random()))
+                shock_prob = 0.16
 
             shock_amp = 0.0
             if rng.random() < shock_prob:
                 if is_heterogeneous:
-                    shock_amp = float(local_amp * rng.uniform(0.75, 1.85))
+                    shock_amp = float(local_amp * rng.uniform(0.95, 2.10))
                 else:
-                    shock_amp = float(local_amp * rng.uniform(0.20, 0.65))
+                    shock_amp = float(local_amp * rng.uniform(0.28, 0.78))
                 large_bias_points += 1
 
-            ret_upper = 0.11 if is_heterogeneous else 0.038
+            ret_upper = 0.13 if is_heterogeneous else 0.046
             ret_mag = float(np.clip(local_amp * oscillation + noise_amp + shock_amp, 0.0009, ret_upper))
             step_ret = float(desired_sign * ret_mag)
-            if idx >= 2 and rng.random() < (0.16 if is_heterogeneous else 0.10):
-                step_ret = float(-np.sign(step_ret) * min(abs(step_ret) * rng.uniform(0.30, 0.65), 0.02))
+            if idx >= 2 and rng.random() < (0.24 if is_heterogeneous else 0.16):
+                step_ret = float(-np.sign(step_ret) * min(abs(step_ret) * rng.uniform(0.35, 0.85), 0.028))
 
             next_price = prev_price * (1.0 + step_ret)
             if is_heterogeneous:
-                next_price = float(next_price * 0.97 + real_p[idx] * 0.03)
-                dev_cap = 0.28 if idx < max(4, point_count // 3) else 0.34
+                next_price = float(next_price * 0.99 + real_p[idx] * 0.01)
+                dev_cap = 0.38 if idx < max(4, point_count // 3) else 0.46
             else:
-                next_price = float(next_price * 0.93 + real_p[idx] * 0.07)
-                dev_cap = 0.16 if idx < max(4, point_count // 3) else 0.20
+                next_price = float(next_price * 0.96 + real_p[idx] * 0.04)
+                dev_cap = 0.24 if idx < max(4, point_count // 3) else 0.30
 
             upper = real_p[idx] * (1.0 + dev_cap)
             lower = real_p[idx] * (1.0 - dev_cap)
@@ -726,6 +739,8 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
     )
     calibrated = optimized_array.tolist()
     result.simulated_prices = calibrated
+    final_achieved = _direction_match_ratio(real_p, optimized_array)
+    final_match_points = int(round(np.clip(final_achieved, 0.0, 1.0) * point_count))
 
     if result.simulated_bars:
         bar_rng = np.random.default_rng(seed_base + 4096)
@@ -762,10 +777,10 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
         "direction_match_floor": min_match,
         "direction_match_ceiling": max_match,
         "target_direction_match": round(float(best_target), 4),
-        "achieved_direction_match": round(float(best_achieved), 4),
+        "achieved_direction_match": round(float(final_achieved), 4),
         "attempts_used": int(best_attempt_used),
         "oscillation_mode": "bounded_sign_mix",
-        "anchor_points": int(best_match_points),
+        "anchor_points": int(final_match_points),
         "large_bias_points": int(best_large_bias_points),
         "local_heterogeneous_points": int(best_heterogeneous_points),
         "local_heterogeneous_ratio": round(float(best_heterogeneous_points / max(point_count, 1)), 4),

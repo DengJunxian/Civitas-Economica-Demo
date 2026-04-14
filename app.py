@@ -39,43 +39,46 @@ from ui import dashboard as dashboard_ui
 
 
 st.set_page_config(
-    page_title="数治观澜 | 基于大模型多智能体的金融政策风洞推演沙箱",
+    page_title="数治观澜 | 金融政策智能推演与验证平台",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 
-OVERVIEW_ENTRY = "总览首页"
+OVERVIEW_ENTRY = "系统总览"
 ENTRY_POINTS = [
     OVERVIEW_ENTRY,
-    "政策试验台",
-    "历史回测",
-    "高级分析",
+    "政策实验",
+    "历史验证",
+    "研判分析",
 ]
 ENTRY_ALIASES = {
     "系统说明": OVERVIEW_ENTRY,
-    "历史政策回放": "历史回测",
-    "历史Agent回放": "历史回测",
-    "历史因子回测": "历史回测",
-    "历史智能体回放": "历史回测",
-    "新闻驱动历史回测": "历史回测",
-    "历史回测": "历史回测",
-    "政策A/B推演": "政策试验台",
-    "真实性报告": "高级分析",
-    "监管优化": "高级分析",
+    "总览首页": OVERVIEW_ENTRY,
+    "政策试验台": "政策实验",
+    "历史政策回放": "历史验证",
+    "历史Agent回放": "历史验证",
+    "历史因子回测": "历史验证",
+    "历史智能体回放": "历史验证",
+    "新闻驱动历史回测": "历史验证",
+    "历史回测": "历史验证",
+    "政策A/B推演": "政策实验",
+    "真实性报告": "研判分析",
+    "高级分析": "研判分析",
+    "监管优化": "研判分析",
 }
 ENTRY_DESCRIPTIONS = {
-    OVERVIEW_ENTRY: "用一屏讲清项目价值、AI 闭环、演示路径与代表性结果。",
-    "政策试验台": "输入政策文本，查看市场路径、风险指标与情绪传导。",
-    "历史回测": "基于真实历史窗口自动汇总政策与新闻，评估仿真与真实走势的一致性。",
-    "高级分析": "聚合 AI 证据、行为诊断、监管优化与研究验证能力。",
+    OVERVIEW_ENTRY: "用一屏建立平台定位、能力链路、工程特性与代表性结果。",
+    "政策实验": "输入政策文本，查看结构化编译、多智能体响应与市场路径。",
+    "历史验证": "基于真实历史窗口自动汇总政策与新闻，验证仿真与真实走势的一致性。",
+    "研判分析": "聚合 AI 证据、行为诊断、监管优化、研究验证与结果归档能力。",
 }
 ENTRY_PURPOSE = {
-    OVERVIEW_ENTRY: "快速建立全局认知并进入演示主线",
-    "政策试验台": "进行政策仿真与影响评估",
-    "历史回测": "验证历史区间下的拟真效果",
-    "高级分析": "追问证据、机制与风险",
+    OVERVIEW_ENTRY: "快速建立平台认知并进入核心工作流",
+    "政策实验": "进行政策仿真、影响评估与结果归档",
+    "历史验证": "验证历史区间下的拟真效果与误差边界",
+    "研判分析": "查看证据链、机制诊断、策略建议与研究验证",
 }
 THEME_PATH = Path("theme") / "competition_dark.css"
 MATERIALS_ROOT = Path("outputs") / "competition_materials"
@@ -204,7 +207,7 @@ def _render_value_bridge_tab() -> None:
     _ensure_demo_loaded()
     scenario = st.session_state.get("demo_scenario")
     if scenario is None:
-        st.warning("当前未加载答辩场景，无法生成反事实对照。")
+        st.warning("当前未加载分析场景，无法生成反事实对照。")
         return
     metrics = scenario.metrics if hasattr(scenario, "metrics") else pd.DataFrame()
     if metrics.empty:
@@ -295,10 +298,10 @@ def _render_top_entry_selector() -> None:
             <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle at 10% 20%, rgba(24, 144, 255, 0.15), transparent 60%); pointer-events: none;"></div>
             <h1 style="font-size: 2.8rem; font-weight: 800; color: #ffffff; margin-bottom: 0.2rem; letter-spacing: 2px; text-shadow: 0 0 24px rgba(24,144,255,0.6); display: flex; align-items: center; gap: 12px;">
                 <span style="background: linear-gradient(90deg, #4da6ff, #1890ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">数治观澜</span> 
-            <span style="font-size: 1.5rem; font-weight: 500; color: #8aa0c2; text-shadow: none;">基于大模型多智能体的金融政策风洞推演沙箱</span>
+            <span style="font-size: 1.5rem; font-weight: 500; color: #8aa0c2; text-shadow: none;">面向政府场景的金融政策智能推演与验证平台</span>
             </h1>
             <div style="font-size: 16px; color: #4da6ff; letter-spacing: 2px; font-weight: 600; text-transform: uppercase;">
-                Civitas Sandbox System
+                Policy Intelligence Engineering Platform
             </div>
         </div>
         """,
@@ -319,7 +322,7 @@ def _render_top_entry_selector() -> None:
     quick_a, quick_b, quick_c, quick_d = st.columns([1.05, 1.05, 1.05, 1.25])
     with quick_a:
         if st.button(
-            "总览首页",
+            OVERVIEW_ENTRY,
             key="top_entry_overview",
             use_container_width=True,
             type="primary" if st.session_state.entry == OVERVIEW_ENTRY else "secondary",
@@ -327,29 +330,29 @@ def _render_top_entry_selector() -> None:
             st.session_state.entry = OVERVIEW_ENTRY
     with quick_b:
         if st.button(
-            "政策试验台",
+            "政策实验",
             key="top_entry_policy_lab",
             use_container_width=True,
-            type="primary" if st.session_state.entry == "政策试验台" else "secondary",
+            type="primary" if st.session_state.entry == "政策实验" else "secondary",
         ):
-            st.session_state.entry = "政策试验台"
+            st.session_state.entry = "政策实验"
     with quick_c:
         if st.button(
-            "历史回测",
+            "历史验证",
             key="top_entry_history_replay",
             use_container_width=True,
-            type="primary" if st.session_state.entry == "历史回测" else "secondary",
+            type="primary" if st.session_state.entry == "历史验证" else "secondary",
         ):
-            st.session_state.entry = "历史回测"
+            st.session_state.entry = "历史验证"
     with quick_d:
         if st.button(
-            "高级分析",
+            "研判分析",
             key="top_entry_advanced",
             use_container_width=True,
-            type="primary" if st.session_state.entry == "高级分析" else "secondary",
+            type="primary" if st.session_state.entry == "研判分析" else "secondary",
         ):
-            st.session_state.entry = "高级分析"
-        st.caption("推荐路径：政策试验台 -> 历史回测 -> 高级分析。")
+            st.session_state.entry = "研判分析"
+        st.caption("建议路径：政策实验 -> 历史验证 -> 研判分析。")
 
 
 def _ensure_demo_loaded() -> None:
@@ -403,10 +406,10 @@ def _generate_competition_materials() -> Dict[str, Path]:
     runtime_summary = _runtime_router_summary()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    competition_summary = f"""# competition_summary
+    competition_summary = f"""# experiment_summary
 
 生成时间：{now}
-演示场景：{display_scenario_name(scenario.name)}
+分析场景：{display_scenario_name(scenario.name)}
 
 ## 关键指标
 - 区间收益率：{stat['return_pct']:.2%}
@@ -422,33 +425,35 @@ def _generate_competition_materials() -> Dict[str, Path]:
 
 ## 结论摘要
 1. 系统能够围绕政策冲击、市场反应和风险扩散形成闭环推演。
-2. 多智能体行为与市场微观结构结果可以同步展示，便于答辩解释。
-3. 监管动作、A/B 对照和导出材料可直接服务比赛展示与复盘。
+2. 多智能体行为与市场微观结构结果可以同步展示，便于机制解释与方案汇报。
+3. 监管动作、A/B 对照和归档材料可直接服务复盘、留痕与策略研判。
 """
 
     design_outline = """# design_outline
 
 ## 功能模块
-- 政策试验台
-- 历史回测
-- 真实性报告
-- 政策 A/B 推演
+- 政策实验
+- 历史验证
+- 研究验证
+- 反事实 A/B 推演
 - 监管优化
 
 ## 技术实现
-- 使用 Streamlit 构建比赛演示前端与交互流程。
+- 使用 Streamlit 构建工程化分析前端与交互流程。
 - 通过多智能体仿真引擎驱动市场演化与行为决策。
-- 结合行为金融指标、回测分析和材料导出形成完整闭环。
+- 结合行为金融指标、历史验证分析和结果归档形成完整闭环。
 """
 
     demo_script_10min = f"""# demo_script_10min
 
-1. 0:00-1:00 介绍项目定位并载入场景 `{display_scenario_name(scenario.name)}`
-2. 1:00-3:00 展示政策输入与多智能体响应过程
-3. 3:00-5:30 展示价格、成交量、风险热度和羊群度变化
-4. 5:30-7:30 展示真实性报告与行为金融诊断结果
-5. 7:30-9:00 展示 A/B 对照与监管优化能力
-6. 9:00-10:00 总结系统价值并导出比赛材料
+1. 0:00-0:40 在系统总览页说明平台定位与分析对象
+2. 0:40-1:30 展示系统工作流与核心能力链
+3. 1:30-4:00 进入政策实验，演示政策输入、结构化编译与多智能体推演
+4. 4:00-6:00 进入历史验证，展示仿真走势与真实市场的对照结果
+5. 6:00-7:20 进入行为与风险诊断，说明群体行为与风险扩散机制
+6. 7:20-8:40 展示监管优化、A/B 差分与 Pareto 权衡
+7. 8:40-9:30 展示实验报告、分析摘要与结果归档
+8. 9:30-10:00 回到总览页，总结平台从政策理解到策略建议的闭环价值
 """
 
     figures_index = {
@@ -459,15 +464,15 @@ def _generate_competition_materials() -> Dict[str, Path]:
     }
 
     file_map = {
-        "competition_summary.md": MATERIALS_ROOT / "competition_summary.md",
-        "design_outline.md": MATERIALS_ROOT / "design_outline.md",
-        "demo_script_10min.md": MATERIALS_ROOT / "demo_script_10min.md",
+        "experiment_summary.md": MATERIALS_ROOT / "experiment_summary.md",
+        "system_design_outline.md": MATERIALS_ROOT / "system_design_outline.md",
+        "video_script_10min.md": MATERIALS_ROOT / "video_script_10min.md",
         "figures/index.json": figures_dir / "index.json",
         "runtime_mode_evidence.json": MATERIALS_ROOT / "runtime_mode_evidence.json",
     }
-    file_map["competition_summary.md"].write_text(competition_summary, encoding="utf-8")
-    file_map["design_outline.md"].write_text(design_outline, encoding="utf-8")
-    file_map["demo_script_10min.md"].write_text(demo_script_10min, encoding="utf-8")
+    file_map["experiment_summary.md"].write_text(competition_summary, encoding="utf-8")
+    file_map["system_design_outline.md"].write_text(design_outline, encoding="utf-8")
+    file_map["video_script_10min.md"].write_text(demo_script_10min, encoding="utf-8")
     file_map["figures/index.json"].write_text(json.dumps(figures_index, ensure_ascii=False, indent=2), encoding="utf-8")
     file_map["runtime_mode_evidence.json"].write_text(
         json.dumps(runtime_summary, ensure_ascii=False, indent=2),
@@ -484,7 +489,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
                 "scenario": scenario.name,
                 "generated_at": now,
             },
-            app_flow=["政策试验台", "历史回测", "真实性报告", "政策A/B推演", "监管优化"],
+            app_flow=["政策实验", "历史验证", "研究验证", "反事实 A/B 推演", "监管优化"],
         )
         realism_payload = {
             "title": "真实性评估摘要",
@@ -542,10 +547,10 @@ def _generate_competition_materials() -> Dict[str, Path]:
         }
         bundle = export_defense_bundle(
             root_dir=MATERIALS_ROOT,
-            bundle_name=f"{scenario.name}_competition_bundle",
+            bundle_name=f"{scenario.name}_analysis_bundle",
             design_chapter_markdown=design_outline,
             realism_payload=realism_payload,
-            policy_ab_markdown="# 反事实与 A/B 说明\n\n- 比赛模式会导出精简版对照材料，用于答辩与作品说明。",
+            policy_ab_markdown="# 反事实与 A/B 说明\n\n- 系统会导出精简版对照材料，用于方案汇报、复盘说明与结果归档。",
             architecture_graph={"nodes": [], "edges": []},
             causal_chain_graph={"nodes": [], "edges": []},
             defense_outline_markdown=demo_script_10min,
@@ -573,13 +578,13 @@ def _render_sidebar_global() -> None:
     with st.sidebar:
         st.markdown(
             "### 导航菜单",
-            help="在这里切换沙箱的不同功能模块。从上到下按展示逻辑排列。"
+            help="在这里切换平台的核心功能模块。从上到下按工作流排列。"
         )
         
         menu_groups = {
-            "比赛主线": [OVERVIEW_ENTRY, "政策试验台", "历史回测", "高级分析"],
+            "核心工作流": [OVERVIEW_ENTRY, "政策实验", "历史验证", "研判分析"],
         }
-        st.caption("默认建议从总览首页进入，再按“政策试验台 -> 历史回测 -> 高级分析”完成展示。")
+        st.caption("建议从系统总览进入，再按“政策实验 -> 历史验证 -> 研判分析”完成全链路浏览。")
 
         for group, entries in menu_groups.items():
             st.markdown(f"<div style='margin-top: 16px; margin-bottom: 8px; font-size: 13px; color: #8aa0c2; letter-spacing: 1px;'>{group}</div>", unsafe_allow_html=True)
@@ -632,39 +637,39 @@ def _render_sidebar_global() -> None:
             st.markdown(f"<div style='font-size: 12px; margin-top: 10px; color: #8aa0c2;'>{status} | 在线成功={online_success} | 降级={fallback_total} | 成功率={success_rate:.0%}</div>", unsafe_allow_html=True)
 
         st.markdown("---")
-        st.caption("比赛演示优先保留主线入口；监管优化、A/B 对照与研究验证已收敛到模块内部。")
+        st.caption("主线入口聚焦政策分析、历史验证与研判分析；监管优化、A/B 对照与研究验证已收敛到模块内部。")
 
-        if st.session_state.entry in {OVERVIEW_ENTRY, "高级分析"}:
+        if st.session_state.entry in {OVERVIEW_ENTRY, "研判分析"}:
             scenarios = list_competition_scenarios()
             if scenarios:
                 if st.session_state.demo_scenario_name not in scenarios:
                     st.session_state.demo_scenario_name = scenarios[0]
                 st.session_state.demo_scenario_name = st.selectbox(
-                    "高级分析默认场景",
+                    "研判分析默认场景",
                     options=scenarios,
                     index=scenarios.index(st.session_state.demo_scenario_name),
                     format_func=display_scenario_name,
                 )
             else:
-                st.warning("未发现可用答辩场景，请检查 demo_scenarios 内容完整性。")
+                st.warning("未发现可用分析场景，请检查 demo_scenarios 内容完整性。")
 
-            if st.button("导出答辩材料", width="stretch"):
+            if st.button("导出实验归档", width="stretch"):
                 _ensure_demo_loaded()
                 if st.session_state.get("demo_scenario") is None:
-                    st.error("当前没有可用场景，无法生成比赛材料。")
+                    st.error("当前没有可用场景，无法生成归档材料。")
                 else:
                     try:
                         file_map = _generate_competition_materials()
                         st.session_state.materials_last_export = {k: str(v) for k, v in file_map.items()}
-                        st.success("比赛材料已生成。")
+                        st.success("实验归档已生成。")
                     except Exception as exc:
-                        st.error(f"比赛材料生成失败：{exc}")
+                        st.error(f"实验归档生成失败：{exc}")
 
             if st.session_state.materials_last_export:
-                st.caption(f"最近已导出 {len(st.session_state.materials_last_export)} 份比赛材料。")
+                st.caption(f"最近已导出 {len(st.session_state.materials_last_export)} 份实验归档。")
                 with st.expander("查看导出文件清单", expanded=False):
                     for name, path in st.session_state.materials_last_export.items():
-                        st.markdown(f"- `{name}`：`{path}`")
+                        st.markdown(f"- `{name}`")
 
 
 def _render_ai_decision_tab() -> None:
@@ -744,7 +749,7 @@ def _build_overview_chain_payload(metrics: pd.DataFrame) -> Dict[str, Any]:
     latest = metrics.tail(1).iloc[0]
     panic = float(latest.get("panic_level", 0.0))
     return {
-        "policy": "默认答辩场景传导链",
+        "policy": "默认分析场景传导链",
         "macro_variables": {
             "inflation": 0.02 + panic * 0.01,
             "unemployment": 0.05 + panic * 0.03,
@@ -770,11 +775,11 @@ def _render_overview_home() -> None:
     st.markdown(
         """
         <div class="hero-panel" style="margin-top: 10px;">
-            <div class="hero-kicker">比赛总览</div>
-            <h1 style="font-size: 30px; margin-bottom: 14px;">面向政策冲击推演的多智能体金融仿真与 AI 决策展示系统</h1>
+            <div class="hero-kicker">系统总览</div>
+            <h1 style="font-size: 30px; margin-bottom: 14px;">面向政府场景的金融政策智能推演平台</h1>
             <p style="font-size: 16px; max-width: 920px;">
-                数治观澜聚焦“政策发布后市场会发生什么、AI 如何理解政策并解释结果、系统如何证明推演可信”三个核心问题，
-                以政策试验、历史回测、行为诊断、监管优化和材料导出构成完整展示闭环。
+                数治观澜聚焦“政策发布后如何传导、系统如何验证推演可信、如何形成可执行建议”三个核心问题，
+                以政策结构化解析、多智能体仿真、历史验证、风险诊断、监管优化和结果归档构成工程化闭环。
             </p>
         </div>
         """,
@@ -789,27 +794,27 @@ def _render_overview_home() -> None:
     flywheel = _load_data_flywheel_summary()
 
     top_stats = st.columns(4)
-    top_stats[0].metric("默认场景", display_scenario_name(getattr(scenario, "name", REQUIRED_SCENARIOS[0])))
-    top_stats[1].metric("综合收益表现", f"{stat['return_pct']:.2%}")
+    top_stats[0].metric("默认分析场景", display_scenario_name(getattr(scenario, "name", REQUIRED_SCENARIOS[0])))
+    top_stats[1].metric("区间收益表现", f"{stat['return_pct']:.2%}")
     top_stats[2].metric("峰值风险热度", f"{stat['panic_max']:.2f}")
     top_stats[3].metric("在线稳定率", f"{float(runtime_summary.get('online_success_rate', 0.0)):.0%}")
 
     story_cols = st.columns(3)
     story_cards = [
         (
-            "项目定位",
-            "把政策文本自动转成可推演、可解释、可导出的市场实验过程，帮助评委快速理解 AI 在业务链路中的作用。",
+            "平台定位",
+            "把自然语言政策自动转成可推演、可解释、可归档的市场实验过程，服务政府治理与金融政策研判场景。",
             ["政策结构化解析", "多智能体联动决策", "市场撮合与风控反馈"],
         ),
         (
-            "应用价值",
-            "既能做演示，也能做验证和复盘，适合说明作品不仅有前端观感，还有真实的建模与分析深度。",
-            ["可演示", "可验证", "可导出", "可答辩"],
+            "核心能力链",
+            "平台既能完成政策实验，也能完成历史验证、行为诊断与策略优化，体现 AI 在分析链路中的连续作用。",
+            ["可编译", "可推演", "可验证", "可建议"],
         ),
         (
-            "比赛亮点",
-            "把 AI 能力、可解释图表、历史对照和答辩材料生成放到同一条主线上，减少“做了但没展示出来”的断层。",
-            ["AI 证据链", "历史拟真验证", "监管优化与 A/B", "比赛材料打包"],
+            "工程特性",
+            "系统保留运行证据、历史对照和结果归档，不只展示结果，也强调过程可信、可复盘、可追溯。",
+            ["AI 证据链", "历史拟真验证", "监管优化与 A/B", "结果归档"],
         ),
     ]
     for col, (title, summary, bullets) in zip(story_cols, story_cards):
@@ -825,15 +830,15 @@ def _render_overview_home() -> None:
             unsafe_allow_html=True,
         )
 
-    st.markdown("### AI 应用闭环")
+    st.markdown("### 系统工作流")
     flow_cols = st.columns(6)
     flow_cards = [
         ("1. 政策输入", "输入自然语言政策或事件描述"),
-        ("2. 结构化解析", "识别类型、强度、传导渠道与影响对象"),
-        ("3. 智能体决策", "形成多角色分歧与行为意图"),
+        ("2. 结构化编译", "识别类型、强度、传导渠道与影响对象"),
+        ("3. 多智能体推演", "形成多角色分歧、行为意图与市场反馈"),
         ("4. 市场撮合", "生成价格、成交量与微观结构结果"),
-        ("5. 风险诊断", "输出羊群、波动、回撤与传播证据"),
-        ("6. 材料导出", "沉淀报告、图表和答辩文稿"),
+        ("5. 历史对照验证", "校验走势一致性、响应时点与误差边界"),
+        ("6. 策略优化与归档", "输出建议方案、报告、图表与归档材料"),
     ]
     for col, (title, summary) in zip(flow_cols, flow_cards):
         col.markdown(
@@ -846,13 +851,13 @@ def _render_overview_home() -> None:
             unsafe_allow_html=True,
         )
 
-    st.markdown("### 推荐演示路径")
+    st.markdown("### 当前可运行模块")
     route_cols = st.columns(4)
     route_cards = [
-        ("总览首页", "30 秒讲清作品背景、AI 闭环和代表性结果。"),
-        ("政策试验台", "现场输入或调用默认政策，展示 AI 处理到市场结果的主流程。"),
-        ("历史回测", "说明系统不仅能演示，还能用历史窗口做真实性验证。"),
-        ("高级分析", "回答评委追问，展开证据链、监管优化与研究验证。"),
+        ("系统总览", "建立平台定位、能力边界、工程特性与代表性结果。"),
+        ("政策实验", "输入政策文本或选择模板，查看结构化编译与推演结果。"),
+        ("历史验证", "用真实历史窗口验证仿真与现实走势的一致性。"),
+        ("研判分析", "查看证据链、风险机制、监管优化与研究验证内容。"),
     ]
     for col, (title, summary) in zip(route_cols, route_cards):
         col.markdown(
@@ -872,7 +877,7 @@ def _render_overview_home() -> None:
 
         left, right = st.columns([1.5, 1.0])
         with left:
-            dashboard_ui.render_market_overview(metrics, upto_step=None, key_prefix="overview", title="默认答辩场景市场结果总览")
+            dashboard_ui.render_market_overview(metrics, upto_step=None, key_prefix="overview", title="默认分析场景市场结果总览")
         with right:
             package_summary = [
                 f"区间收益率：{stat['return_pct']:.2%}",
@@ -885,8 +890,8 @@ def _render_overview_home() -> None:
                 """
                 <div class="summary-card">
                   <div class="summary-label">代表性结果摘要</div>
-                  <div class="summary-value">适合截图与视频展示</div>
-                  <div class="summary-note">建议在 10 分钟演示中优先展示主图、KPI、政策传导链与历史回测对照。</div>
+                  <div class="summary-value">适合汇报截图与结果留痕</div>
+                  <div class="summary-note">建议优先展示主图、KPI、政策传导链与历史验证对照。</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -894,23 +899,23 @@ def _render_overview_home() -> None:
             st.markdown("\n".join(f"- {item}" for item in package_summary))
             dashboard_ui.render_policy_transmission_chain(_build_overview_chain_payload(metrics), key_prefix="overview")
 
-    st.markdown("### 已有能力如何承接到比赛展示")
+    st.markdown("### 工程特性与交付能力")
     capability_cols = st.columns(3)
     capability_cards = [
         (
-            "展示主线",
-            ["政策试验台", "历史回测", "高级分析"],
-            "评委先看价值，再看主功能，再看真实性与追问。",
+            "工作流主线",
+            ["系统总览", "政策实验", "历史验证", "研判分析"],
+            "支持从问题定义到策略建议的连续分析，不依赖单点功能拼接。",
         ),
         (
             "后端沉淀能力",
             ["政策结构化包", "事件库与新闻覆盖", "监管优化 / Pareto", "多格式报告导出"],
-            "很多能力已实现，本次提交版重点解决“已做未显”。",
+            "很多能力已完成工程沉淀，前端负责把能力链按分析逻辑组织出来。",
         ),
         (
-            "交付物支持",
-            ["设计说明书", "作品小结", "答辩 PPT", "10 分钟视频"],
-            "总览页、历史回测报告和比赛材料导出可直接复用到最终提交物。",
+            "结果交付支持",
+            ["实验报告", "分析摘要", "结果归档", "10 分钟视频脚本"],
+            "总览页、历史验证报告和归档导出可直接复用到汇报、复盘与展示材料。",
         ),
     ]
     for col, (title, items, note) in zip(capability_cols, capability_cards):
@@ -929,16 +934,16 @@ def _render_overview_home() -> None:
 
 def _render_advanced_analysis() -> None:
     st.session_state.runtime_mode = DEMO_MODE
-    st.markdown("## 高级分析")
-    st.caption("这里用于回答评委追问，集中展示 AI 证据链、行为诊断、监管优化和研究验证能力。")
-    tab1, tab2, tab3, tab4 = st.tabs(["AI 决策证据", "行为与风险诊断", "监管优化与 A/B", "研究验证与材料"])
+    st.markdown("## 研判分析中心")
+    st.caption("这里集中展示 AI 证据链、行为诊断、监管优化、研究验证与结果归档能力。")
+    tab1, tab2, tab3, tab4 = st.tabs(["AI 决策证据", "行为与风险诊断", "监管优化与 A/B", "研究验证与归档"])
 
     with tab1:
         _render_ai_decision_tab()
     with tab2:
         render_behavioral_diagnostics()
     with tab3:
-        reg_tab, demo_tab = st.tabs(["监管策略优化", "答辩场景对照"])
+        reg_tab, demo_tab = st.tabs(["监管策略优化", "系统场景对照"])
         with reg_tab:
             render_regulator_optimization()
         with demo_tab:
@@ -962,16 +967,16 @@ def main() -> None:
     entry = st.session_state.entry
     if entry == OVERVIEW_ENTRY:
         _render_overview_home()
-    elif entry == "政策试验台":
+    elif entry == "政策实验":
         st.session_state.runtime_mode = DEMO_MODE
         _render_policy_lab_compatible("standard")
-    elif entry == "历史回测":
+    elif entry == "历史验证":
         st.session_state.runtime_mode = LIVE_MODE
         st.session_state["history_replay_entry_mode"] = str(
             st.session_state.get("history_replay_entry_mode", "factor")
         ).strip().lower() or "factor"
         render_history_replay(ctrl=st.session_state.get("controller"))
-    elif entry == "高级分析":
+    elif entry == "研判分析":
         _render_advanced_analysis()
     else:
         _render_overview_home()

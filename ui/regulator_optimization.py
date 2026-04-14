@@ -200,7 +200,7 @@ def render_regulator_optimization() -> None:
         render_narrative_block(
             "候选方案清单解读",
             frames["candidates"].head(12).to_dict(orient="records"),
-            context="请概括候选方案的分布特征，并指出适合答辩重点展示的 1 到 2 个候选动作。",
+            context="请概括候选方案的分布特征，并指出适合重点汇报的 1 到 2 个候选动作。",
             cache_namespace="regulator_opt_narrative_cache",
         )
 

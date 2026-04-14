@@ -139,8 +139,8 @@ def _runtime_mode_text(runtime_profile: RuntimeModeProfile) -> str:
     mode_map = {
         "SMART": "标准推演模式",
         "DEEP": "深度多智能体模式",
-        "LIVE": "实时演示模式",
-        "DEMO": "答辩演示模式",
+        "LIVE": "实时联机模式",
+        "DEMO": "场景推演模式",
     }
     mode = str(getattr(runtime_profile, "mode", "") or "").upper()
     label = mode_map.get(mode, mode or "未知模式")
@@ -1509,7 +1509,7 @@ def _policy_session_report_payload(session: Dict[str, Any], runtime_profile: Run
             runtime_profile,
         )
         return {
-            "title": f"政策试验台 - {session.get('policy_name', '政策仿真')}",
+            "title": f"政策实验 - {session.get('policy_name', '政策仿真')}",
             "summary": summary,
             "policy_name": session.get("policy_name", "政策仿真"),
             "policy_text": session.get("policy_text", ""),
@@ -1556,7 +1556,7 @@ def _policy_session_report_payload(session: Dict[str, Any], runtime_profile: Run
         runtime_profile,
     )
     return {
-            "title": f"政策试验台 - {session.get('policy_name', '政策仿真')}",
+            "title": f"政策实验 - {session.get('policy_name', '政策仿真')}",
         "summary": summary,
         "policy_name": session.get("policy_name", "政策仿真"),
         "policy_text": session.get("policy_text", ""),
@@ -1778,7 +1778,7 @@ def _policy_eval_payload(summary: Dict[str, Any], package_dict: Dict[str, Any]) 
         "action_recommendations": {
             "short_term": ["关注政策生效初期的风险热度与成交反应。"],
             "mid_term": ["结合板块轮动、角色订单流和回撤变化做阶段性复核。"],
-            "long_term": ["将当前场景输出纳入历史回测与监管优化链路继续验证。"],
+            "long_term": ["将当前场景输出纳入历史验证与监管优化链路继续验证。"],
         },
         "monitoring_kpis": [
             {"name": "累计收益率", "display": f"{return_pct:+.2%}"},
@@ -1891,7 +1891,7 @@ def _render_policy_package_summary(package_dict: Dict[str, Any], summary: Dict[s
             "action_recommendations": payload["action_recommendations"],
             "monitoring_kpis": payload["monitoring_kpis"],
         },
-        context="请用比赛展示口径解释这项政策的主要传导路径、预期影响、风险和建议动作。",
+        context="请用工程汇报口径解释这项政策的主要传导路径、预期影响、风险和建议动作。",
         cache_namespace="policy_lab_structured_narrative_cache",
     )
 
@@ -2163,7 +2163,7 @@ def _llm_policy_narrative(
             "输出要求：",
             "1) 只用中文段落，不要 JSON、代码块、键值对、项目符号、标题标签。",
             "2) 先说明政策主线，再说明对交易行为和指数路径的影响，最后说明风险和建议关注指标。",
-            "3) 语言要清晰、专业、易懂，可直接用于答辩口头讲解。",
+            "3) 语言要清晰、专业、易懂，可直接用于项目汇报或视频配音。",
             "4) 避免英文缩写和术语堆砌。",
             f"数据：{json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str)}",
         ]
@@ -2988,7 +2988,7 @@ def _build_policy_session_report_bundle(
     index_symbol: str,
     runtime_profile: RuntimeModeProfile,
 ) -> Dict[str, Any]:
-    report_title = f"政策试验台会话 - {selected_title}"
+    report_title = f"政策实验会话 - {selected_title}"
     payload = dict(report.get("报告数据", {}) or {})
     report_meta = official_report_meta("policy_lab_session", report_title)
     payload.update(
@@ -3013,13 +3013,13 @@ def _build_policy_session_report_bundle(
 
 
 def render_policy_lab(*, presentation_mode: str = "standard") -> None:
-    st.subheader("政策试验台")
+    st.subheader("政策实验")
     st.caption("仅供教学科研与仿真，不构成投资建议。")
     runtime_profile = _resolve_runtime_profile()
     presentation_mode = str(presentation_mode or "standard").strip().lower()
     st.caption(f"当前模式：{_runtime_mode_text(runtime_profile)}")
     if presentation_mode == "defense":
-        st.info("当前页面采用答辩风洞视图，适合讲解政策链路和市场传导；默认“政策试验台”页则更偏稳健评估。")
+        st.info("当前页面采用场景风洞视图，适合快速浏览政策链路和市场传导；默认“政策实验”页则更偏稳健评估。")
 
     session: Optional[Dict[str, Any]] = st.session_state.get("policy_lab_session")
     current_defaults = dict(session or {})
@@ -3214,7 +3214,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
               <div class="hero-chip-row">{chip_html}</div>
             </div>
             <div class="hero-alert hero-alert-{briefing['tone']}">
-              <div class="hero-alert-label">演示提示</div>
+              <div class="hero-alert-label">运行提示</div>
               <div class="hero-alert-value">{briefing['alert']}</div>
             </div>
           </div>

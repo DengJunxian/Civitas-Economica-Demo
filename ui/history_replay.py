@@ -43,7 +43,7 @@ HISTORY_CASE_GLOB = "history_case_*.json"
 DEFAULT_HISTORY_REPLAY_START_DATE = date(2024, 9, 24)
 HISTORY_WORKSPACE_LABELS = {
     "factor": "智能因子回测",
-    "agent": "历史回测政策仿真",
+    "agent": "历史验证政策仿真",
 }
 
 
@@ -360,7 +360,7 @@ def _build_bias_explanation(metrics: Dict[str, float], policy_name: str) -> str:
 
 
 def _engine_mode_label(mode: str) -> str:
-    return "历史回测仿真模式" if mode == "agent" else "因子回测模式"
+    return "历史验证仿真模式" if mode == "agent" else "因子回测模式"
 
 
 def _fallback_period_policy_text(digest_rows: List[Dict[str, Any]], start_date: str, end_date: str, symbol: str) -> str:
@@ -1100,7 +1100,7 @@ def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> 
         "pre_news_digest": bundle.get("pre_news_digest", []),
     }
     markdown = [
-        f"# 历史回测报告：{bundle['policy_name']}",
+        f"# 历史验证报告：{bundle['policy_name']}",
         "",
         f"- 报告编号：{report_meta['report_no']}",
         f"- 生成日期：{report_meta['date_cn']}",
@@ -1274,7 +1274,7 @@ def _render_agent_replay_workspace(
         st.markdown(
             """
             <div class="hero-panel">
-              <div class="hero-kicker">历史回测</div>
+              <div class="hero-kicker">历史验证</div>
               <h1>自动化历史重演与验证</h1>
               <p>系统会自动抓取回测时间段内的重要经济政策与重大新闻，生成可执行政策文本，并与真实大盘走势同图对比，用于评估仿真结果与现实市场的一致性。</p>
             </div>
@@ -1295,7 +1295,7 @@ def _render_agent_replay_workspace(
             end_date = st.date_input("结束日期", value=default_end)
             symbol_label = st.selectbox("对比指数基准", options=list(INDEX_OPTIONS.keys()), index=1)
 
-            policy_name = st.text_input("任务名称", value=f"历史回测：{start_date} ~ {end_date}")
+            policy_name = st.text_input("任务名称", value=f"历史验证：{start_date} ~ {end_date}")
 
             st.info("系统会自动提取该区间的政策与新闻要点，并重点纳入“新国九条”事件影响。")
             policy_text = st.text_area(
@@ -1324,7 +1324,7 @@ def _render_agent_replay_workspace(
                     "仿真模式",
                     options=["agent", "factor"],
                     index=0 if normalized_default_mode == "agent" else 1,
-                    format_func=lambda m: "历史回测仿真模式" if m == "agent" else "因子回测模式",
+                    format_func=lambda m: "历史验证仿真模式" if m == "agent" else "因子回测模式",
                     horizontal=True,
                 )
             enable_agent_replay = True
@@ -1344,7 +1344,7 @@ def _render_agent_replay_workspace(
             auth_score_mode = "demo_first"
             show_strict_details = False
             enable_baseline = False
-        submitted = st.form_submit_button("运行历史回测", use_container_width=True, type="primary")
+        submitted = st.form_submit_button("运行历史验证", use_container_width=True, type="primary")
 
     if submitted:
         if start_date >= end_date:
@@ -1505,7 +1505,7 @@ def _render_agent_replay_workspace(
 
     bundle = st.session_state.history_replay_result
     if not bundle:
-        st.info("选择时间窗口后，点击“运行历史回测”。系统会自动抓取并总结该区间政策与重大新闻。")
+        st.info("选择时间窗口后，点击“运行历史验证”。系统会自动抓取并总结该区间政策与重大新闻。")
         return
 
     result: BacktestResult = bundle["result"]
@@ -1574,7 +1574,7 @@ def _render_agent_replay_workspace(
             f"""
             <div class="summary-card">
               <div class="summary-value">{_build_bias_explanation(display_metrics, bundle['policy_name'])}</div>
-              <div class="summary-note">【系统提示】历史回测用于验证政策逻辑一致性；对个别边角事件保留可解释误差区间。</div>
+              <div class="summary-note">【系统提示】历史验证用于验证政策逻辑一致性；对个别边角事件保留可解释误差区间。</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1625,8 +1625,8 @@ def render_history_replay(ctrl: Any = None) -> None:
     st.markdown(
         """
         <div class="hero-panel">
-            <div class="hero-kicker">历史回测</div>
-            <h1>政策仿真历史回测工作台</h1>
+            <div class="hero-kicker">历史验证</div>
+            <h1>政策仿真历史验证工作台</h1>
             <p>自动提取历史窗口内的主要经济政策与重大新闻，作为“被测试政策”输入仿真，并与真实大盘走势同图对比。（仅供教学科研与仿真评估）</p>
         </div>
         """,

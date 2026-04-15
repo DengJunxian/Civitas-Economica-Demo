@@ -496,11 +496,127 @@ def _moderate_display_confidence(result: BacktestResult) -> None:
     result.metadata = metadata
 
 
+def _select_interlocking_anchor_indices(real_prices: np.ndarray, *, seed: int) -> List[int]:
+    n = int(real_prices.size)
+    if n <= 2:
+        return [0, max(0, n - 1)]
+
+    rng = np.random.default_rng(seed)
+    anchors: set[int] = {0, n - 1}
+
+    evenly_count = int(np.clip(n // 6 + 3, 5, 9))
+    for idx in np.linspace(0, n - 1, evenly_count, dtype=int).tolist():
+        anchors.add(int(idx))
+
+    if n >= 6:
+        returns = np.diff(real_prices)
+        turning_candidates: List[tuple[float, int]] = []
+        for idx in range(1, max(1, returns.size)):
+            prev_ret = float(returns[idx - 1])
+            next_ret = float(returns[idx] if idx < returns.size else returns[idx - 1])
+            if np.sign(prev_ret) == np.sign(next_ret):
+                continue
+            curvature = abs(next_ret - prev_ret)
+            amplitude = abs(float(real_prices[min(idx + 1, n - 1)]) - float(real_prices[max(idx - 1, 0)]))
+            turning_candidates.append((curvature + amplitude / max(float(real_prices[idx]), 1e-9), idx))
+        turning_candidates.sort(key=lambda item: item[0], reverse=True)
+        max_turns = int(np.clip(n // 18, 2, 5))
+        for _, idx in turning_candidates[:max_turns]:
+            anchors.add(int(idx))
+
+    anchor_list = sorted(int(np.clip(idx, 0, n - 1)) for idx in anchors)
+    if len(anchor_list) > 10:
+        keep = {0, n - 1}
+        middle = np.asarray(anchor_list[1:-1], dtype=int)
+        rng.shuffle(middle)
+        for idx in sorted(middle[:8].tolist()):
+            keep.add(int(idx))
+        anchor_list = sorted(keep)
+    return anchor_list
+
+
+def _apply_interlocking_anchor_rebalance(
+    base_prices: np.ndarray,
+    real_prices: np.ndarray,
+    *,
+    seed: int,
+) -> tuple[np.ndarray, Dict[str, Any]]:
+    n = int(min(base_prices.size, real_prices.size))
+    if n < 3:
+        return base_prices.copy(), {"anchor_indices": [0, max(0, n - 1)], "anchor_count": n}
+
+    rng = np.random.default_rng(seed)
+    anchors = _select_interlocking_anchor_indices(real_prices[:n], seed=seed + 17)
+    anchor_values: List[float] = []
+    anchor_offsets: List[float] = []
+    diff_signs: List[float] = []
+
+    for pos, idx in enumerate(anchors):
+        real_value = float(real_prices[idx])
+        base_value = float(base_prices[idx])
+        if idx in (0, n - 1):
+            target = real_value
+            offset = target - real_value
+        else:
+            left = max(0, idx - 2)
+            right = min(n, idx + 3)
+            local_window = real_prices[left:right]
+            local_ret = np.diff(local_window) / np.maximum(local_window[:-1], 1e-9) if local_window.size > 1 else np.asarray([], dtype=float)
+            local_vol = float(max(np.mean(np.abs(local_ret)) if local_ret.size else 0.0, 0.0024))
+            amp_ratio = float(np.clip(local_vol * (1.55 + 0.90 * rng.random()), 0.0035, 0.022))
+            bias_dir = 1.0 if base_value <= real_value else -1.0
+            alternating_dir = 1.0 if pos % 2 == 1 else -1.0
+            desired_dir = bias_dir if pos % 3 != 0 else alternating_dir
+            if diff_signs and desired_dir == diff_signs[-1]:
+                desired_dir *= -1.0
+            offset = float(real_value * amp_ratio * desired_dir * (0.85 + 0.45 * rng.random()))
+            target = float(real_value + offset)
+            upper = real_value * 1.075
+            lower = real_value * 0.925
+            target = float(np.clip(target, lower, upper))
+            offset = float(target - real_value)
+        anchor_values.append(target)
+        anchor_offsets.append(offset)
+        diff_signs.append(float(np.sign(offset)))
+
+    target_path = np.interp(np.arange(n, dtype=float), np.asarray(anchors, dtype=float), np.asarray(anchor_values, dtype=float))
+    rebalance_strength = 0.42
+    rebalanced = base_prices[:n] * (1.0 - rebalance_strength) + target_path * rebalance_strength
+    rebalanced[0] = float(real_prices[0])
+    rebalanced[-1] = float(target_path[-1] * 0.80 + real_prices[-1] * 0.20)
+
+    rel_bias = (rebalanced - real_prices[:n]) / np.maximum(real_prices[:n], 1e-9)
+    median_bias = float(np.median(rel_bias[1:])) if rel_bias.size > 1 else float(np.median(rel_bias))
+    if abs(median_bias) > 0.006:
+        correction = float(np.clip(-median_bias * 0.75, -0.022, 0.022))
+        rebalanced *= 1.0 + correction
+        rebalanced[0] = float(real_prices[0])
+
+    for idx in range(n):
+        cap = 0.11 + 0.07 * min(idx / max(n - 1, 1), 1.0)
+        upper = float(real_prices[idx] * (1.0 + cap))
+        lower = float(real_prices[idx] * (1.0 - cap))
+        rebalanced[idx] = float(np.clip(rebalanced[idx], lower, upper))
+
+    diff_after = rebalanced - real_prices[:n]
+    crossovers = int(np.sum(np.sign(diff_after[1:]) != np.sign(diff_after[:-1]))) if diff_after.size > 1 else 0
+    metadata = {
+        "anchor_indices": [int(idx) for idx in anchors],
+        "anchor_count": int(len(anchors)),
+        "crossovers_created": int(crossovers),
+        "median_relative_bias": round(float(np.median(diff_after / np.maximum(real_prices[:n], 1e-9))), 4),
+        "offset_balance": round(float(np.mean(anchor_offsets[1:-1])) if len(anchor_offsets) > 2 else 0.0, 4),
+        "mode": "interlocking_anchor_rebalance",
+    }
+    return rebalanced, metadata
+
+
 def _apply_interval_shape_optimization(
     base_prices: np.ndarray,
     real_prices: np.ndarray,
     *,
     seed: int,
+    anchor_indices: Optional[List[int]] = None,
 ) -> tuple[np.ndarray, List[Dict[str, Any]]]:
     """Keep interval-level trend anchors while breaking local wave resemblance."""
     n = int(min(base_prices.size, real_prices.size))
@@ -509,21 +625,17 @@ def _apply_interval_shape_optimization(
 
     rng = np.random.default_rng(seed)
     optimized = base_prices.copy()
-    interval_count = int(np.clip(n // 45 + 3, 4, 7))
-    candidate_starts = np.arange(2, max(3, n - 6), dtype=int)
-    rng.shuffle(candidate_starts)
-
-    used_ranges: List[tuple[int, int]] = []
     intervals: List[Dict[str, Any]] = []
+    anchors = sorted(set(int(np.clip(idx, 0, n - 1)) for idx in (anchor_indices or [])))
+    if len(anchors) < 2:
+        anchors = _select_interlocking_anchor_indices(real_prices[:n], seed=seed + 31)
+    segment_pairs = [(start, end) for start, end in zip(anchors[:-1], anchors[1:]) if end - start >= 4]
+    if not segment_pairs:
+        return optimized, intervals
 
-    for start in candidate_starts.tolist():
-        if len(intervals) >= interval_count:
-            break
-        span = int(rng.integers(5, 12))
-        end = min(n - 2, start + span)
+    max_intervals = int(np.clip(len(segment_pairs), 3, 8))
+    for interval_no, (start, end) in enumerate(segment_pairs[:max_intervals], start=1):
         if end - start < 3:
-            continue
-        if any(not (end < s or start > e) for s, e in used_ranges):
             continue
 
         segment_base = optimized[start : end + 1].copy()
@@ -545,51 +657,69 @@ def _apply_interval_shape_optimization(
                 0.0025,
             )
         )
-        drift = (p1 - p0) / max(seg_len, 1)
-        jagged_scale = max(abs(p0) * local_ref * float(0.9 + rng.random() * 1.7), abs(drift) * float(1.8 + rng.random() * 1.5))
+        jagged_scale = max(
+            abs(p0) * local_ref * float(0.85 + rng.random() * 1.45),
+            abs(p1 - p0) * float(0.18 + rng.random() * 0.22),
+        )
 
-        increments = np.full(seg_len, drift, dtype=float)
-        teeth_sign = np.where((np.arange(seg_len) + int(rng.integers(0, 2))) % 2 == 0, 1.0, -1.0)
-        increments += teeth_sign * jagged_scale * (0.20 + 0.28 * rng.random(seg_len))
-        increments += rng.normal(0.0, jagged_scale * 0.22, size=seg_len)
+        inner_anchor_count = 1 if seg_len <= 5 else 2
+        if seg_len >= 9 and rng.random() < 0.35:
+            inner_anchor_count = 3
+        inner_anchor_positions = np.linspace(0, seg_len, inner_anchor_count + 2, dtype=int)[1:-1].tolist()
+        inner_anchor_positions = sorted(
+            int(np.clip(pos + int(rng.integers(-1, 2)), 1, seg_len - 1))
+            for pos in inner_anchor_positions
+        )
+        inner_anchor_positions = sorted(set(inner_anchor_positions))
 
-        hetero_count = int(np.clip(rng.integers(1, max(2, seg_len // 2 + 1)), 1, max(1, seg_len - 1)))
-        hetero_steps = rng.choice(np.arange(seg_len, dtype=int), size=hetero_count, replace=False)
-        for step in hetero_steps.tolist():
-            flip = -coarse_dir if abs(coarse_dir) > 1e-12 else (-1.0 if rng.random() < 0.5 else 1.0)
-            shock = jagged_scale * float(0.55 + rng.random() * 1.15)
-            increments[step] += flip * shock
+        anchor_pos = [0]
+        anchor_val = [p0]
+        for local_no, pos in enumerate(inner_anchor_positions, start=1):
+            real_mid = float(segment_real[pos])
+            side = -1.0 if (interval_no + local_no) % 2 == 0 else 1.0
+            if coarse_dir < 0 and local_no % 2 == 0:
+                side *= -1.0
+            amp_ratio = float(np.clip(local_ref * (1.55 + rng.random() * 1.50), 0.0040, 0.028))
+            target = float(real_mid * (1.0 + side * amp_ratio))
+            target = float(np.clip(target, real_mid * 0.90, real_mid * 1.10))
+            anchor_pos.append(int(pos))
+            anchor_val.append(target)
+        anchor_pos.append(seg_len)
+        anchor_val.append(p1)
 
-        increments -= np.mean(increments) - drift
-        candidate = np.empty(seg_len + 1, dtype=float)
-        candidate[0] = p0
-        candidate[1:] = p0 + np.cumsum(increments)
-        endpoint_gap = candidate[-1] - p1
-        candidate -= endpoint_gap * x
+        candidate = np.interp(np.arange(seg_len + 1, dtype=float), np.asarray(anchor_pos, dtype=float), np.asarray(anchor_val, dtype=float))
+        envelope = np.sin(np.linspace(0.0, np.pi, seg_len + 1)) ** 1.12
+        teeth = np.sin(
+            np.linspace(0.0, np.pi * (2.2 + rng.random() * 1.6), seg_len + 1)
+            + rng.uniform(-0.55, 0.55)
+        )
+        candidate += envelope * teeth * jagged_scale * float(0.26 + rng.random() * 0.18)
+        candidate += envelope * rng.normal(0.0, jagged_scale * 0.14, size=seg_len + 1)
         candidate[0] = p0
         candidate[-1] = p1
+        for pos, value in zip(anchor_pos[1:-1], anchor_val[1:-1]):
+            candidate[int(pos)] = float(value)
 
-        # Keep the broad trend intact while allowing more local dissimilarity.
-        candidate[0] = segment_base[0]
-        candidate[-1] = segment_base[-1]
         for j, idx in enumerate(range(start, end + 1)):
-            cap = 0.30 if j not in (0, seg_len) else 0.22
+            cap = 0.20 if j in (0, seg_len) else 0.16 + 0.08 * min(j / max(seg_len, 1), 1.0)
             upper = real_prices[idx] * (1.0 + cap)
             lower = real_prices[idx] * (1.0 - cap)
             candidate[j] = float(np.clip(candidate[j], lower, upper))
-        candidate[0] = segment_base[0]
-        candidate[-1] = segment_base[-1]
+        candidate[0] = p0
+        candidate[-1] = p1
+        for pos, value in zip(anchor_pos[1:-1], anchor_val[1:-1]):
+            candidate[int(pos)] = float(np.clip(value, real_prices[start + int(pos)] * 0.90, real_prices[start + int(pos)] * 1.10))
 
         optimized[start : end + 1] = candidate
-        used_ranges.append((start, end))
         intervals.append(
             {
                 "start_index": int(start),
                 "end_index": int(end),
                 "length": int(seg_len + 1),
                 "coarse_trend": "up" if coarse_dir > 0 else "down",
-                "shape_mode": "trend_anchor_jagged",
-                "heterogeneous_steps": int(hetero_count),
+                "shape_mode": "multi_anchor_interlocking_wave",
+                "internal_anchor_count": int(len(anchor_pos) - 2),
+                "heterogeneous_steps": int(max(1, seg_len - len(anchor_pos) + 1)),
             }
         )
 
@@ -731,16 +861,49 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
             best_heterogeneous_points = len(heterogeneous_points)
             best_attempt_used = attempt + 1
 
-    calibrated = best_prices.tolist()
+    anchored_prices, anchor_meta = _apply_interlocking_anchor_rebalance(
+        best_prices,
+        real_p,
+        seed=seed_base + 311,
+    )
     optimized_array, optimized_intervals = _apply_interval_shape_optimization(
-        np.asarray(calibrated, dtype=float),
+        np.asarray(anchored_prices, dtype=float),
         real_p,
         seed=seed_base + 777,
+        anchor_indices=list(anchor_meta.get("anchor_indices", [])),
     )
+    final_achieved = _direction_match_ratio(real_p, optimized_array)
+    if not (min_match <= final_achieved <= max_match):
+        candidate_pool: List[tuple[float, np.ndarray]] = [(final_achieved, optimized_array)]
+        for mix in np.linspace(0.2, 0.8, 4):
+            mixed = anchored_prices * mix + best_prices * (1.0 - mix)
+            candidate_pool.append((_direction_match_ratio(real_p, mixed), mixed))
+        chosen_match, chosen_array = min(
+            candidate_pool,
+            key=lambda item: min(abs(item[0] - min_match), abs(item[0] - max_match)),
+        )
+        optimized_array = np.asarray(chosen_array, dtype=float)
+        final_achieved = float(chosen_match)
+
+    final_rel_gap = (optimized_array - real_p) / np.maximum(real_p, 1e-9)
+    final_median_bias = float(np.median(final_rel_gap[1:])) if final_rel_gap.size > 1 else float(np.median(final_rel_gap))
+    if abs(final_median_bias) > 0.012:
+        level_correction = float(np.clip(-final_median_bias * 0.85, -0.035, 0.035))
+        optimized_array = optimized_array * (1.0 + level_correction)
+        optimized_array[0] = float(real_p[0])
+        for idx in range(optimized_array.size):
+            cap = 0.11 + 0.07 * min(idx / max(optimized_array.size - 1, 1), 1.0)
+            upper = float(real_p[idx] * (1.0 + cap))
+            lower = float(real_p[idx] * (1.0 - cap))
+            optimized_array[idx] = float(np.clip(optimized_array[idx], lower, upper))
+        final_rel_gap = (optimized_array - real_p) / np.maximum(real_p, 1e-9)
+        final_median_bias = float(np.median(final_rel_gap[1:])) if final_rel_gap.size > 1 else float(np.median(final_rel_gap))
+        final_achieved = _direction_match_ratio(real_p, optimized_array)
+
     calibrated = optimized_array.tolist()
     result.simulated_prices = calibrated
-    final_achieved = _direction_match_ratio(real_p, optimized_array)
     final_match_points = int(round(np.clip(final_achieved, 0.0, 1.0) * point_count))
+    final_crossovers = int(np.sum(np.sign(final_rel_gap[1:]) != np.sign(final_rel_gap[:-1]))) if final_rel_gap.size > 1 else 0
 
     if result.simulated_bars:
         bar_rng = np.random.default_rng(seed_base + 4096)
@@ -785,12 +948,19 @@ def _apply_moderate_calibration(result: BacktestResult) -> None:
         "local_heterogeneous_points": int(best_heterogeneous_points),
         "local_heterogeneous_ratio": round(float(best_heterogeneous_points / max(point_count, 1)), 4),
         "total_adjusted_points": point_count,
+        "level_anchor_points": int(anchor_meta.get("anchor_count", 0)),
+        "path_crossovers": int(final_crossovers),
+        "median_relative_bias": round(float(final_median_bias), 4),
     }
     metadata["presentation_shape_optimization"] = {
         "enabled": bool(optimized_intervals),
         "mode": "interval_morphology_on_agent_simulation_base",
         "interval_count": int(len(optimized_intervals)),
         "intervals": optimized_intervals,
+        "anchor_count": int(anchor_meta.get("anchor_count", 0)),
+        "anchor_indices": list(anchor_meta.get("anchor_indices", [])),
+        "crossovers_created": int(final_crossovers),
+        "anchor_mode": str(anchor_meta.get("mode", "interlocking_anchor_rebalance")),
     }
     result.metadata = metadata
 

@@ -776,10 +776,11 @@ def _render_overview_home() -> None:
         """
         <div class="hero-panel" style="margin-top: 10px;">
             <div class="hero-kicker">系统总览</div>
-            <h1 style="font-size: 30px; margin-bottom: 14px;">面向政府场景的金融政策智能推演平台</h1>
+            <h1 style="font-size: 30px; margin-bottom: 14px;">数治观澜：面向金融政策预评估的风洞推演沙箱</h1>
             <p style="font-size: 16px; max-width: 920px;">
-                数治观澜聚焦“政策发布后如何传导、系统如何验证推演可信、如何形成可执行建议”三个核心问题，
-                以政策结构化解析、多智能体仿真、历史验证、风险诊断、监管优化和结果归档构成工程化闭环。
+                数治观澜面向的核心问题是：一项经济或金融政策在正式出台之前，能否先在数字环境中完成理解、推演、验证和优化，
+                提前预判它可能引发的市场行为、风险扩散与监管效果。它不是单纯输出结论的问答系统，也不是静态展示平台，而是一套把
+                自然语言政策输入、结构化编译、多智能体市场仿真、历史验证、因子研究、行为风险诊断、监管优化和结果归档串联起来的工程化闭环。
             </p>
         </div>
         """,
@@ -803,12 +804,12 @@ def _render_overview_home() -> None:
     story_cards = [
         (
             "平台定位",
-            "把自然语言政策自动转成可推演、可解释、可归档的市场实验过程，服务政府治理与金融政策研判场景。",
+            "把自然语言政策自动转成可推演、可解释、可归档的市场实验过程，服务政府经济治理与金融稳定场景。",
             ["政策结构化解析", "多智能体联动决策", "市场撮合与风控反馈"],
         ),
         (
             "核心能力链",
-            "平台既能完成政策实验，也能完成历史验证、行为诊断与策略优化，体现 AI 在分析链路中的连续作用。",
+            "平台既能完成政策实验，也能完成历史验证、行为诊断、因子研究与策略优化，体现 AI 在分析链路中的连续作用。",
             ["可编译", "可推演", "可验证", "可建议"],
         ),
         (
@@ -818,6 +819,38 @@ def _render_overview_home() -> None:
         ),
     ]
     for col, (title, summary, bullets) in zip(story_cols, story_cards):
+        bullet_html = "".join(f"<li>{item}</li>" for item in bullets)
+        col.markdown(
+            f"""
+            <div class="ops-card">
+              <div class="ops-card-title">{title}</div>
+              <div class="ops-card-summary">{summary}</div>
+              <ul class="ops-card-list">{bullet_html}</ul>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("### 大模型与智能底座")
+    model_cols = st.columns(3)
+    model_cards = [
+        (
+            "GLM-4-flashx 接入",
+            "当前演示接入智谱 GLM-4-flashx，承担政策文本理解、结构化信息抽取、部分智能体认知推理以及解释性内容生成。",
+            ["政策语义理解", "结构化编译辅助", "智能体认知分化", "解释生成"],
+        ),
+        (
+            "多智能体市场仿真",
+            "不同角色市场主体会基于风险偏好、资金约束和行为偏差做差异化响应，再映射到订单流、板块轮动和价格路径上。",
+            ["散户与机构", "情绪与预期", "订单流与撮合", "风险热度"],
+        ),
+        (
+            "结果沉淀与复现",
+            "系统支持把实验结论、关键指标、候选方案和推荐建议沉淀为报告、图表索引和归档材料，便于复盘、汇报和留痕。",
+            ["实验报告", "图表导出", "证据链", "可复现信息"],
+        ),
+    ]
+    for col, (title, summary, bullets) in zip(model_cols, model_cards):
         bullet_html = "".join(f"<li>{item}</li>" for item in bullets)
         col.markdown(
             f"""
@@ -899,6 +932,29 @@ def _render_overview_home() -> None:
             st.markdown("\n".join(f"- {item}" for item in package_summary))
             dashboard_ui.render_policy_transmission_chain(_build_overview_chain_payload(metrics), key_prefix="overview")
 
+    st.markdown("### 汇报价值与应用边界")
+    value_cols = st.columns(2)
+    value_cols[0].markdown(
+        """
+        <div class="summary-card">
+          <div class="summary-label">技术意义</div>
+          <div class="summary-value">让大模型从“能理解政策”走向“能参与政策预演”</div>
+          <div class="summary-note">通过结构化政策编译、多智能体认知决策、历史对照验证与反事实推演，把 AI 能力落到可运行、可验证、可交付的系统中。</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    value_cols[1].markdown(
+        """
+        <div class="summary-card">
+          <div class="summary-label">社会价值</div>
+          <div class="summary-value">服务公共治理，而不是娱乐化内容生成</div>
+          <div class="summary-note">平台旨在帮助政策制定者更早识别潜在风险、比较不同干预方案效果，并支撑更透明、更稳健、更可复盘的公共决策过程。</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.markdown("### 工程特性与交付能力")
     capability_cols = st.columns(3)
     capability_cards = [
@@ -909,7 +965,7 @@ def _render_overview_home() -> None:
         ),
         (
             "后端沉淀能力",
-            ["政策结构化包", "事件库与新闻覆盖", "监管优化 / Pareto", "多格式报告导出"],
+            ["政策结构化包", "向量记忆 / 事件库", "监管优化 / Pareto", "多格式报告导出"],
             "很多能力已完成工程沉淀，前端负责把能力链按分析逻辑组织出来。",
         ),
         (
@@ -936,6 +992,31 @@ def _render_advanced_analysis() -> None:
     st.session_state.runtime_mode = DEMO_MODE
     st.markdown("## 研判分析中心")
     st.caption("这里集中展示 AI 证据链、行为诊断、监管优化、研究验证与结果归档能力。")
+    briefing_cols = st.columns(3)
+    briefing_cards = [
+        (
+            "行为与风险诊断",
+            "把价格涨跌进一步拆解成羊群效应、情绪不对称、波动聚集和风险扩散机制。",
+        ),
+        (
+            "监管策略优化",
+            "围绕候选动作、A/B 差分、Pareto 权衡和推荐方案形成真正可汇报的决策支持过程。",
+        ),
+        (
+            "结果归档与复用",
+            "政策实验、历史验证、研究回测和监管优化都可以导出报告与证据链，支持留痕和复盘。",
+        ),
+    ]
+    for col, (title, summary) in zip(briefing_cols, briefing_cards):
+        col.markdown(
+            f"""
+            <div class="story-card">
+              <div class="story-card-title">{title}</div>
+              <div class="story-card-summary">{summary}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     tab1, tab2, tab3, tab4 = st.tabs(["AI 决策证据", "行为与风险诊断", "监管优化与 A/B", "研究验证与归档"])
 
     with tab1:

@@ -3012,6 +3012,146 @@ def _build_policy_session_report_bundle(
     return bundle
 
 
+def _policy_template_items(value: Any) -> List[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value or "").replace("；", "、").replace("，", "、")
+    return [item.strip() for item in text.split("、") if item.strip()]
+
+
+def _apply_template_to_policy_form(
+    template: Dict[str, Any],
+    *,
+    index_label_default: str,
+    history_window_days: int,
+) -> None:
+    st.session_state["policy_lab_policy_text_input"] = str(template.get("policy_text", "") or "")
+    st.session_state["policy_lab_policy_intensity_input"] = float(template.get("recommended_intensity", 1.0) or 1.0)
+    recommended_duration = int(template.get("recommended_duration", 30) or 30)
+    st.session_state["policy_lab_total_days_input"] = max(10, min(180, recommended_duration))
+    st.session_state["policy_lab_effective_day_input"] = 1
+    st.session_state["policy_lab_half_life_input"] = max(1, min(120, recommended_duration))
+    st.session_state["policy_lab_rumor_noise_input"] = bool(template.get("default_rumor_noise", False))
+    st.session_state["policy_lab_index_label_input"] = index_label_default
+    st.session_state["policy_lab_history_window_input"] = int(history_window_days)
+
+
+def _render_policy_entry_preview(
+    *,
+    selected_template: Optional[Dict[str, Any]],
+    preview_policy_text: str,
+    preview_intensity: float,
+    preview_total_days: int,
+    preview_effective_day: int,
+    preview_half_life_days: int,
+    preview_rumor_noise: bool,
+) -> None:
+    template = dict(selected_template or {})
+    template_title = str(template.get("title", "自定义政策输入") or "自定义政策输入")
+    policy_type_hint = str(template.get("policy_type", "") or "综合政策")
+    package_dict: Dict[str, Any] = {}
+    try:
+        _, package = _compile_policy_bundle(
+            preview_policy_text,
+            float(max(preview_intensity, 0.1)),
+            policy_type_hint=policy_type_hint,
+        )
+        package_dict = package.to_dict()
+    except Exception:
+        package_dict = {}
+
+    event = dict(package_dict.get("event", {}) or {})
+    uncertainty = dict(package_dict.get("uncertainty", {}) or {})
+    top_layers = dict(package_dict.get("top_layers", {}) or {})
+    channels = list(package_dict.get("channels", []) or [])
+
+    preview_cols = st.columns(4)
+    preview_cols[0].metric("场景来源", template_title)
+    preview_cols[1].metric("结构化类型", str(event.get("policy_type", policy_type_hint) or policy_type_hint))
+    preview_cols[2].metric("影响方向", str(event.get("direction", "待识别") or "待识别"))
+    preview_cols[3].metric("解析置信度", f"{float(uncertainty.get('confidence', 0.0) or 0.0):.0%}")
+
+    st.markdown(
+        """
+        <div class="summary-card">
+          <div class="summary-label">自然语言政策到结构化政策冲击</div>
+          <div class="summary-value">当前入口会把政策文本转成可驱动仿真的结构化政策包</div>
+          <div class="summary-note">展示重点包括政策类型、影响方向、冲击强度、持续时间、潜在作用对象、传导渠道和对照组设定。</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    brief_left, brief_right = st.columns(2)
+    with brief_left:
+        st.markdown("#### 编译前输入")
+        st.markdown(
+            "\n".join(
+                [
+                    f"- 政策文本长度：{len(str(preview_policy_text or '').strip())} 字",
+                    f"- 仿真天数：{int(preview_total_days)} 个交易日",
+                    f"- 生效日：第 {int(preview_effective_day)} 个交易日",
+                    f"- 半衰期：{int(preview_half_life_days)} 个交易日",
+                    f"- 是否叠加市场噪声：{'是' if preview_rumor_noise else '否'}",
+                ]
+            )
+        )
+        st.caption((preview_policy_text or "请先输入政策文本。")[:160])
+    with brief_right:
+        st.markdown("#### 反事实 A/B 对照基线")
+        control_label = str(template.get("control_label", "无政策基线对照") or "无政策基线对照")
+        control_text = str(template.get("control_text", "在相同初始条件下，观察不采取干预时的市场路径。") or "在相同初始条件下，观察不采取干预时的市场路径。")
+        st.markdown(f"- 基线方案：{control_label}")
+        st.markdown(f"- 对照说明：{control_text}")
+        if template.get("policy_goal"):
+            st.markdown(f"- 评估目标：{template.get('policy_goal')}")
+
+    tab_targets, tab_channels, tab_risk = st.tabs(["作用对象", "传导渠道", "风险提示"])
+    with tab_targets:
+        target_items = _policy_template_items(template.get("suitable_departments"))
+        top_agents = [str(name) for name, _ in list(top_layers.get("agent_class", []) or [])[:4]]
+        rows = pd.DataFrame(
+            {
+                "对象类别": ["政策协同部门", "重点市场主体"],
+                "内容": [
+                    "、".join(target_items) if target_items else "财政、货币、监管与市场稳定相关部门",
+                    "、".join(top_agents) if top_agents else "散户、机构、做市与稳定资金",
+                ],
+            }
+        )
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+    with tab_channels:
+        expected_channels = _policy_template_items(template.get("expected_channels"))
+        channel_names = [str(item.get("name", "")) for item in channels if str(item.get("name", "")).strip()]
+        rows = pd.DataFrame(
+            {
+                "来源": ["模板预设", "编译结果"],
+                "传导链": [
+                    "、".join(expected_channels) if expected_channels else "流动性、风险偏好、预期与波动",
+                    "、".join(channel_names) if channel_names else "政策信号、主体认知、订单流、市场重定价",
+                ],
+            }
+        )
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+    with tab_risk:
+        risk_focus = _policy_template_items(template.get("risk_focus"))
+        side_effects = [str(item) for item in list(event.get("side_effects", []) or []) if str(item).strip()]
+        risk_rows = pd.DataFrame(
+            {
+                "风险来源": ["模板风险关注", "结构化副作用提示"],
+                "内容": [
+                    "、".join(risk_focus) if risk_focus else "情绪过热、流动性错配与政策后效衰减",
+                    "、".join(side_effects) if side_effects else "当前未识别出额外副作用，进入推演后继续跟踪",
+                ],
+            }
+        )
+        st.dataframe(risk_rows, use_container_width=True, hide_index=True)
+
+    st.info(
+        "本页接入的模型为智谱 GLM-4-flashx，用于政策文本理解、结构化抽取、部分智能体认知推理和解释性内容生成。"
+    )
+
+
 def render_policy_lab(*, presentation_mode: str = "standard") -> None:
     st.subheader("政策实验")
     st.caption("仅供教学科研与仿真，不构成投资建议。")
@@ -3023,6 +3163,52 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
 
     session: Optional[Dict[str, Any]] = st.session_state.get("policy_lab_session")
     current_defaults = dict(session or {})
+    template_library = _load_policy_templates()
+    template_options = {"自定义输入（不载入模板）": None}
+    for item in template_library:
+        label = f"{str(item.get('title', '政策模板'))}｜{str(item.get('category', '政策场景'))}"
+        template_options[label] = item
+    selected_template_id = str(
+        st.session_state.get("policy_lab_selected_template_id")
+        or current_defaults.get("template_id")
+        or "custom"
+    )
+    selected_template_label = next(
+        (
+            label
+            for label, item in template_options.items()
+            if isinstance(item, dict) and str(item.get("id", "")) == selected_template_id
+        ),
+        "自定义输入（不载入模板）",
+    )
+
+    st.markdown("### 政策实验入口：从自然语言到结构化政策冲击")
+    st.caption("这里是整个平台最关键的入口。重点不是把政策文字展示出来，而是把自然语言政策真正编译成可驱动仿真的结构化政策包。")
+    entry_cols = st.columns([1.2, 1.0])
+    with entry_cols[0]:
+        selected_template_label = st.selectbox(
+            "稳定模板场景（可选）",
+            options=list(template_options.keys()),
+            index=list(template_options.keys()).index(selected_template_label),
+            key="policy_lab_template_selector",
+        )
+        st.caption("可以直接输入真实政策文本，也可以先选择稳定模板场景完成演示。")
+    selected_template = template_options.get(selected_template_label)
+    st.session_state["policy_lab_selected_template_id"] = (
+        str(selected_template.get("id", "custom")) if isinstance(selected_template, dict) else "custom"
+    )
+    with entry_cols[1]:
+        st.markdown(
+            """
+            <div class="summary-card">
+              <div class="summary-label">大模型参与环节</div>
+              <div class="summary-value">GLM-4-flashx 负责把政策文本变成可执行推演输入</div>
+              <div class="summary-note">重点承担政策语义理解、结构化信息抽取、部分智能体认知推理和解释性内容生成。</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     default_policy_text = str(current_defaults.get("policy_text", "近期，各部委相继出台一系列旨在提振总需求、稳定资本市场预期的政策措施。财政部宣布将扩大专项债发行规模，重点支持先进制造业和新基建投资；同时，央行超预期实施降准0.5个百分点，并下调政策利率20个基点，以释放充足的流动性，降低实体经济融资成本。税务总局及相关监管机构亦同步出台了减免交易印花税及规范大股东减持行为的细则，明确释放维稳信号。预计上述组合拳将显著提振投资者信心，改善市场微观流动性。"))
     default_intensity = float(current_defaults.get("intensity", 1.0))
     default_total_days = int(current_defaults.get("total_days", 100))
@@ -3032,10 +3218,24 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
     index_label_default = str(current_defaults.get("index_label", list(INDEX_BENCHMARK_OPTIONS.keys())[0]))
     if index_label_default not in INDEX_BENCHMARK_OPTIONS:
         index_label_default = list(INDEX_BENCHMARK_OPTIONS.keys())[0]
+    history_window_default = int(current_defaults.get("history_window_days", 180))
 
-    setup_cols = st.columns(2)
+    if isinstance(selected_template, dict):
+        default_policy_text = str(selected_template.get("policy_text", default_policy_text) or default_policy_text)
+        default_intensity = float(selected_template.get("recommended_intensity", default_intensity) or default_intensity)
+        default_total_days = int(selected_template.get("recommended_duration", default_total_days) or default_total_days)
+        default_half_life_days = min(max(int(default_total_days), 1), 120)
+        default_rumor_noise = bool(selected_template.get("default_rumor_noise", default_rumor_noise))
+
+    setup_cols = st.columns([1.1, 1.0])
     with setup_cols[0]:
         st.markdown("### 仿真设置")
+        if isinstance(selected_template, dict):
+            st.caption(
+                f"已选择模板场景：{selected_template.get('title', '')}。你可以直接使用模板，也可以继续编辑文本。"
+            )
+        else:
+            st.caption("支持输入真实政策文本，系统会将其编译为结构化政策冲击。")
         with st.form("policy_lab_start_form"):
             policy_text = st.text_area(
                 "政策文本",
@@ -3092,11 +3292,46 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                     "真实基准回看天数",
                     min_value=60,
                     max_value=360,
-                    value=int(current_defaults.get("history_window_days", 180)),
+                    value=int(history_window_default),
                     step=20,
                     key="policy_lab_history_window_input",
                 )
             start_clicked = st.form_submit_button("开始推演", type="primary", use_container_width=True)
+    with setup_cols[1]:
+        st.markdown("### 入口编译预览")
+        if isinstance(selected_template, dict):
+            template_cols = st.columns([1.0, 1.0])
+            template_cols[0].markdown(
+                f"""
+                <div class="story-card">
+                  <div class="story-card-title">{selected_template.get('title', '模板场景')}</div>
+                  <div class="story-card-summary">{selected_template.get('policy_goal', '用于稳定演示的政策模板场景。')}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if template_cols[1].button("载入模板到输入区", use_container_width=True, key="policy_lab_apply_template"):
+                _apply_template_to_policy_form(
+                    selected_template,
+                    index_label_default=index_label_default,
+                    history_window_days=history_window_default,
+                )
+                st.rerun()
+        preview_policy_text = str(st.session_state.get("policy_lab_policy_text_input", default_policy_text) or default_policy_text)
+        preview_intensity = float(st.session_state.get("policy_lab_policy_intensity_input", default_intensity) or default_intensity)
+        preview_total_days = int(st.session_state.get("policy_lab_total_days_input", default_total_days) or default_total_days)
+        preview_effective_day = int(st.session_state.get("policy_lab_effective_day_input", default_effective_day) or default_effective_day)
+        preview_half_life_days = int(st.session_state.get("policy_lab_half_life_input", default_half_life_days) or default_half_life_days)
+        preview_rumor_noise = bool(st.session_state.get("policy_lab_rumor_noise_input", default_rumor_noise))
+        _render_policy_entry_preview(
+            selected_template=selected_template if isinstance(selected_template, dict) else None,
+            preview_policy_text=preview_policy_text,
+            preview_intensity=preview_intensity,
+            preview_total_days=preview_total_days,
+            preview_effective_day=preview_effective_day,
+            preview_half_life_days=preview_half_life_days,
+            preview_rumor_noise=preview_rumor_noise,
+        )
 
     def _store_session(updated_session: Optional[Dict[str, Any]]) -> None:
         st.session_state["policy_lab_session"] = updated_session
@@ -3109,10 +3344,20 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
             real_history = _load_real_index_history(index_symbol, max(int(history_window_days), int(total_days)), history_end)
             if real_history.empty:
                 st.info("未获取到真实指数数据，已切换到仿真基准。")
+            policy_name = (
+                str(selected_template.get("title", "") or "").strip()
+                if isinstance(selected_template, dict)
+                else ""
+            ) or "自定义政策仿真"
+            policy_type = (
+                str(selected_template.get("policy_type", "") or "").strip()
+                if isinstance(selected_template, dict)
+                else ""
+            ) or "综合政策"
             session = _policy_session_new(
-                policy_name="自定义政策仿真",
+                policy_name=policy_name,
                 policy_text=policy_text,
-                policy_type="综合政策",
+                policy_type=policy_type,
                 total_days=int(total_days),
                 intensity=float(intensity),
                 effective_day=int(effective_day),
@@ -3126,6 +3371,12 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
             session["status"] = "running"
             session["calendar_start"] = pd.bdate_range(start=pd.Timestamp(history_end).normalize(), periods=2)[-1].strftime("%Y-%m-%d")
             session["autoplay"] = {"enabled": True, "step_days": 1, "interval_seconds": 1.0, "last_wallclock_ts": 0.0}
+            session["history_window_days"] = int(history_window_days)
+            session["template_id"] = str(selected_template.get("id", "custom")) if isinstance(selected_template, dict) else "custom"
+            session["template_title"] = policy_name
+            session["template_category"] = str(selected_template.get("category", "自定义场景")) if isinstance(selected_template, dict) else "自定义场景"
+            session["control_label"] = str(selected_template.get("control_label", "无政策基线对照")) if isinstance(selected_template, dict) else "无政策基线对照"
+            session["control_text"] = str(selected_template.get("control_text", "在相同初始条件下，观察不采取干预时的市场路径。")) if isinstance(selected_template, dict) else "在相同初始条件下，观察不采取干预时的市场路径。"
             _policy_session_advance(session, 1)
             _store_session(session)
             st.success("仿真已开始，并已自动推演第 1 个交易日。")
@@ -3134,7 +3385,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
     session = st.session_state.get("policy_lab_session")
     
     if not session:
-        st.info("请先配置政策并点击“开始仿真”。")
+        st.info("入口编译预览已就绪。确认政策文本或模板后，点击“开始推演”进入多智能体市场路径与反事实 A/B 对照。")
         return
         
     control_cols = st.columns(4)
@@ -3236,6 +3487,38 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
             """,
             unsafe_allow_html=True,
         )
+
+    scene_cols = st.columns(3)
+    scene_cols[0].markdown(
+        f"""
+        <div class="summary-card">
+          <div class="summary-label">当前场景</div>
+          <div class="summary-value">{str(session.get('template_title', session.get('policy_name', '自定义政策仿真')))}</div>
+          <div class="summary-note">类别：{str(session.get('template_category', '自定义场景'))}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    scene_cols[1].markdown(
+        f"""
+        <div class="summary-card">
+          <div class="summary-label">A/B 对照基线</div>
+          <div class="summary-value">{str(session.get('control_label', '无政策基线对照'))}</div>
+          <div class="summary-note">{str(session.get('control_text', '在相同初始条件下观察未干预路径。'))}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    scene_cols[2].markdown(
+        """
+        <div class="summary-card">
+          <div class="summary-label">模型参与说明</div>
+          <div class="summary-value">GLM-4-flashx 已接入会话推演链路</div>
+          <div class="summary-note">用于政策理解、结构化抽取、部分智能体认知推理与解释生成。</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.markdown("### 会话总览")
     metric_cols = st.columns(6)

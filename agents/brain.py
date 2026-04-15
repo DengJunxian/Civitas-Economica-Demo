@@ -39,6 +39,14 @@ def stable_json_hash(payload: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Best-effort float coercion for noisy market/account payloads."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def resolve_feature_flags(overrides: Optional[Mapping[str, bool]] = None) -> Dict[str, bool]:
     """Resolve feature flags from environment defaults plus explicit overrides."""
     defaults = {

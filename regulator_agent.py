@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import random
 import threading
 from collections import defaultdict
@@ -21,11 +22,20 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Tuple
 
 import numpy as np
 
+from config import GLOBAL_CONFIG
+
 
 DEFAULT_REGULATOR_FEATURE_FLAGS: Dict[str, bool] = {
     "regulator_real_env_v1": True,
     "regulator_toy_fallback_v1": True,
 }
+
+
+def _has_configured_live_model() -> bool:
+    """Real env is only practical when at least one online model provider is configured."""
+    deepseek_key = str(getattr(GLOBAL_CONFIG, "DEEPSEEK_API_KEY", "") or os.environ.get("DEEPSEEK_API_KEY", "")).strip()
+    zhipu_key = str(getattr(GLOBAL_CONFIG, "ZHIPU_API_KEY", "") or os.environ.get("ZHIPU_API_KEY", "")).strip()
+    return bool(deepseek_key or zhipu_key)
 
 
 def _run_coro_blocking(coro: Any, *, timeout: float) -> Any:
@@ -1055,8 +1065,8 @@ def build_default_real_env_factory(
 
     def _factory() -> RegulatoryEnvironment:
         controller_factory = build_simulation_controller_factory(
-            deepseek_key="",
-            zhipu_key="",
+            deepseek_key=str(getattr(GLOBAL_CONFIG, "DEEPSEEK_API_KEY", "") or ""),
+            zhipu_key=str(getattr(GLOBAL_CONFIG, "ZHIPU_API_KEY", "") or "") or None,
             mode="FAST",
         )
         return SimulationControllerEnvAdapter(
@@ -1306,11 +1316,19 @@ def run_regulatory_closed_loop(
         active_env_factory = toy_factory
         env_selection["selected_path"] = "toy_explicit"
     elif flags.get("regulator_real_env_v1", True):
-        active_env_factory = build_default_real_env_factory(
-            max_steps_per_episode=int(max_steps_per_episode),
-            reward_fn=reward_fn,
-        )
-        env_selection["selected_path"] = "real_env_factory"
+        if _has_configured_live_model():
+            active_env_factory = build_default_real_env_factory(
+                max_steps_per_episode=int(max_steps_per_episode),
+                reward_fn=reward_fn,
+            )
+            env_selection["selected_path"] = "real_env_factory"
+        elif flags.get("regulator_toy_fallback_v1", True):
+            active_env_factory = toy_factory
+            env_selection["selected_path"] = "toy_fallback"
+            env_selection["fallback_used"] = True
+            env_selection["fallback_reason"] = "missing_live_model_keys"
+        else:
+            raise ValueError("Real regulatory environment requested but no live model keys are configured.")
     elif flags.get("regulator_toy_fallback_v1", True):
         active_env_factory = toy_factory
         env_selection["selected_path"] = "toy_fallback"

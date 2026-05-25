@@ -1,0 +1,57 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.env
+.venv/
+env/
+venv/
+
+# IDE/editor
+.idea/
+.vscode/
+*.swp
+
+# Logs/build artifacts
+*.log
+*.so
+*.pyd
+dist/
+build/
+build_temp/
+build_lib/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.pytest_tmp/
+.pytest_tmp_check/
+.tmp/
+__pycache__/
+
+# Generated runtime outputs
+.playwright-cli/
+artifacts/
+output/
+outputs/
+tmp/
+tmp/pytest_realism_reporting/
+
+# Temporary and local data caches
+tmp_akshare_test.py
+tests/update_config.py
+data/seed_events.jsonl
+data/event_graph.graphml
+data/cache/
+data/chroma_smoke_test/
+chroma_db/
+
+# Agent tooling
+.gemini/
+.agents/
+.agent/
+_agents/
+_agent/
+
+# OS
+.DS_Store

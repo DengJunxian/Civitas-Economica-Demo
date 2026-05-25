@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 from openai import AsyncOpenAI, APIConnectionError, APITimeoutError, RateLimitError
 
 from config import GLOBAL_CONFIG
+from core.llm.base import redact_sensitive
 
 
 class ModelType(Enum):
@@ -63,6 +64,20 @@ class ModelRouter:
     _runtime_last_fallback_reason: Optional[str] = None
 
     MODEL_REGISTRY: Dict[str, ModelInfo] = {
+        "deepseek-v4-pro": ModelInfo(
+            name="deepseek-v4-pro",
+            provider="deepseek",
+            model_type=ModelType.REASONER,
+            base_url=GLOBAL_CONFIG.API_BASE_URL,
+            timeout=GLOBAL_CONFIG.LLM_TIMEOUT_SECONDS,
+        ),
+        "deepseek-v4-flash": ModelInfo(
+            name="deepseek-v4-flash",
+            provider="deepseek",
+            model_type=ModelType.FLASH,
+            base_url=GLOBAL_CONFIG.API_BASE_URL,
+            timeout=GLOBAL_CONFIG.LLM_TIMEOUT_SECONDS,
+        ),
         "deepseek-reasoner": ModelInfo(
             name="deepseek-reasoner",
             provider="deepseek",
@@ -134,7 +149,7 @@ class ModelRouter:
     def _get_available_models(self) -> List[str]:
         available: List[str] = []
         if self.deepseek_key:
-            available.extend(["deepseek-reasoner", "deepseek-chat"])
+            available.extend(["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-reasoner", "deepseek-chat"])
         if self.zhipu_key:
             available.extend(["glm-4-flashx", "glm-4-flashx-250414"])
         return available
@@ -152,7 +167,7 @@ class ModelRouter:
                 cls._runtime_counters["online_success_total"] += 1
             error_text = payload.get("error")
             if error_text:
-                cls._runtime_last_error = str(error_text)
+                cls._runtime_last_error = redact_sensitive(error_text)
             cls._runtime_recent_events.append(event)
             if len(cls._runtime_recent_events) > 120:
                 cls._runtime_recent_events = cls._runtime_recent_events[-120:]
@@ -293,11 +308,11 @@ class ModelRouter:
         FAST (快速模式): DeepSeek Chat -> GLM (回退)
         """
         if mode == "DEEP":
-            base_priority = ["deepseek-reasoner", "deepseek-chat", "glm-4-flashx"]
+            base_priority = ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-reasoner", "deepseek-chat", "glm-4-flashx"]
         elif mode == "SMART" or mode == "FAST":
-            base_priority = ["deepseek-chat", "glm-4-flashx", "glm-4-flashx-250414"]
+            base_priority = ["deepseek-v4-flash", "deepseek-chat", "glm-4-flashx", "glm-4-flashx-250414"]
         else:
-            base_priority = ["deepseek-chat", "glm-4-flashx", "glm-4-flashx-250414"]
+            base_priority = ["deepseek-v4-flash", "deepseek-chat", "glm-4-flashx", "glm-4-flashx-250414"]
             
         return [m for m in base_priority if m in self.available_models]
 
@@ -357,7 +372,7 @@ class ModelRouter:
                 continue
             except (APIConnectionError, APITimeoutError, RateLimitError) as e:
                 last_error = f"{model_name}: {type(e).__name__}"
-                self._update_stats(model_name, 0, success=False, error=str(e))
+                self._update_stats(model_name, 0, success=False, error=redact_sensitive(e))
                 self._record_runtime_event(
                     "online_error",
                     model=model_name,
@@ -366,8 +381,8 @@ class ModelRouter:
                 )
                 continue
             except Exception as e:
-                last_error = f"{model_name}: {str(e)}"
-                self._update_stats(model_name, 0, success=False, error=str(e))
+                last_error = f"{model_name}: {redact_sensitive(e)}"
+                self._update_stats(model_name, 0, success=False, error=redact_sensitive(e))
                 self._record_runtime_event(
                     "online_error",
                     model=model_name,
@@ -574,7 +589,7 @@ class ModelRouter:
             stats.total_time += call_time
         else:
             stats.error_count += 1
-            stats.last_error = error
+            stats.last_error = redact_sensitive(error)
 
     def _fallback_response(
         self,
@@ -583,6 +598,7 @@ class ModelRouter:
         messages: Optional[List[Dict]] = None,
         cache_key: Optional[str] = None,
     ) -> Tuple[str, Optional[str], str]:
+        error = redact_sensitive(error)
         reason = "all_models_unavailable"
         if error:
             if "rate" in error.lower() and "limit" in error.lower():

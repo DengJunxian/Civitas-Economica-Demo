@@ -146,8 +146,11 @@ pip install -r requirements-lock.txt
 项目支持在线优先 + 自动离线回退。以下环境变量在接入在线模型时建议配置（未配置也可离线演示）：
 
 ```powershell
-$env:DEEPSEEK_API_KEY="你的 DeepSeek Key"
-$env:ZHIPU_API_KEY="你的 智谱 Key"
+$env:DEEPSEEK_API_KEY="<set-in-local-shell-or-env-file>"
+$env:ZHIPUAI_API_KEY="<set-in-local-shell-or-env-file>"
+$env:LLM_DEFAULT_PROVIDER="auto"
+$env:LLM_TIMEOUT_SECONDS="20"
+$env:LLM_MAX_RETRIES="2"
 $env:CIVITAS_INFERENCE_MODE="lite"
 $env:CIVITAS_LOCAL_MODEL_PATH="D:\models\xxx.gguf"
 $env:CIVITAS_VLLM_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"

@@ -839,6 +839,11 @@ JSON 格式示例：
             ("risk_analyst", "Focus on risk and social evidence. Output only strict JSON."),
         ]
         priority = self.model_priority or model_priority or ["deepseek-reasoner", "deepseek-chat", "glm-4-flashx"]
+        try:
+            per_role_timeout = float(os.environ.get("CIVITAS_AGENT_LLM_CALL_TIMEOUT_SECONDS", "9.0") or 9.0)
+        except (TypeError, ValueError):
+            per_role_timeout = 9.0
+        per_role_timeout = max(6.0, min(12.0, per_role_timeout))
 
         if self.model_router and hasattr(self.model_router, "call_with_schema"):
             for idx, (role_name, role_prompt) in enumerate(role_prompts):
@@ -855,7 +860,7 @@ JSON 格式示例：
                         messages=messages,
                         json_schema=analyst_schema,
                         priority_models=priority,
-                        timeout_budget=max(4.0, timeout_budget / 3.0),
+                        timeout_budget=per_role_timeout,
                         fallback_obj=fallback_card,
                     )
                     parsed_card["analyst_id"] = f"{self.agent_id}_{role_name}"

@@ -14,6 +14,7 @@ from core.llm.base import LLMClient, LLMResponse, redact_sensitive
 from core.llm.config import LLMSettings, load_llm_settings
 from core.llm.deepseek_client import DeepSeekClient
 from core.llm.zhipu_client import ZhipuClient
+from core.reproducibility import LLMCallRecord, llm_call_record_from_response
 
 
 logger = logging.getLogger("civitas.llm.router")
@@ -47,6 +48,15 @@ class LLMRouter:
             "deepseek": deepseek_client or DeepSeekClient(settings=self.settings),
             "zhipu": zhipu_client or ZhipuClient(settings=self.settings),
         }
+        self.call_records: list[dict[str, Any]] = []
+
+    def get_call_records(self) -> list[dict[str, Any]]:
+        return list(self.call_records)
+
+    def _save_call_record(self, record: LLMCallRecord) -> None:
+        self.call_records.append(record.to_dict())
+        if len(self.call_records) > 500:
+            self.call_records = self.call_records[-500:]
 
     def build_chain(self, mode: str, task_type: str | None = None) -> list[RouteCandidate]:
         normalized = str(mode or self.settings.default_provider or "auto").strip().lower()
@@ -144,6 +154,16 @@ class LLMRouter:
                     task_type=task_type,
                 )
             except Exception as exc:  # noqa: BLE001
+                self._save_call_record(
+                    LLMCallRecord(
+                        provider=candidate.provider,
+                        model=candidate.model,
+                        fallback_chain=list(fallback_chain),
+                        latency_ms=0.0,
+                        ok=False,
+                        error_type=redact_sensitive(type(exc).__name__),
+                    )
+                )
                 logger.warning(
                     "llm_provider_error provider=%s model=%s ok=false error=%s",
                     candidate.provider,
@@ -154,6 +174,7 @@ class LLMRouter:
 
             if response.ok:
                 response.fallback_chain = list(fallback_chain)
+                self._save_call_record(llm_call_record_from_response(response))
                 logger.info(
                     "llm_complete provider=%s model=%s latency_ms=%.1f fallback_chain=%s ok=true",
                     response.provider,
@@ -165,6 +186,8 @@ class LLMRouter:
             reason = ""
             if isinstance(response.raw, dict):
                 reason = redact_sensitive(response.raw.get("error", ""))
+            response.fallback_chain = list(fallback_chain)
+            self._save_call_record(llm_call_record_from_response(response, error_type=reason))
             logger.warning(
                 "llm_candidate_failed provider=%s model=%s latency_ms=%.1f fallback_chain=%s ok=false reason=%s",
                 response.provider,
@@ -175,7 +198,9 @@ class LLMRouter:
             )
 
         logger.info("llm_complete provider=offline model=deterministic_stub latency_ms=0 fallback_chain=%s ok=false", " > ".join(fallback_chain))
-        return self._offline_response(messages, fallback_chain, fallback_response=fallback_response)
+        offline = self._offline_response(messages, fallback_chain, fallback_response=fallback_response)
+        self._save_call_record(llm_call_record_from_response(offline, error_type="all_llm_providers_unavailable"))
+        return offline
 
 
 async def llm_complete(messages: list[dict], mode: str = "auto", task_type: str | None = None, **kwargs: Any) -> LLMResponse:
@@ -219,4 +244,3 @@ def _run_coro_sync(coro: Any) -> Any:
 
 def sync_llm_complete(messages: list[dict], mode: str = "auto", task_type: str | None = None, **kwargs: Any) -> LLMResponse:
     return _run_coro_sync(llm_complete(messages, mode=mode, task_type=task_type, **kwargs))
-

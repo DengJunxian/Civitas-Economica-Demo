@@ -10,6 +10,8 @@ import hashlib
 import json
 import subprocess
 
+from core.reproducibility import experiment_id as build_experiment_id, parameter_set_id as build_parameter_set_id
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -44,6 +46,9 @@ class ExperimentManifest:
     seed: int
     dataset_snapshot_id: str
     module: str
+    experiment_id: str = ""
+    data_snapshot_hash: str = ""
+    parameter_set_id: str = ""
     code_version: str = ""
     model_version: str = ""
     data_slice: Dict[str, Any] = field(default_factory=dict)
@@ -98,6 +103,19 @@ class ExperimentManifest:
                 }
             )
         )
+        data_snapshot_hash = str(dataset_snapshot_id or "")
+        parameter_id = str(
+            clean_notes.get("parameter_set_id")
+            or clean_config.get("parameter_set_id")
+            or build_parameter_set_id(clean_config.get("calibration_parameters", clean_config))
+        )
+        resolved_experiment_id = build_experiment_id(
+            module=str(module),
+            config_hash_value=manifest_config_hash,
+            data_snapshot_hash_value=data_snapshot_hash,
+            seed=int(seed),
+            parameter_set_id_value=parameter_id,
+        )
         manifest_run_id = str(
             run_id
             or f"{module}-{manifest_timestamp.replace(':', '').replace('-', '').replace('+00:00', 'Z')}-{manifest_config_hash[:12]}"
@@ -110,6 +128,9 @@ class ExperimentManifest:
             seed=int(seed),
             dataset_snapshot_id=str(dataset_snapshot_id or ""),
             module=str(module),
+            experiment_id=resolved_experiment_id,
+            data_snapshot_hash=data_snapshot_hash,
+            parameter_set_id=parameter_id,
             code_version=resolved_git_commit,
             model_version=str(model_version or ""),
             data_slice=clean_data_slice,
@@ -159,10 +180,13 @@ def attach_manifest_to_metadata(
     )
     meta["experiment_manifest"] = manifest.to_dict()
     meta["experiment_manifest_id"] = manifest.run_id
+    meta["experiment_id"] = manifest.experiment_id
     meta["experiment_config_hash"] = manifest.config_hash
     meta["code_version"] = manifest.code_version
     meta["model_version"] = manifest.model_version
     meta["data_slice"] = manifest.data_slice
     meta["seed"] = int(seed)
     meta["dataset_snapshot_id"] = str(dataset_snapshot_id)
+    meta["data_snapshot_hash"] = manifest.data_snapshot_hash
+    meta["parameter_set_id"] = manifest.parameter_set_id
     return meta

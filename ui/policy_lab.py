@@ -3212,10 +3212,13 @@ def _policy_session_registry_entry(session: Dict[str, Any], chart_frame: pd.Data
         selected_benchmark=str(session.get("index_symbol", "sh000001") or "sh000001"),
         status=str(session.get("status", "created")),
         created_at=str(session.get("created_at", "")) or None,
+        parameter_set_id=str(session.get("calibration_parameter_set_id", "policy_lab_default_calibration_v1")),
     )
     session["experiment_id"] = entry["experiment_id"]
     session["config_hash"] = entry["config_hash"]
     session["data_snapshot_id"] = entry["data_snapshot_id"]
+    session["data_snapshot_hash"] = entry["data_snapshot_hash"]
+    session["parameter_set_id"] = entry["parameter_set_id"]
     session["created_at"] = entry["created_at"]
     return entry
 
@@ -3228,6 +3231,7 @@ def _policy_session_repro_meta(
     runtime_profile: RuntimeModeProfile,
 ) -> Dict[str, Any]:
     return build_reproducibility_meta(
+        experiment_id=str(registry_entry.get("experiment_id", session.get("experiment_id", ""))),
         data_snapshot_hash=str(registry_entry.get("data_snapshot_id", chart_frame.attrs.get("trade_tape_hash", ""))),
         config_hash=str(registry_entry.get("config_hash", "")),
         random_seed=int(registry_entry.get("seed", 42) or 42),

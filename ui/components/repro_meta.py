@@ -62,6 +62,7 @@ def build_experiment_registry_entry(
     selected_benchmark: str = "sh000001",
     status: str = "created",
     created_at: Optional[str] = None,
+    parameter_set_id: str = "default_calibration_v1",
 ) -> Dict[str, Any]:
     created = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
     if not config_hash:
@@ -74,12 +75,14 @@ def build_experiment_registry_entry(
             }
         )
     if not experiment_id:
-        experiment_id = f"exp_{stable_payload_hash({'scenario': scenario_name, 'config_hash': config_hash})[:16]}"
+        experiment_id = f"exp_{stable_payload_hash({'scenario': scenario_name, 'config_hash': config_hash, 'data_snapshot_id': data_snapshot_id, 'seed': int(seed), 'parameter_set_id': parameter_set_id})[:16]}"
     return {
         "experiment_id": str(experiment_id),
         "scenario_name": str(scenario_name or "research_workbench"),
         "config_hash": str(config_hash),
         "data_snapshot_id": str(data_snapshot_id or "synthetic_or_cached_snapshot"),
+        "data_snapshot_hash": str(data_snapshot_id or "synthetic_or_cached_snapshot"),
+        "parameter_set_id": str(parameter_set_id or "default_calibration_v1"),
         "seed": int(seed),
         "created_at": created,
         "selected_benchmark": str(selected_benchmark or "sh000001"),
@@ -89,6 +92,7 @@ def build_experiment_registry_entry(
 
 def build_reproducibility_meta(
     *,
+    experiment_id: str = "",
     data_snapshot_hash: str = "",
     config_hash: str = "",
     random_seed: int = 42,
@@ -97,6 +101,7 @@ def build_reproducibility_meta(
     extra: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     return {
+        "experiment_id": str(experiment_id or ""),
         "data_snapshot_hash": str(data_snapshot_hash or "synthetic_or_cached_snapshot"),
         "config_hash": str(config_hash or stable_payload_hash(extra or {})),
         "git_commit_hash": safe_git_commit(),
@@ -130,6 +135,8 @@ def render_experiment_registry(
         "scenario_name",
         "config_hash",
         "data_snapshot_id",
+        "data_snapshot_hash",
+        "parameter_set_id",
         "seed",
         "created_at",
         "selected_benchmark",

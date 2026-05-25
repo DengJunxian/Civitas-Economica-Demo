@@ -1,7 +1,5 @@
-from setuptools import setup, Extension
-from setuptools.command.build_ext import build_ext
+from setuptools import Extension, setup
 import sys
-import setuptools
 
 class get_pybind_include(object):
     """Helper class to determine the pybind11 include path
@@ -22,7 +20,7 @@ ext_modules = [
             "core/exchange/c_core"
         ],
         language="c++",
-        extra_compile_args=['/std:c++17']
+        extra_compile_args=["/std:c++17"] if sys.platform.startswith("win") else ["-std=c++17"],
     ),
 ]
 

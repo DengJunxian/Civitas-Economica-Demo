@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
 from core.exchange.trade_tape import stable_hash
+from core.reproducibility import parameter_set_id
 
 
 @dataclass(frozen=True)
@@ -33,9 +34,22 @@ class ParameterSet:
             }
         )
 
+    @property
+    def parameter_set_id(self) -> str:
+        return parameter_set_id(
+            {
+                "name": self.name,
+                "params": self.params,
+                "seed": int(self.seed),
+                "config_hash": self.config_hash,
+                "data_snapshot_hash": self.data_snapshot_hash,
+            }
+        )
+
     def to_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
         payload["parameter_hash"] = self.parameter_hash
+        payload["parameter_set_id"] = self.parameter_set_id
         return payload
 
 
@@ -58,6 +72,7 @@ class ParameterStore:
             path = matches[-1]
         payload = json.loads(path.read_text(encoding="utf-8"))
         payload.pop("parameter_hash", None)
+        payload.pop("parameter_set_id", None)
         return ParameterSet(
             name=str(payload.get("name", path.stem)),
             params={str(k): float(v) for k, v in dict(payload.get("params", {}) or {}).items()},

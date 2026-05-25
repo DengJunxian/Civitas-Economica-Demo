@@ -4,6 +4,36 @@
 
 项目支持离线演示。评委在没有云端 API Key 的情况下，也可以直接加载内置场景完成展示、回放、分析与材料导出。
 
+## 第八批收尾：可复现政策风洞
+
+本轮补齐了复现、性能、CI、工程文档和答辩说明。推荐把项目理解为“政策文本驱动的金融市场风洞”：
+
+- 不是普通 demo：系统不是让大模型直接画图，而是把政策文本解析成结构化政策包，驱动异质智能体生成订单，经 A 股 session-aware 撮合引擎生成 trade tape，再由 trade tape 聚合 K 线、风险指标、行为金融指标和 scorecard。
+- AI 方法：DeepSeek v4 pro 承担慢思考，DeepSeek v4 flash thinking/non-thinking 承担快思考，智谱 GLM-4-flashx 承担在线兜底；无 key 时进入 deterministic offline fallback。
+- 金融场景：以上证指数 `sh000001` 为主 benchmark，支持政策冲击、重大新闻、监管事件、谣言/辟谣和历史 replay window。
+- 工程链路：`core/reproducibility.py` 统一 random seed、config hash、dataset snapshot hash、parameter_set_id 和 LLM 调用元数据；`core/experiment_registry.py` 保存 experiment registry，报告导出包含 `experiment_id`。
+- 历史验证：统一 evaluation suite 输出上证指数路径误差、事件窗方向命中率、风险指标、微观结构指标和行为金融指标。
+- 监管优化：保留监管页面并升级为多目标政策优化入口，支持轻量 black-box search、Pareto 输出和推荐方案。
+- 可复现性：无 API Key、断网、C++ 扩展缺失时都具备 mock/cache/synthetic/Python fallback 或清晰错误提示。
+
+关键文档：
+
+- [架构说明](docs/architecture.md)
+- [工程设计说明](docs/engineering_design.md)
+- [LLM Provider 与路由](docs/llm_provider.md)
+- [校准与历史验证](docs/calibration.md)
+- [Evaluation Suite](docs/evaluation.md)
+- [监管优化与 Pareto 输出](docs/policy_optimization.md)
+- [比赛演示 Playbook](docs/demo_playbook.md)
+
+快速验收命令：
+
+```bash
+pytest -q tests/test_reproducibility.py tests/test_deterministic_replay.py tests/test_performance_smoke.py
+python -c "import app; assert hasattr(app, 'main')"
+python -m streamlit run app.py --server.port 8501
+```
+
 ## 一、项目亮点
 
 - 多智能体政策推演：把自然语言政策转成结构化冲击，驱动市场行为变化。
@@ -151,12 +181,13 @@ $env:ZHIPUAI_API_KEY="<set-in-local-shell-or-env-file>"
 $env:LLM_DEFAULT_PROVIDER="auto"
 $env:LLM_TIMEOUT_SECONDS="20"
 $env:LLM_MAX_RETRIES="2"
+$env:CIVITAS_AGENT_LLM_CALL_TIMEOUT_SECONDS="9"
 $env:CIVITAS_INFERENCE_MODE="lite"
 $env:CIVITAS_LOCAL_MODEL_PATH="D:\models\xxx.gguf"
 $env:CIVITAS_VLLM_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 ```
 
-模板可参考 `.env.example`。
+模板可参考 `.env.example`。项目启动时会自动读取仓库根目录下的本地 `.env`，但 `.env` 已在 `.gitignore` 中，不应提交。
 
 ### 5. 启动方式
 
@@ -212,7 +243,16 @@ python main.py
 python setup.py build_ext --inplace
 ```
 
-如需编译，请先安装 Visual Studio Build Tools 2022（含 MSVC v143）。
+Windows 如需编译，请先安装 Visual Studio Build Tools 2022（含 MSVC v143）。macOS/Linux 使用同一命令，`setup.py` 会切换到 `-std=c++17`。扩展缺失时系统仍可走 Python 撮合实现；扩展可用时会打印 `High-Performance C++ OrderBook Activated`。
+
+可用以下命令确认本地性能路径：
+
+```powershell
+python scripts\benchmark_simulation.py --agents 6 --ticks 1
+python scripts\benchmark_deepseek_online.py --llm-agents 4
+```
+
+第二条命令会读取本地 `.env` 的 DeepSeek key，做一次严格在线、不使用 GLM/离线兜底的一轮仿真计时。
 
 ### 8. 比赛提交包自动命名
 

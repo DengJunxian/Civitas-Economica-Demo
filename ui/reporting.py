@@ -451,6 +451,17 @@ def write_report_artifacts(
 
     clean_payload = serializable_payload(payload)
     report_meta = clean_payload.get("report_meta") or official_report_meta(report_type, title)
+    experiment_id = (
+        clean_payload.get("experiment_id")
+        or clean_payload.get("report_experiment_id")
+        or dict(clean_payload.get("reproducibility") or {}).get("experiment_id")
+    )
+    if not experiment_id:
+        experiment_id = f"exp_{stable_payload_hash({'report_type': report_type, 'title': title, 'seed': dict(clean_payload.get('reproducibility') or {}).get('seed', ''), 'config_hash': clean_payload.get('config_hash', '')})[:20]}"
+    clean_payload["experiment_id"] = str(experiment_id)
+    clean_payload["report_experiment_id"] = str(experiment_id)
+    report_meta["experiment_id"] = str(experiment_id)
+    clean_payload["report_meta"] = report_meta
 
     markdown_path.write_text(markdown_text, encoding="utf-8")
     json_text = json.dumps(clean_payload, ensure_ascii=False, indent=2)

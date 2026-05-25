@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import math
+import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -210,6 +212,8 @@ class MarketDataProvider:
         errors: List[str] = []
         for provider in self.provider_priority:
             try:
+                if provider == "synthetic":
+                    return self._fetch_synthetic(query, errors), provider
                 if provider == "akshare":
                     return self._fetch_from_akshare(query), provider
                 if provider == "yfinance":
@@ -218,7 +222,91 @@ class MarketDataProvider:
                     return self._fetch_from_ashare(query), provider
             except Exception as exc:  # pragma: no cover - network and optional package path
                 errors.append(f"{provider}: {exc}")
+        if str(os.environ.get("CIVITAS_DISABLE_SYNTHETIC_MARKET_FALLBACK", "")).lower() not in {"1", "true", "yes"}:
+            return self._fetch_synthetic(query, errors), "synthetic"
         raise RuntimeError("; ".join(errors) if errors else "no data provider available")
+
+    def _fetch_synthetic(self, query: MarketDataQuery, errors: Optional[Sequence[str]] = None) -> pd.DataFrame:
+        """Build deterministic OHLCV fallback data for offline CI/demo replay."""
+
+        seed_text = json.dumps(asdict(query), sort_keys=True, ensure_ascii=True)
+        seed_int = int(hashlib.sha256(seed_text.encode("utf-8")).hexdigest()[:8], 16)
+        base = 3000.0 if self._looks_index_symbol(query.symbol) else 100.0
+        drift = ((seed_int % 97) - 48) / 100000.0
+        amp = 0.006 + (seed_int % 13) / 10000.0
+
+        def _price(idx: int) -> float:
+            seasonal = math.sin((idx + (seed_int % 31)) / 5.0) * amp
+            trend = drift * idx
+            return max(1.0, base * (1.0 + trend + seasonal))
+
+        end_ts = pd.to_datetime(query.end, errors="coerce") if query.end else pd.Timestamp("2024-12-31")
+        if pd.isna(end_ts):
+            end_ts = pd.Timestamp("2024-12-31")
+        start_ts = pd.to_datetime(query.start, errors="coerce") if query.start else None
+        if start_ts is not None and pd.isna(start_ts):
+            start_ts = None
+
+        if query.interval == "1d":
+            if start_ts is not None:
+                dates = pd.bdate_range(start=start_ts, end=end_ts)
+            else:
+                dates = pd.bdate_range(end=end_ts, periods=max(10, int(query.period_days or 60)))
+            rows = []
+            prev = _price(0)
+            for idx, day in enumerate(dates):
+                close = _price(idx)
+                open_ = prev
+                high = max(open_, close) * (1.0 + 0.0025 + (idx % 5) * 0.0002)
+                low = min(open_, close) * (1.0 - 0.0025 - (idx % 3) * 0.0002)
+                volume = int(800_000_000 + (seed_int % 1000) * 10000 + (idx % 17) * 9_000_000)
+                rows.append(
+                    {
+                        "date": day.strftime("%Y-%m-%d"),
+                        "open": open_,
+                        "high": high,
+                        "low": low,
+                        "close": close,
+                        "volume": volume,
+                        "amount": close * volume,
+                    }
+                )
+                prev = close
+            return pd.DataFrame(rows)
+
+        minute_step = int(self.INTERVAL_MAP_AK.get(query.interval, "1"))
+        if start_ts is not None:
+            days = pd.bdate_range(start=start_ts.normalize(), end=end_ts.normalize())
+        else:
+            days = pd.bdate_range(end=end_ts.normalize(), periods=max(1, min(int(query.period_days or 5), 10)))
+        intraday_times: List[pd.Timestamp] = []
+        for day in days:
+            morning = pd.date_range(day + pd.Timedelta(hours=9, minutes=30), day + pd.Timedelta(hours=11, minutes=30), freq=f"{minute_step}min")
+            afternoon = pd.date_range(day + pd.Timedelta(hours=13), day + pd.Timedelta(hours=15), freq=f"{minute_step}min")
+            intraday_times.extend(list(morning) + list(afternoon))
+        rows = []
+        prev = _price(0)
+        for idx, ts in enumerate(intraday_times):
+            close = _price(idx) * (1.0 + math.sin(idx / 11.0) * 0.001)
+            open_ = prev
+            high = max(open_, close) * 1.0008
+            low = min(open_, close) * 0.9992
+            volume = int(5_000_000 + (seed_int % 100) * 1000 + (idx % 31) * 80_000)
+            rows.append(
+                {
+                    "datetime": ts.strftime("%Y-%m-%d %H:%M:%S"),
+                    "date": ts.strftime("%Y-%m-%d"),
+                    "open": open_,
+                    "high": high,
+                    "low": low,
+                    "close": close,
+                    "volume": volume,
+                    "amount": close * volume,
+                    "fallback_errors": " | ".join(errors or []),
+                }
+            )
+            prev = close
+        return pd.DataFrame(rows)
 
     def _fetch_from_akshare(self, query: MarketDataQuery) -> pd.DataFrame:
         if ak is None:

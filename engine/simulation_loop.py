@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import random
 import uuid
 from collections import defaultdict
@@ -20,6 +21,7 @@ from agents.trading_agent_core import GLOBAL_CONFIG, Persona, TradingAgent
 from core.market_metrics import MarketMetrics
 from core.market_state import MarketState as UnifiedMarketState
 from core.types import ExecutionPlan, Order, OrderSide, OrderType
+from core.experiment_events import EventDigest, EventImpactProfile, ExperimentEvent, ScenarioEventQueue
 from core.behavioral_finance import (
     StylizedFactsTracker,
     behavioral_update_step,
@@ -50,6 +52,7 @@ from core.runtime_mode import RuntimeModeProfile, resolve_runtime_mode_profile
 from core.social.contagion import ContagionSnapshot, SocialContagionEngine
 from core.social.graph_state import SocialGraphState
 from core.world.event_bus import EventBus
+from engine.agent_scheduler import AgentScheduler
 from engine.market_match import calculate_new_price
 from policy.policy_engine import PolicyEngine
 from policy.interpretation_engine import AgentBelief, PolicyInterpretationEngine
@@ -66,6 +69,15 @@ if not logger.handlers:
 
 def _clip(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, float(value)))
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = str(os.environ.get(name, "")).strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
 
 
 class _NoPolicyEngine:
@@ -237,6 +249,21 @@ class MarketEnvironment:
             else enable_policy_committee
         )
         self.runner_symbol = runner_symbol
+        self.feature_flags = {
+            "vector_fast_agents": _env_flag("CIVITAS_VECTOR_FAST_AGENTS", False),
+            "batched_slow_agents": _env_flag("CIVITAS_BATCHED_SLOW_AGENTS", True),
+            "multi_symbol_v1": _env_flag("CIVITAS_MULTI_SYMBOL_V1", False),
+        }
+        self.supported_symbols = [self.runner_symbol]
+        if self.feature_flags["multi_symbol_v1"]:
+            self.supported_symbols = [
+                self.runner_symbol,
+                "FINANCIALS_PROXY",
+                "GROWTH_PROXY",
+                "CONSUMER_PROXY",
+                "PROPERTY_PROXY",
+                "DEFENSIVE_PROXY",
+            ]
         self.last_step_report: Dict[str, Any] = {}
         self.last_stage_order: List[str] = []
         self.steps_per_day = max(1, int(steps_per_day))
@@ -249,6 +276,12 @@ class MarketEnvironment:
         self._initial_cash: Dict[str, float] = {}
         self._wealth_history: Dict[str, List[float]] = {}
         self._policy_shocks: List[Dict[str, Any]] = []
+        self.runtime_event_queue = ScenarioEventQueue(
+            dataset_version="market_environment_runtime",
+            persist_events=True,
+            event_bus=event_bus,
+        )
+        self._last_event_digest: EventDigest = self.runtime_event_queue.digest_for_time(0)
         self.policy_transmission_history: List[Dict[str, Any]] = []
         self._last_social_mean: float = 0.0
         self.stylized_facts_tracker = StylizedFactsTracker(prices=[self.current_price])
@@ -291,15 +324,23 @@ class MarketEnvironment:
         self.spoofing_agent = SpoofingAgent(intensity=self._abuse_agent_scale)
         self._exogenous_backdrop: List[ExogenousBackdropPoint] = []
         self._latest_hybrid_point: Optional[Dict[str, float]] = None
-        self.policy_interpreter = PolicyInterpretationEngine(default_symbols=[self.runner_symbol])
+        self.policy_interpreter = PolicyInterpretationEngine(default_symbols=self.supported_symbols)
         self.execution_adapter = ExecutionAdapter(default_symbol=self.runner_symbol)
         self._last_policy_package: Optional[Any] = None
         self._last_policy_committee_review: Dict[str, Any] = {}
         self._last_agent_beliefs: List[AgentBelief] = []
+        self.agent_scheduler = AgentScheduler()
+        self._belief_cache: Dict[str, AgentBelief] = {}
+        self._last_belief_cache_stats: Dict[str, Any] = {
+            "belief_cache_hit_count": 0,
+            "belief_cache_miss_count": 0,
+            "belief_cache_hit_rate": 0.0,
+        }
         self.unified_market_state = UnifiedMarketState.from_symbol_price(self.runner_symbol, self.current_price)
 
         self.macro_state = macro_state or MacroState()
         self.event_bus = event_bus or EventBus()
+        self.runtime_event_queue.event_bus = self.event_bus
         self.government = government or GovernmentAgent()
         self.bank = bank or BankAgent()
         self.contagion_engine = contagion_engine or SocialContagionEngine()
@@ -531,6 +572,44 @@ class MarketEnvironment:
         self._policy_shocks.append(record)
         return str(record["policy_id"])
 
+    def schedule_experiment_event(
+        self,
+        raw_text: str,
+        *,
+        event_type: str = "major_news",
+        title: str = "",
+        strength: float = 1.0,
+        half_life: float = 7.0,
+        scope: str = "broad_market",
+        channels: Optional[Sequence[str]] = None,
+        confidence: float = 0.75,
+        source: str = "external",
+        effective_tick: Optional[int] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> Optional[str]:
+        """Inject a generic runtime event into the market loop."""
+        text = str(raw_text or "").strip()
+        if not text:
+            return None
+        tick = int(effective_tick) if effective_tick is not None else int(self.simulation_time + 1)
+        event = ExperimentEvent.create(
+            event_type=event_type,
+            title=title or text[:28],
+            raw_text=text,
+            effective_day=max(1, int(self._day_count + 1)),
+            effective_tick=tick,
+            strength=float(max(0.0, strength)),
+            half_life=float(max(half_life, 1e-6)),
+            scope=str(scope or "broad_market"),
+            channels=list(channels or []),
+            confidence=float(confidence),
+            source=str(source or "external"),
+            metadata=dict(metadata or {}),
+            created_day=int(self._day_count),
+            created_tick=int(self.simulation_time),
+        )
+        return self.runtime_event_queue.append_event(event)
+
     def _consume_policy_shock(self) -> Optional[str]:
         if not self._policy_shocks:
             return None
@@ -739,6 +818,76 @@ class MarketEnvironment:
             )
         )
 
+    def _batch_interpret_beliefs_cached(
+        self,
+        *,
+        market_state_payload: Mapping[str, Any],
+        event_digest: Optional[EventDigest] = None,
+    ) -> List[AgentBelief]:
+        if self._last_policy_package is None:
+            self._last_belief_cache_stats = {
+                "belief_cache_hit_count": 0,
+                "belief_cache_miss_count": 0,
+                "belief_cache_hit_rate": 0.0,
+            }
+            return []
+        hits = 0
+        misses = 0
+        beliefs: List[AgentBelief] = []
+        pkg_hash = str(getattr(self._last_policy_package, "metadata", {}).get("config_hash", "")) or str(
+            getattr(getattr(self._last_policy_package, "event", None), "policy_id", "")
+        )
+        event_hash = str(getattr(event_digest, "event_hash", "") or "")
+        regime = str(dict(market_state_payload).get("regime", "neutral"))
+        tick = int(dict(market_state_payload).get("tick", self.simulation_time) or self.simulation_time)
+        for agent in self.agents:
+            persona = getattr(agent, "persona", None)
+            persona_key = self.policy_interpreter._persona_key(persona)
+            key = "|".join([pkg_hash, event_hash, persona_key, regime, str(tick), self.runner_symbol])
+            if key in self._belief_cache:
+                beliefs.append(self._belief_cache[key])
+                hits += 1
+                continue
+            belief = self.policy_interpreter.interpret(
+                self._last_policy_package,
+                persona,
+                market_state_payload,
+                getattr(agent, "portfolio", None),
+            )
+            self._belief_cache[key] = belief
+            beliefs.append(belief)
+            misses += 1
+        total = hits + misses
+        self._last_belief_cache_stats = {
+            "belief_cache_hit_count": int(hits),
+            "belief_cache_miss_count": int(misses),
+            "belief_cache_hit_rate": float(hits / max(total, 1)),
+            "belief_cache_size": int(len(self._belief_cache)),
+        }
+        if len(self._belief_cache) > 4096:
+            for old_key in list(self._belief_cache.keys())[:1024]:
+                self._belief_cache.pop(old_key, None)
+        return beliefs
+
+    def _symbol_price_view(self) -> Dict[str, float]:
+        prices = {self.runner_symbol: float(self.current_price)}
+        if not bool(self.feature_flags.get("multi_symbol_v1", False)):
+            return prices
+        sector_effects: Mapping[str, Any] = {}
+        if self._last_policy_package is not None:
+            sector_effects = dict(getattr(self._last_policy_package, "sector_effects", {}) or {})
+        proxy_map = {
+            "FINANCIALS_PROXY": "financials",
+            "GROWTH_PROXY": "growth",
+            "CONSUMER_PROXY": "consumer",
+            "PROPERTY_PROXY": "property",
+            "DEFENSIVE_PROXY": "defensive",
+        }
+        for symbol, sector in proxy_map.items():
+            sector_bias = float(sector_effects.get(sector, 0.0) or 0.0)
+            prices[symbol] = float(max(0.01, self.current_price * (1.0 + 0.015 * sector_bias)))
+        return prices
+
     def _update_disposition_book(self, agent_actions: Sequence[Any], old_price: float) -> None:
         for idx, action in enumerate(agent_actions):
             if idx >= len(self.agents):
@@ -945,6 +1094,76 @@ class MarketEnvironment:
                     "metadata": {},
                 }
 
+        runtime_event_digest_payload: Dict[str, Any] = {}
+        if scheduled_policy and isinstance(scheduled_policy.get("metadata"), Mapping):
+            maybe_digest = dict(scheduled_policy.get("metadata", {}) or {}).get("runtime_event_digest")
+            if isinstance(maybe_digest, Mapping):
+                runtime_event_digest_payload = dict(maybe_digest)
+        runtime_event_digest = self.runtime_event_queue.digest_for_time(self._day_count + 1, self.simulation_time)
+        if runtime_event_digest.active_events:
+            local_text = runtime_event_digest.to_policy_text()
+            if scheduled_policy is None:
+                scheduled_policy = {
+                    "policy_text": local_text,
+                    "intensity": float(runtime_event_digest.aggregate_strength),
+                    "policy_id": f"runtime_events_{self.simulation_time}",
+                    "source": "runtime_event_queue",
+                    "metadata": {"runtime_event_digest": runtime_event_digest.to_dict()},
+                }
+            else:
+                scheduled_policy = dict(scheduled_policy)
+                scheduled_policy["policy_text"] = "；".join(
+                    part for part in [str(scheduled_policy.get("policy_text", "")).strip(), local_text] if part
+                )
+                scheduled_policy["intensity"] = float(scheduled_policy.get("intensity", 1.0) or 1.0) + float(
+                    runtime_event_digest.aggregate_strength
+                )
+                metadata = dict(scheduled_policy.get("metadata", {}) or {})
+                metadata["runtime_event_queue_digest"] = runtime_event_digest.to_dict()
+                scheduled_policy["metadata"] = metadata
+        def _impact_from_payload(payload: Mapping[str, Any]) -> EventImpactProfile:
+            raw_impact = payload.get("aggregate_impact", {}) if isinstance(payload, Mapping) else {}
+            if not isinstance(raw_impact, Mapping):
+                return EventImpactProfile()
+            allowed = {
+                "channels",
+                "macro_delta",
+                "social_delta",
+                "market_delta",
+                "affected_symbols",
+                "affected_sectors",
+                "affected_cohorts",
+                "direction",
+                "confidence",
+                "lag_days",
+                "decay_half_life",
+                "liquidity_impact",
+                "funding_stress",
+                "sentiment_impact",
+                "compliance_pressure",
+            }
+            return EventImpactProfile(**{key: value for key, value in dict(raw_impact).items() if key in allowed})
+
+        if runtime_event_digest_payload and not runtime_event_digest.active_events:
+            self._last_event_digest = EventDigest(
+                day_index=int(runtime_event_digest_payload.get("day_index", self._day_count + 1) or self._day_count + 1),
+                tick=runtime_event_digest_payload.get("tick"),
+                active_events=list(runtime_event_digest_payload.get("active_events", []) or []),
+                queued_events=list(runtime_event_digest_payload.get("queued_events", []) or []),
+                expired_events=list(runtime_event_digest_payload.get("expired_events", []) or []),
+                by_type=dict(runtime_event_digest_payload.get("by_type", {}) or {}),
+                policy_digest=str(runtime_event_digest_payload.get("policy_digest", "") or ""),
+                news_digest=str(runtime_event_digest_payload.get("news_digest", "") or ""),
+                rumor_digest=str(runtime_event_digest_payload.get("rumor_digest", "") or ""),
+                refute_digest=str(runtime_event_digest_payload.get("refute_digest", "") or ""),
+                macro_shock_digest=str(runtime_event_digest_payload.get("macro_shock_digest", "") or ""),
+                aggregate_strength=float(runtime_event_digest_payload.get("aggregate_strength", 0.0) or 0.0),
+                aggregate_impact=_impact_from_payload(runtime_event_digest_payload),
+                event_hash=str(runtime_event_digest_payload.get("event_hash", "") or ""),
+            )
+        else:
+            self._last_event_digest = runtime_event_digest
+
         policy_text = str(scheduled_policy.get("policy_text", "")).strip() if scheduled_policy else None
         policy_intensity = float(scheduled_policy.get("intensity", 1.0) if scheduled_policy else 1.0)
         policy_source = str(scheduled_policy.get("source", "external") if scheduled_policy else "external")
@@ -958,11 +1177,15 @@ class MarketEnvironment:
 
         # 2) macro update
         self.last_stage_order.append("macro update")
-        household_signals, firm_signals, bank_signal = self._update_macro(policy_shock, policy_text)
+        household_signals, firm_signals, bank_signal = self._update_macro(
+            policy_shock,
+            policy_text,
+            event_digest=self._last_event_digest,
+        )
 
         # 3) social contagion
         self.last_stage_order.append("social contagion")
-        contagion = self._run_social_contagion(policy_shock)
+        contagion = self._run_social_contagion(policy_shock, event_digest=self._last_event_digest)
 
         # 4) agent cognition
         self.last_stage_order.append("agent cognition")
@@ -974,6 +1197,7 @@ class MarketEnvironment:
             "price_history": list(self.price_history),
             "symbol": self.runner_symbol,
             "macro_context": macro_context.to_payload(),
+            "runtime_event_digest": self._last_event_digest.to_dict(),
         }
 
         async def process_agent(agent: Any):
@@ -1037,24 +1261,36 @@ class MarketEnvironment:
             await asyncio.sleep(self.deep_reasoning_pause_s)
 
         logger.info("Collecting agent decisions: %s agents", len(self.agents))
-        agent_actions = await asyncio.gather(*(process_agent(agent) for agent in self.agents))
+        scheduler_result = await self.agent_scheduler.collect_actions(
+            self.agents,
+            process_agent=process_agent,
+            tick=int(self.simulation_time),
+            current_price=float(self.current_price),
+            runner_symbol=self.runner_symbol,
+            event_digest=self._last_event_digest.to_dict(),
+            macro_state=self.macro_state.to_dict(),
+        )
+        agent_actions = list(scheduler_result.actions)
         actions_by_agent: Dict[str, Any] = {
             str(getattr(agent, "agent_id", f"agent_{idx}")): action
             for idx, (agent, action) in enumerate(zip(self.agents, agent_actions))
         }
-        self._last_agent_beliefs = self.policy_interpreter.batch_interpret(
-            self._last_policy_package,
-            self.agents,
-            {
-                "tick": int(self.simulation_time),
-                "symbols": [self.runner_symbol],
-                "symbol": self.runner_symbol,
-                "last_price": float(self.current_price),
-                "prices": {self.runner_symbol: float(self.current_price)},
-                "macro_state": self.macro_state.to_dict(),
-                "liquidity_index": float(self.macro_state.liquidity_index),
-                "sentiment_index": float(self.macro_state.sentiment_index),
-            },
+        symbol_prices = self._symbol_price_view()
+        symbol_list = list(symbol_prices.keys())
+        belief_market_state = {
+            "tick": int(self.simulation_time),
+            "symbols": symbol_list,
+            "symbol": self.runner_symbol,
+            "last_price": float(self.current_price),
+            "prices": symbol_prices,
+            "macro_state": self.macro_state.to_dict(),
+            "liquidity_index": float(self.macro_state.liquidity_index),
+            "sentiment_index": float(self.macro_state.sentiment_index),
+            "event_digest": self._last_event_digest.to_dict(),
+        }
+        self._last_agent_beliefs = self._batch_interpret_beliefs_cached(
+            market_state_payload=belief_market_state,
+            event_digest=self._last_event_digest,
         )
 
         # 5) trading intent
@@ -1096,9 +1332,9 @@ class MarketEnvironment:
                     plans: List[ExecutionPlan] = []
                     market_state_payload = {
                         "symbol": self.runner_symbol,
-                        "symbols": [self.runner_symbol],
+                        "symbols": symbol_list,
                         "last_price": float(self.current_price),
-                        "prices": {self.runner_symbol: float(self.current_price)},
+                        "prices": symbol_prices,
                     }
                     for idx, action in enumerate(agent_actions):
                         belief = self._last_agent_beliefs[idx] if idx < len(self._last_agent_beliefs) else None
@@ -1229,7 +1465,17 @@ class MarketEnvironment:
             "slow_count": int(sum(int(getattr(agent, "slow_think_count", 0) or 0) for agent in self.agents)),
             "llm_enabled_agents": int(sum(1 for agent in self.agents if bool(getattr(agent, "use_llm", False)))),
             "llm_primary": bool(self.llm_primary),
+            **dict(scheduler_result.stats),
+            **dict(self._last_belief_cache_stats),
         }
+        cache_checks = int(thinking_stats.get("cache_hit_count", 0)) + int(thinking_stats.get("batch_count", 0))
+        belief_checks = int(thinking_stats.get("belief_cache_hit_count", 0)) + int(thinking_stats.get("belief_cache_miss_count", 0))
+        total_hits = int(thinking_stats.get("cache_hit_count", 0)) + int(thinking_stats.get("belief_cache_hit_count", 0))
+        total_checks = max(1, cache_checks + belief_checks)
+        thinking_stats["cache_hit_rate"] = float(total_hits / total_checks)
+        thinking_stats["llm_call_count"] = int(thinking_stats.get("llm_call_count", 0))
+        thinking_stats["batch_count"] = int(thinking_stats.get("batch_count", 0))
+        thinking_stats["avg_slow_agent_latency_ms"] = float(thinking_stats.get("avg_slow_agent_latency_ms", 0.0))
 
         self.unified_market_state = self.unified_market_state.apply_snapshot(
             matching_snapshot,
@@ -1338,6 +1584,7 @@ class MarketEnvironment:
                 "last_price": float(self.current_price),
                 "microstructure_score": float(realism_diagnostics.get("microstructure_score", 0.0) or 0.0),
             },
+            "runtime_events": self._last_event_digest.to_dict(),
             "index_move": {
                 "old_price": float(old_price),
                 "new_price": float(self.current_price),
@@ -1359,6 +1606,7 @@ class MarketEnvironment:
                 "policy_text": policy_text or "",
                 "policy_intensity": float(policy_intensity),
                 "policy_source": policy_source,
+                "runtime_event_digest": self._last_event_digest.to_dict(),
             },
             "matching_mode": matching_mode,
             "pipeline_version": "v2" if self.market_pipeline_v2 else "v1",
@@ -1366,6 +1614,9 @@ class MarketEnvironment:
             "buffered_intents": buffered_intents,
             "simulation_mode": self.simulation_mode,
             "mode_runtime": self.runtime_profile.to_dict(),
+            "feature_flags": dict(self.feature_flags),
+            "supported_symbols": symbol_list,
+            "symbol_prices": symbol_prices,
             "llm_pause_seconds": float(self.deep_reasoning_pause_s),
             "stage_order": list(self.last_stage_order),
             "macro_state": self.macro_state.to_dict(),
@@ -1374,9 +1625,17 @@ class MarketEnvironment:
             "realism_diagnostics": realism_diagnostics,
             "role_order_flows": role_order_flows,
             "thinking_stats": thinking_stats,
+            "llm_call_count": int(thinking_stats.get("llm_call_count", 0)),
+            "batch_count": int(thinking_stats.get("batch_count", 0)),
+            "cache_hit_count": int(thinking_stats.get("cache_hit_count", 0)) + int(thinking_stats.get("belief_cache_hit_count", 0)),
+            "cache_hit_rate": float(thinking_stats.get("cache_hit_rate", 0.0)),
+            "avg_slow_agent_latency_ms": float(thinking_stats.get("avg_slow_agent_latency_ms", 0.0)),
+            "fast_agent_count": int(thinking_stats.get("fast_agent_count", 0)),
+            "slow_agent_count": int(thinking_stats.get("slow_agent_count", 0)),
             "social_mean_sentiment": contagion.mean_sentiment,
             "policy_transmission_chain": policy_chain,
             "macro_context": macro_context.to_payload(),
+            "runtime_event_digest": self._last_event_digest.to_dict(),
             "behavioral_diagnostics": {
                 "csad": float(csad_value),
                 "loss_aversion_intensity": float(loss_intensity),
@@ -1522,15 +1781,26 @@ class MarketEnvironment:
         return shock
 
     def _update_macro(
-        self, policy_shock: Optional[PolicyShock], policy_text: Optional[str]
+        self,
+        policy_shock: Optional[PolicyShock],
+        policy_text: Optional[str],
+        event_digest: Optional[EventDigest] = None,
     ) -> tuple[List[HouseholdSignal], List[FirmSignal], Dict[str, float]]:
         if policy_shock is not None:
             self.government.apply_policy_shock(self.macro_state, policy_shock)
+        if event_digest is not None:
+            macro_delta = dict(getattr(event_digest.aggregate_impact, "macro_delta", {}) or {})
+            if macro_delta:
+                self.macro_state.apply_delta(**macro_delta)
 
         liquidity_shock = policy_shock.liquidity_injection if policy_shock else 0.0
         sentiment_shock = (
             (policy_shock.sentiment_delta + policy_shock.rumor_shock) if policy_shock else 0.0
         )
+        if event_digest is not None:
+            impact = getattr(event_digest, "aggregate_impact", None)
+            liquidity_shock += float(getattr(impact, "liquidity_impact", 0.0) or 0.0)
+            sentiment_shock += float(getattr(impact, "sentiment_impact", 0.0) or 0.0)
         bank_signal = self.bank.step(
             self.macro_state,
             liquidity_shock=liquidity_shock,
@@ -1582,12 +1852,20 @@ class MarketEnvironment:
                 "bank_signal": bank_signal,
                 "household_count": len(household_signals),
                 "firm_count": len(firm_signals),
+                "runtime_event_digest": event_digest.to_dict() if event_digest is not None else {},
             },
         )
         return household_signals, firm_signals, bank_signal
 
-    def _run_social_contagion(self, policy_shock: Optional[PolicyShock]) -> ContagionSnapshot:
+    def _run_social_contagion(
+        self,
+        policy_shock: Optional[PolicyShock],
+        event_digest: Optional[EventDigest] = None,
+    ) -> ContagionSnapshot:
         rumor = policy_shock.rumor_shock if policy_shock else 0.0
+        if event_digest is not None:
+            social_delta = dict(getattr(event_digest.aggregate_impact, "social_delta", {}) or {})
+            rumor += float(social_delta.get("rumor_pressure", 0.0) or 0.0)
         contagion = self.contagion_engine.step(self.social_graph, self.macro_state, rumor_shock=rumor)
         self._last_social_mean = contagion.mean_sentiment
         self.macro_state.sentiment_index = _clip(
@@ -1723,6 +2001,7 @@ class MarketEnvironment:
 
         return {
             "policy": policy_text or "no_policy",
+            "runtime_events": self._last_event_digest.to_dict(),
             "macro_variables": {
                 "inflation": self.macro_state.inflation,
                 "unemployment": self.macro_state.unemployment,

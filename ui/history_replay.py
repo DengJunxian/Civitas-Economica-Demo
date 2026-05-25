@@ -1045,6 +1045,8 @@ def _render_metric_cards(result: BacktestResult, metrics: Dict[str, float]) -> N
 
 def _render_authenticity_overview(bundle: Dict[str, Any], result: BacktestResult) -> None:
     score = float(result.metadata.get("demo_authenticity_score", 0.0) or 0.0)
+    strict_score = float(result.metadata.get("strict_authenticity_score", 0.0) or 0.0)
+    mode = str(result.metadata.get("history_replay_mode", bundle.get("replay_mode", "demo")) or "demo")
     coverage = dict(result.metadata.get("news_coverage", {}) or {})
     pre_coverage = dict(bundle.get("pre_news_coverage", {}) or {})
     overview_left, overview_right = st.columns([1.15, 1.0])
@@ -1054,7 +1056,7 @@ def _render_authenticity_overview(bundle: Dict[str, Any], result: BacktestResult
             <div class="summary-card">
               <div class="summary-label">综合拟真评分</div>
               <div class="summary-value">{score:.0%}</div>
-              <div class="summary-note">用于综合表达历史路径、波动状态、回撤表现与新闻覆盖对回放质量的支撑程度。</div>
+              <div class="summary-note">当前口径：{mode}。严格分数 {strict_score:.0%}，展示分数 {score:.0%}；raw metrics 与 display metrics 分开记录。</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1264,6 +1266,10 @@ def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> 
         "strict_authenticity_score": result.metadata.get("strict_authenticity_score"),
         "demo_authenticity_score": result.metadata.get("demo_authenticity_score"),
         "score_adjustment_trace": result.metadata.get("score_adjustment_trace", []),
+        "history_replay_mode": result.metadata.get("history_replay_mode", bundle.get("replay_mode", "demo")),
+        "raw_vs_display": result.metadata.get("raw_vs_display", {}),
+        "raw_simulated_prices": result.metadata.get("raw_simulated_prices", []),
+        "display_simulated_prices": result.metadata.get("display_simulated_prices", result.simulated_prices),
         "news_coverage": result.metadata.get("news_coverage", {}),
         "news_digest": result.metadata.get("news_digest", []),
         "pre_news_coverage": bundle.get("pre_news_coverage", {}),
@@ -1511,8 +1517,15 @@ def _render_agent_replay_workspace(
             )
             news_topk_per_day = st.slider("每日主要新闻条数", min_value=3, max_value=12, value=8, step=1)
             persist_news_events = st.toggle("默认写入事件库以复现", value=True)
-            auth_score_mode = "demo_first"
-            show_strict_details = False
+            replay_mode = st.radio(
+                "评估口径",
+                options=["strict", "demo"],
+                index=1,
+                format_func=lambda value: "严格评测（不做展示校准）" if value == "strict" else "答辩展示（保留展示校准）",
+                horizontal=False,
+            )
+            auth_score_mode = "strict" if replay_mode == "strict" else "demo_first"
+            show_strict_details = replay_mode == "strict"
             enable_baseline = False
         submitted = st.form_submit_button("运行历史验证", use_container_width=True, type="primary")
 
@@ -1584,6 +1597,8 @@ def _render_agent_replay_workspace(
             random_seed=42,
             feature_flags={
                 "agent_replay": bool(enable_agent_replay),
+                "strict_history_replay": bool(replay_mode == "strict"),
+                "history_replay_demo_mode": bool(replay_mode == "demo"),
             },
         )
         engine, resolved_mode, fallback_reason = _select_replay_engine(config, engine_mode, config.feature_flags)
@@ -1643,7 +1658,8 @@ def _render_agent_replay_workspace(
         if result is None:
             st.error("未能生成回测结果，请稍后重试。")
             return
-        _apply_moderate_calibration(result)
+        if not bool(result.metadata.get("strict_mode", False)) and str(replay_mode) != "strict":
+            _apply_moderate_calibration(result)
         _moderate_display_confidence(result)
 
         bundle = {
@@ -1663,6 +1679,7 @@ def _render_agent_replay_workspace(
             "baseline_result": baseline_result,
             "metrics": _build_replay_metrics(result),
             "show_strict_details": bool(show_strict_details),
+            "replay_mode": str(replay_mode),
             "history_case": None,
             "pre_news_coverage": pre_news_coverage,
             "pre_news_digest": pre_news_digest,

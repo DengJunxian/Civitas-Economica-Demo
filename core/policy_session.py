@@ -12,6 +12,8 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 import pandas as pd
 
+from core.event_store import EventStore
+from core.experiment_events import EventDigest, ExperimentEvent, ScenarioEventQueue
 from engine.simulation_loop import MarketEnvironment
 
 
@@ -107,6 +109,8 @@ class PolicySessionConfig:
     hybrid_replay: bool = False
     exogenous_backdrop: Optional[Sequence[Mapping[str, Any]] | str] = None
     hybrid_backdrop_weight: float = 0.0
+    event_dataset_version: str = "policy_lab_runtime"
+    persist_runtime_events: bool = True
 
 
 class PolicySession:
@@ -118,6 +122,7 @@ class PolicySession:
         environment: Optional[MarketEnvironment] = None,
         agents: Optional[Sequence[Any]] = None,
         config: Optional[PolicySessionConfig] = None,
+        event_store: Optional[EventStore] = None,
     ) -> None:
         self.config = config or PolicySessionConfig()
         self.start_date = _coerce_date(self.config.start_date)
@@ -127,8 +132,16 @@ class PolicySession:
         self._stopped = False
         self._daily_rows: List[Dict[str, Any]] = []
         self._policy_plans: List[PolicyPlan] = []
+        self._event_queue = ScenarioEventQueue(
+            event_store=event_store,
+            dataset_version=str(self.config.event_dataset_version),
+            persist_events=bool(self.config.persist_runtime_events),
+            event_bus=getattr(environment, "event_bus", None) if environment is not None else None,
+        )
+        self._last_event_digest: EventDigest = self._event_queue.digest_for_time(0)
         self._last_result: Dict[str, Any] = {}
         self._environment = environment or self._build_environment(list(agents or []))
+        self._event_queue.event_bus = getattr(self._environment, "event_bus", None)
 
         if self.config.base_policy:
             self.enqueue_policy(
@@ -164,6 +177,8 @@ class PolicySession:
         hybrid_replay: bool = False,
         exogenous_backdrop: Optional[Sequence[Mapping[str, Any]] | str] = None,
         hybrid_backdrop_weight: float = 0.0,
+        event_dataset_version: str = "policy_lab_runtime",
+        persist_runtime_events: bool = True,
     ) -> "PolicySession":
         config = PolicySessionConfig(
             total_days=int(total_days),
@@ -184,6 +199,8 @@ class PolicySession:
             hybrid_replay=bool(hybrid_replay),
             exogenous_backdrop=exogenous_backdrop,
             hybrid_backdrop_weight=float(hybrid_backdrop_weight or 0.0),
+            event_dataset_version=str(event_dataset_version or "policy_lab_runtime"),
+            persist_runtime_events=bool(persist_runtime_events),
         )
         return cls(environment=environment, agents=agents, config=config)
 
@@ -253,6 +270,10 @@ class PolicySession:
     def policies(self) -> List[PolicyPlan]:
         return list(self._policy_plans)
 
+    @property
+    def events(self) -> List[ExperimentEvent]:
+        return list(self._event_queue.events)
+
     def start(self) -> "PolicySession":
         if not self._stopped:
             self._status = "running"
@@ -304,10 +325,234 @@ class PolicySession:
             created_day=int(self._current_day),
         )
         self._policy_plans.append(plan)
+        self._event_queue.append_event(
+            ExperimentEvent.create(
+                event_id=policy_id,
+                event_type="policy",
+                title=str(label or text[:20] or "政策事件"),
+                raw_text=text,
+                effective_day=day,
+                strength=float(max(0.0, strength)),
+                half_life=float(half_life_days if half_life_days is not None else self.config.half_life_days),
+                scope=str(dict(metadata or {}).get("scope", "broad_market")),
+                channels=list(dict(metadata or {}).get("channels", []) or []),
+                confidence=float(dict(metadata or {}).get("confidence", 0.92) or 0.92),
+                source=str(source or "manual"),
+                metadata={
+                    "policy_plan_id": policy_id,
+                    "rumor_noise": bool(rumor_noise),
+                    **dict(metadata or {}),
+                },
+                created_day=int(self._current_day),
+                created_tick=int(getattr(self._environment, "simulation_time", 0) or 0),
+            )
+        )
         return policy_id
 
     add_policy = enqueue_policy
     append_policy = enqueue_policy
+
+    def append_event(
+        self,
+        *,
+        event_type: str,
+        title: str,
+        raw_text: str,
+        effective_day: Optional[int] = None,
+        effective_tick: Optional[int] = None,
+        visibility_time: Any = "",
+        strength: float = 1.0,
+        half_life: float = 7.0,
+        scope: str = "broad_market",
+        channels: Optional[Sequence[str]] = None,
+        confidence: float = 0.75,
+        source: str = "manual",
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> str:
+        """Append a runtime event to the experiment timeline."""
+        text = str(raw_text or "").strip()
+        if not text:
+            raise ValueError("raw_text 不能为空")
+        day = int(effective_day) if effective_day is not None else (self._current_day + 1 if self.is_running else 1)
+        day = max(1, day)
+        return self._event_queue.append(
+            event_type=event_type,
+            title=str(title or text[:24]),
+            raw_text=text,
+            effective_day=day,
+            effective_tick=effective_tick,
+            strength=float(max(0.0, strength)),
+            half_life=float(max(half_life, 1e-6)),
+            scope=str(scope or "broad_market"),
+            channels=list(channels or []),
+            confidence=float(confidence),
+            source=str(source or "manual"),
+            metadata=dict(metadata or {}),
+            created_day=int(self._current_day),
+            created_tick=int(getattr(self._environment, "simulation_time", 0) or 0),
+        )
+
+    def append_news_event(
+        self,
+        raw_text: str,
+        *,
+        title: str = "重大新闻",
+        effective_day: Optional[int] = None,
+        strength: float = 1.0,
+        half_life: float = 5.0,
+        scope: str = "broad_market",
+        confidence: float = 0.78,
+        source: str = "runtime_news",
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> str:
+        return self.append_event(
+            event_type="major_news",
+            title=title,
+            raw_text=raw_text,
+            effective_day=effective_day,
+            strength=strength,
+            half_life=half_life,
+            scope=scope,
+            channels=["information_network", "expectations"],
+            confidence=confidence,
+            source=source,
+            metadata=metadata,
+        )
+
+    def append_macro_event(
+        self,
+        raw_text: str,
+        *,
+        title: str = "宏观冲击",
+        effective_day: Optional[int] = None,
+        strength: float = 1.0,
+        half_life: float = 8.0,
+        scope: str = "funding",
+        confidence: float = 0.82,
+        source: str = "runtime_macro",
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> str:
+        return self.append_event(
+            event_type="macro_shock",
+            title=title,
+            raw_text=raw_text,
+            effective_day=effective_day,
+            strength=strength,
+            half_life=half_life,
+            scope=scope,
+            channels=["macro_state", "funding_conditions"],
+            confidence=confidence,
+            source=source,
+            metadata=metadata,
+        )
+
+    def append_regime_shift(
+        self,
+        raw_text: str,
+        *,
+        title: str = "状态切换",
+        effective_day: Optional[int] = None,
+        strength: float = 1.0,
+        half_life: float = 10.0,
+        scope: str = "broad_market",
+        confidence: float = 0.72,
+        source: str = "runtime_regime",
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> str:
+        return self.append_event(
+            event_type="regime_shift",
+            title=title,
+            raw_text=raw_text,
+            effective_day=effective_day,
+            strength=strength,
+            half_life=half_life,
+            scope=scope,
+            channels=["regime_transition", "risk_budget"],
+            confidence=confidence,
+            source=source,
+            metadata=metadata,
+        )
+
+    def append_rumor_event(
+        self,
+        raw_text: str,
+        *,
+        title: str = "市场谣言",
+        effective_day: Optional[int] = None,
+        strength: float = 1.0,
+        half_life: float = 3.0,
+        scope: str = "expectations",
+        confidence: float = 0.45,
+        source: str = "runtime_rumor",
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> str:
+        return self.append_event(
+            event_type="rumor",
+            title=title,
+            raw_text=raw_text,
+            effective_day=effective_day,
+            strength=strength,
+            half_life=half_life,
+            scope=scope,
+            channels=["rumor_network", "social_contagion"],
+            confidence=confidence,
+            source=source,
+            metadata=metadata,
+        )
+
+    def append_refute_event(
+        self,
+        raw_text: str,
+        *,
+        title: str = "官方澄清",
+        effective_day: Optional[int] = None,
+        strength: float = 1.0,
+        half_life: float = 4.0,
+        scope: str = "expectations",
+        confidence: float = 0.90,
+        source: str = "runtime_refute",
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> str:
+        return self.append_event(
+            event_type="refute",
+            title=title,
+            raw_text=raw_text,
+            effective_day=effective_day,
+            strength=strength,
+            half_life=half_life,
+            scope=scope,
+            channels=["authority_signal", "rumor_suppression"],
+            confidence=confidence,
+            source=source,
+            metadata=metadata,
+        )
+
+    def append_regulatory_action(
+        self,
+        raw_text: str,
+        *,
+        title: str = "监管行动",
+        effective_day: Optional[int] = None,
+        strength: float = 1.0,
+        half_life: float = 6.0,
+        scope: str = "broad_market",
+        confidence: float = 0.88,
+        source: str = "runtime_regulatory",
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> str:
+        return self.append_event(
+            event_type="regulatory_action",
+            title=title,
+            raw_text=raw_text,
+            effective_day=effective_day,
+            strength=strength,
+            half_life=half_life,
+            scope=scope,
+            channels=["regulatory_signal", "compliance_intensity"],
+            confidence=confidence,
+            source=source,
+            metadata=metadata,
+        )
 
     def _active_policies(self, day_index: int) -> List[PolicyPlan]:
         return [plan for plan in self._policy_plans if plan.intensity_for_day(day_index) > 1e-6]
@@ -395,6 +640,7 @@ class PolicySession:
         trade_date = self.calendar[min(max(day_index - 1, 0), len(self.calendar) - 1)]
         old_price, close_price = self._resolve_day_prices(report, active_timeline)
         market_return = float((close_price - old_price) / old_price) if old_price > 0 else 0.0
+        event_digest = dict(report.get("runtime_event_digest", {}) or self._last_event_digest.to_dict())
         row = {
             "交易日序号": int(day_index),
             "交易日": trade_date.strftime("%Y-%m-%d"),
@@ -407,11 +653,14 @@ class PolicySession:
             "政策文本": str(report.get("policy_input", {}).get("policy_text", "")),
             "政策强度": float(report.get("policy_input", {}).get("policy_intensity", 0.0) or 0.0),
             "政策来源": str(report.get("policy_input", {}).get("policy_source", "")),
+            "事件摘要": str(event_digest.get("combined_text", "")),
+            "活跃事件数": int(event_digest.get("active_count", 0) or 0),
             "恐慌度": float(max(0.0, 1.0 - float(report.get("macro_state", {}).get("sentiment_index", 0.0) or 0.0))),
             "羊群度": float(report.get("behavioral_diagnostics", {}).get("csad", 0.0) or 0.0),
             "阶段": "运行中" if self.is_running else self.status,
             "原始报告": dict(report),
             "政策时间轴": list(active_timeline),
+            "事件时间轴": list(event_digest.get("active_events", [])),
         }
         if "macro_state" in report:
             row["宏观状态"] = dict(report.get("macro_state", {}))
@@ -425,6 +674,7 @@ class PolicySession:
 
     def _summary_payload(self) -> Dict[str, Any]:
         frame = self.to_frame()
+        event_digest = self._event_queue.digest_for_time(self._current_day)
         if frame.empty:
             return {
                 "状态": self.status,
@@ -435,6 +685,9 @@ class PolicySession:
                 "最大回撤": 0.0,
                 "最新收盘价": 0.0,
                 "政策数量": len(self._policy_plans),
+                "事件数量": len(self._event_queue.events),
+                "活跃事件数": len(event_digest.active_events),
+                "待生效事件数": len(event_digest.queued_events),
                 "自动随机政策事件": bool(self.config.enable_random_policy_events),
             }
         close = frame["收盘价"].astype(float)
@@ -451,6 +704,9 @@ class PolicySession:
             "初始收盘价": float(close.iloc[0]),
             "日均波动率": float(returns.std()),
             "政策数量": len(self._policy_plans),
+            "事件数量": len(self._event_queue.events),
+            "活跃事件数": len(event_digest.active_events),
+            "待生效事件数": len(event_digest.queued_events),
             "已生效政策数": len([plan for plan in self._policy_plans if plan.effective_day <= self._current_day]),
             "待生效政策数": len(self._queued_policies(self._current_day)),
             "自动随机政策事件": bool(self.config.enable_random_policy_events),
@@ -458,6 +714,9 @@ class PolicySession:
 
     def _timeline_payload(self) -> List[Dict[str, Any]]:
         return [plan.to_timeline_row(self._current_day) for plan in self._policy_plans]
+
+    def _event_timeline_payload(self) -> List[Dict[str, Any]]:
+        return self._event_queue.timeline(self._current_day)
 
     def to_frame(self) -> pd.DataFrame:
         if not self._daily_rows:
@@ -474,6 +733,8 @@ class PolicySession:
                     "政策文本",
                     "政策强度",
                     "政策来源",
+                    "事件摘要",
+                    "活跃事件数",
                     "恐慌度",
                     "羊群度",
                     "阶段",
@@ -603,6 +864,8 @@ class PolicySession:
             "标题": "政策试验台会话报告",
             "会话摘要": self._summary_payload(),
             "政策时间轴": self._timeline_payload(),
+            "事件时间轴": self._event_timeline_payload(),
+            "最新事件摘要": self._last_event_digest.to_dict(),
             "日度结果": frame.to_dict(orient="records"),
             "已完成交易日": int(len(frame)),
             "当前交易日": int(self._current_day),
@@ -768,18 +1031,31 @@ class PolicySession:
 
             self._current_day += 1
             day_text, day_strength, active_timeline = self._build_day_policy_text(self._current_day)
-            if day_text:
+            event_digest = self._event_queue.digest_for_time(
+                self._current_day,
+                tick=int(getattr(self._environment, "simulation_time", 0) or 0) + 1,
+            )
+            self._last_event_digest = event_digest
+            event_text = event_digest.to_policy_text()
+            scheduled_text = event_text or day_text
+            scheduled_strength = float(event_digest.aggregate_strength if event_text else day_strength)
+            if scheduled_text:
                 self._environment.schedule_policy_shock(
-                    day_text,
-                    intensity=float(day_strength),
+                    scheduled_text,
+                    intensity=float(scheduled_strength),
                     policy_id=f"session_day_{self._current_day}",
-                    source="policy_session",
+                    source="policy_session_events",
                     metadata={
                         "day_index": int(self._current_day),
                         "active_policies": list(active_timeline),
+                        "runtime_event_digest": event_digest.to_dict(),
                     },
                 )
             report = dict(await self._environment.simulation_step())
+            report["runtime_event_digest"] = event_digest.to_dict()
+            report.setdefault("policy_input", {})
+            if isinstance(report["policy_input"], dict):
+                report["policy_input"]["runtime_event_digest"] = event_digest.to_dict()
             daily_row = self._record_for_day(self._current_day, report, active_timeline)
             self._daily_rows.append(daily_row)
             self._last_result = report
@@ -801,12 +1077,18 @@ class PolicySession:
         summary = self._summary_payload()
         active_policies = [plan.to_timeline_row(self._current_day) for plan in self._active_policies(self._current_day)]
         queued_policies = [plan.to_timeline_row(self._current_day) for plan in self._queued_policies(self._current_day)]
+        event_digest = self._event_queue.digest_for_time(self._current_day)
         report_payload = self.build_report_payload()
         result = {
             "frame": frame,
             "current_day": int(self._current_day),
             "active_policies": active_policies,
             "queued_policies": queued_policies,
+            "active_events": list(event_digest.active_events),
+            "queued_events": list(event_digest.queued_events),
+            "expired_events": list(event_digest.expired_events),
+            "event_timeline": self._event_timeline_payload(),
+            "event_digest": event_digest.to_dict(),
             "summary": summary,
             "report_payload": report_payload,
             "status": self.status,
@@ -816,4 +1098,4 @@ class PolicySession:
         return result
 
 
-__all__ = ["PolicyPlan", "PolicySession", "PolicySessionConfig"]
+__all__ = ["PolicyPlan", "PolicySession", "PolicySessionConfig", "ExperimentEvent", "EventDigest"]

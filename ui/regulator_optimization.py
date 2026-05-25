@@ -10,6 +10,7 @@ import plotly.express as px
 import streamlit as st
 
 from regulator_agent import run_regulatory_closed_loop
+from ui.dashboard import render_discovered_metrics_panel
 from ui.narrative import narrate_payload, render_narrative_block
 
 
@@ -109,6 +110,9 @@ def render_regulator_optimization() -> None:
     c2.metric("最优动作得分", f"{float(summary.get('best_action_score', 0.0)):.4f}")
     c3.metric("帕累托点数", str(len(frames["pareto"])))
     c4.metric("Q 状态数", str(int(summary.get("q_states", 0))))
+
+    st.markdown("### 发现目标约束")
+    render_discovered_metrics_panel(result.get("discovered_objectives", {}), key_prefix="regulator_objectives")
 
     st.caption(
         "可复现信息："

@@ -32,6 +32,7 @@ class EventType(str, Enum):
     RUMOR = "rumor"
     REFUTE = "refute"
     REGIME = "regime"
+    REGULATORY_ACTION = "regulatory_action"
 
 
 def _to_iso(value: Any) -> str:

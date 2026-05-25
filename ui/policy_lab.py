@@ -20,6 +20,7 @@ from plotly.subplots import make_subplots
 from core.data.market_data_provider import MarketDataProvider, MarketDataQuery
 from core.event_store import EventRecord, EventStore, EventType
 from core.macro.government import GovernmentAgent, PolicyShock
+from core.objective_discovery import ObjectiveDiscoveryEngine
 from core.policy_session import PolicySession
 from core.runtime_paths import resolve_runtime_path
 from core.runtime_mode import RuntimeModeProfile, resolve_runtime_mode_profile
@@ -802,6 +803,24 @@ def _policy_session_timeline_item_from_runner(item: Dict[str, Any]) -> Dict[str,
     }
 
 
+def _policy_session_discovered_metrics(
+    session: Dict[str, Any],
+    frame: Optional[pd.DataFrame] = None,
+    reports: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    market_frame = frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame(session.get("frame_rows", []) or [])
+    report_payloads: List[Dict[str, Any]] = []
+    for item in reports or []:
+        if isinstance(item, dict) and item:
+            report_payloads.append(dict(item))
+    latest = session.get("latest_step_report", {})
+    if isinstance(latest, dict) and latest:
+        report_payloads.append(dict(latest))
+    if market_frame.empty:
+        return ObjectiveDiscoveryEngine().discover([], reports=report_payloads, top_k=8).to_dict()
+    return ObjectiveDiscoveryEngine().discover(market_frame, reports=report_payloads, top_k=8).to_dict()
+
+
 def _policy_session_sync_from_runner(session: Dict[str, Any], snapshot: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     runner = session.get("_runner")
     if not isinstance(runner, PolicySession):
@@ -816,6 +835,14 @@ def _policy_session_sync_from_runner(session: Dict[str, Any], snapshot: Optional
     display_frame = _session_frame_to_market_frame(raw_frame, anchor_close=float(session.get("index_anchor_close", 0.0)))
     active_items = snapshot.get("active_policies", []) if isinstance(snapshot.get("active_policies"), list) else []
     queued_items = snapshot.get("queued_policies", []) if isinstance(snapshot.get("queued_policies"), list) else []
+    runtime_active = snapshot.get("active_events", []) if isinstance(snapshot.get("active_events"), list) else []
+    runtime_queued = snapshot.get("queued_events", []) if isinstance(snapshot.get("queued_events"), list) else []
+    runtime_expired = snapshot.get("expired_events", []) if isinstance(snapshot.get("expired_events"), list) else []
+    runtime_timeline = snapshot.get("event_timeline", []) if isinstance(snapshot.get("event_timeline"), list) else []
+    event_digest = snapshot.get("event_digest", {}) if isinstance(snapshot.get("event_digest"), dict) else {}
+    raw_reports: List[Dict[str, Any]] = []
+    if isinstance(raw_frame, pd.DataFrame) and "原始报告" in raw_frame.columns:
+        raw_reports = [dict(item) for item in raw_frame["原始报告"].tolist() if isinstance(item, dict)]
     policy_events = [_policy_session_timeline_item_from_runner(item) for item in [*active_items, *queued_items]]
     summary_payload = snapshot.get("summary", {}) if isinstance(snapshot.get("summary"), dict) else {}
     session["status"] = str(snapshot.get("status", session.get("status", "idle")))
@@ -824,6 +851,11 @@ def _policy_session_sync_from_runner(session: Dict[str, Any], snapshot: Optional
     session["raw_frame_rows"] = raw_frame.to_dict(orient="records")
     session["policy_events"] = policy_events
     session["policy_timeline"] = policy_events
+    session["runtime_active_events"] = runtime_active
+    session["runtime_queued_events"] = runtime_queued
+    session["runtime_expired_events"] = runtime_expired
+    session["runtime_event_timeline"] = runtime_timeline
+    session["event_digest"] = event_digest
     session["latest_step_report"] = dict(snapshot.get("last_step_report", {}) or {})
     display_latest_close = float(display_frame["close"].iloc[-1]) if not display_frame.empty else float(session.get("last_close", 0.0) or 0.0)
     session["last_close"] = display_latest_close
@@ -837,10 +869,13 @@ def _policy_session_sync_from_runner(session: Dict[str, Any], snapshot: Optional
         "avg_volume": float(display_frame["volume"].mean()) if not display_frame.empty else 0.0,
         "policy_signal_avg": float(len(active_items)),
         "active_policy_max": float(len(active_items)),
+        "active_event_count": float(len(runtime_active)),
+        "queued_event_count": float(len(runtime_queued)),
         "latest_close": display_latest_close,
         "最新收盘价": display_latest_close,
         "累计收益率": float(summary_payload.get("累计收益率", 0.0) or 0.0),
     }
+    session["discovered_metrics"] = _policy_session_discovered_metrics(session, display_frame, raw_reports)
     session["_snapshot"] = snapshot
     return session
 
@@ -1295,6 +1330,7 @@ def _policy_session_refresh_summary(session: Dict[str, Any]) -> Dict[str, float]
             "active_policy_max": 0.0,
         }
         session["summary"] = summary
+        session["discovered_metrics"] = _policy_session_discovered_metrics(session, pd.DataFrame())
         return summary
     summary = _compute_policy_summary(frame.rename(columns={"panic_level": "panic_level", "csad": "csad"}))
     summary["policy_signal_avg"] = float(frame["政策压力"].mean()) if "政策压力" in frame else 0.0
@@ -1302,6 +1338,7 @@ def _policy_session_refresh_summary(session: Dict[str, Any]) -> Dict[str, float]
     summary["latest_close"] = float(frame.iloc[-1]["close"])
     summary["最新收盘价"] = float(frame.iloc[-1]["close"])
     session["summary"] = summary
+    session["discovered_metrics"] = _policy_session_discovered_metrics(session, frame)
     return summary
 
 
@@ -1399,6 +1436,44 @@ def _policy_session_enqueue(
     session["report_payload"] = None
     session["policy_timeline"] = _policy_session_timeline(session)
     return event
+
+
+def _policy_session_enqueue_runtime_event(
+    session: Dict[str, Any],
+    *,
+    event_type: str,
+    title: str,
+    raw_text: str,
+    effective_day: int,
+    strength: float,
+    half_life_days: int,
+    scope: str = "broad_market",
+    confidence: float = 0.75,
+) -> Dict[str, Any]:
+    runner = session.get("_runner")
+    if isinstance(runner, PolicySession):
+        event_id = runner.append_event(
+            event_type=event_type,
+            title=title,
+            raw_text=raw_text,
+            effective_day=max(1, int(effective_day)),
+            strength=float(strength),
+            half_life=float(half_life_days),
+            scope=str(scope or "broad_market"),
+            confidence=float(confidence),
+            source="policy_lab_runtime_ui",
+            metadata={"ui_injected": True},
+        )
+        _policy_session_sync_from_runner(session)
+        return next(
+            (
+                dict(item)
+                for item in list(session.get("runtime_event_timeline", []) or [])
+                if str(item.get("event_id", "")) == str(event_id)
+            ),
+            {"event_id": event_id, "event_type": event_type, "title": title, "raw_text": raw_text},
+        )
+    return {}
 
 
 def _policy_session_advance(session: Dict[str, Any], days: int) -> Dict[str, Any]:
@@ -1502,6 +1577,9 @@ def _policy_session_report_payload(session: Dict[str, Any], runtime_profile: Run
         combined_policy_text = "\n".join(str(item.get("政策文本", "")) for item in timeline if str(item.get("政策文本", "")).strip())
         package_dict = _policy_session_policy_package(session)
         summary = dict(session.get("summary", {}) or {})
+        discovered_metrics = dict(session.get("discovered_metrics", {}) or {})
+        if not discovered_metrics:
+            discovered_metrics = ObjectiveDiscoveryEngine().discover(payload.get("日度结果", []), top_k=8).to_dict()
         narrative = _get_policy_narrative(
             combined_policy_text or str(session.get("policy_text", "")),
             summary,
@@ -1509,14 +1587,22 @@ def _policy_session_report_payload(session: Dict[str, Any], runtime_profile: Run
             runtime_profile,
         )
         return {
-            "title": f"政策实验 - {session.get('policy_name', '政策仿真')}",
+            "title": f"政策试验台 - {session.get('policy_name', '政策仿真')}",
             "summary": summary,
             "policy_name": session.get("policy_name", "政策仿真"),
             "policy_text": session.get("policy_text", ""),
             "policy_type": session.get("policy_type", "自定义政策"),
             "timeline": timeline,
+            "runtime_events": {
+                "active": list(session.get("runtime_active_events", []) or []),
+                "queued": list(session.get("runtime_queued_events", []) or []),
+                "expired": list(session.get("runtime_expired_events", []) or []),
+                "timeline": list(session.get("runtime_event_timeline", []) or []),
+                "digest": dict(session.get("event_digest", {}) or {}),
+            },
             "frame": payload.get("日度结果", []),
             "policy_package": package_dict,
+            "discovered_metrics": discovered_metrics,
             "runtime_mode": runtime_profile.mode,
             "runtime_profile": runtime_profile.to_dict(),
             "narrative": narrative,
@@ -1556,14 +1642,22 @@ def _policy_session_report_payload(session: Dict[str, Any], runtime_profile: Run
         runtime_profile,
     )
     return {
-            "title": f"政策实验 - {session.get('policy_name', '政策仿真')}",
+        "title": f"政策试验台 - {session.get('policy_name', '政策仿真')}",
         "summary": summary,
         "policy_name": session.get("policy_name", "政策仿真"),
         "policy_text": session.get("policy_text", ""),
         "policy_type": session.get("policy_type", "自定义政策"),
         "timeline": _policy_session_timeline(session),
+        "runtime_events": {
+            "active": list(session.get("runtime_active_events", []) or []),
+            "queued": list(session.get("runtime_queued_events", []) or []),
+            "expired": list(session.get("runtime_expired_events", []) or []),
+            "timeline": list(session.get("runtime_event_timeline", []) or []),
+            "digest": dict(session.get("event_digest", {}) or {}),
+        },
         "frame": frame.to_dict(orient="records"),
         "policy_package": package_dict,
+        "discovered_metrics": dict(session.get("discovered_metrics", {}) or _policy_session_discovered_metrics(session, frame)),
         "runtime_mode": runtime_profile.mode,
         "runtime_profile": runtime_profile.to_dict(),
         "narrative": narrative,
@@ -1915,6 +2009,80 @@ def _policy_session_display_frame(frame: pd.DataFrame) -> pd.DataFrame:
     if "成交量" in display.columns:
         display = display.drop(columns=["成交量"], errors="ignore")
     return display
+
+
+def _render_discovered_metrics_panel(discovered_metrics: Dict[str, Any]) -> None:
+    payload = dict(discovered_metrics or {})
+    top_metrics = list(payload.get("top_metrics", []) or payload.get("ranked_metrics", [])[:8])
+    pareto = list(payload.get("pareto_frontier", []) or [])
+    if not top_metrics:
+        st.info("目标发现将在生成市场路径后显示。")
+        return
+
+    st.markdown("### 目标发现与指标组合")
+    score = float(payload.get("composite_score", payload.get("composite_policy_score", 0.0)) or 0.0)
+    weights = dict(payload.get("weight_decomposition", {}) or {})
+    shanghai = dict(payload.get("shanghai_index_metric", {}) or {})
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Composite Policy Score", f"{score:.3f}")
+    c2.metric("候选指标池", int(len(payload.get("candidate_pool", []) or [])))
+    c3.metric("上证指数关系", str(shanghai.get("relation_to_shanghai_index", "self") or "self"))
+
+    metric_frame = pd.DataFrame(top_metrics)
+    display_cols = [
+        col
+        for col in [
+            "name",
+            "category",
+            "rank_score",
+            "composite_weight",
+            "policy_sensitivity",
+            "robustness",
+            "early_warning_utility",
+            "relation_to_shanghai_index",
+        ]
+        if col in metric_frame.columns
+    ]
+    if display_cols:
+        st.dataframe(metric_frame[display_cols], use_container_width=True, hide_index=True)
+
+    if pareto:
+        pareto_frame = pd.DataFrame(pareto)
+        if {"policy_sensitivity", "robustness", "name"}.issubset(pareto_frame.columns):
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(
+                    x=pareto_frame["policy_sensitivity"],
+                    y=pareto_frame["robustness"],
+                    mode="markers+text",
+                    text=pareto_frame["name"],
+                    textposition="top center",
+                    marker=dict(
+                        size=10 + 24 * pd.to_numeric(pareto_frame.get("early_warning_utility", 0.0), errors="coerce").fillna(0.0),
+                        color=pd.to_numeric(pareto_frame.get("rank_score", 0.0), errors="coerce").fillna(0.0),
+                        colorscale="Viridis",
+                        showscale=True,
+                        colorbar=dict(title="rank"),
+                    ),
+                )
+            )
+            fig.update_layout(
+                title="Pareto 前沿：敏感性 × 稳健性",
+                xaxis_title="policy sensitivity",
+                yaxis_title="robustness",
+                height=320,
+                template="plotly_dark",
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                margin=dict(l=20, r=20, t=48, b=20),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    if weights:
+        weight_frame = pd.DataFrame(
+            [{"metric": key, "weight": float(value)} for key, value in sorted(weights.items(), key=lambda item: float(item[1]), reverse=True)]
+        )
+        st.bar_chart(weight_frame.set_index("metric"))
 
 
 def _compute_policy_summary(metrics: pd.DataFrame) -> Dict[str, float]:
@@ -3625,6 +3793,8 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
         else:
             st.info("当前数据量不足，继续推进会话后可查看反事实对照结果。")
 
+        _render_discovered_metrics_panel(dict(session.get("discovered_metrics", {}) or {}))
+
         with st.expander("查看政策时间轴、追加政策与日度明细", expanded=False):
             st.markdown("#### 政策时间轴")
             timeline_df = pd.DataFrame(session.get("policy_timeline", []) or _policy_session_timeline(session))
@@ -3632,6 +3802,38 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                 st.dataframe(timeline_df, use_container_width=True, hide_index=True)
             else:
                 st.info("当前还没有追加政策。")
+
+            st.markdown("#### 运行时事件时间轴")
+            runtime_timeline_df = pd.DataFrame(session.get("runtime_event_timeline", []) or [])
+            if not runtime_timeline_df.empty:
+                preferred_cols = [
+                    col
+                    for col in [
+                        "status",
+                        "event_type",
+                        "title",
+                        "effective_day",
+                        "current_strength",
+                        "scope",
+                        "confidence",
+                        "source",
+                    ]
+                    if col in runtime_timeline_df.columns
+                ]
+                st.dataframe(
+                    runtime_timeline_df[preferred_cols] if preferred_cols else runtime_timeline_df,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.info("当前还没有运行时事件。")
+
+            event_digest = dict(session.get("event_digest", {}) or {})
+            digest_cols = st.columns(4)
+            digest_cols[0].metric("活跃事件", int(event_digest.get("active_count", 0) or 0))
+            digest_cols[1].metric("待进入", int(event_digest.get("queued_count", 0) or 0))
+            digest_cols[2].metric("已过期", int(event_digest.get("expired_count", 0) or 0))
+            digest_cols[3].metric("事件强度", f"{float(event_digest.get('aggregate_strength', 0.0) or 0.0):.2f}")
 
             st.markdown("#### 追加政策设置")
             can_append = str(session.get("status", "")).lower() in {"running", "paused"}
@@ -3695,6 +3897,85 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                     )
                     _store_session(session)
                     st.success("政策已加入会话队列。")
+
+            with append_cols[1]:
+                st.markdown("#### 注入重大新闻/谣言/冲击")
+                with st.form(f"policy_lab_runtime_event_form_{presentation_mode}"):
+                    event_type_label = st.selectbox(
+                        "事件类型",
+                        options=["major_news", "policy", "rumor", "refute", "macro_shock", "regime_shift", "regulatory_action"],
+                        format_func=lambda value: {
+                            "major_news": "重大新闻",
+                            "policy": "新政策",
+                            "rumor": "谣言",
+                            "refute": "辟谣/澄清",
+                            "macro_shock": "宏观冲击",
+                            "regime_shift": "状态切换",
+                            "regulatory_action": "监管行动",
+                        }.get(value, value),
+                        key=f"policy_lab_event_type_{presentation_mode}",
+                    )
+                    event_title = st.text_input(
+                        "事件标题",
+                        value="盘中重大事件",
+                        key=f"policy_lab_event_title_{presentation_mode}",
+                    )
+                    event_text = st.text_area(
+                        "事件正文",
+                        value="",
+                        height=110,
+                        key=f"policy_lab_event_text_{presentation_mode}",
+                        placeholder="例如：盘中传出某行业融资收紧消息，投资者风险偏好快速下降。",
+                    )
+                    event_scope = st.selectbox(
+                        "作用范围",
+                        options=["broad_market", "sector", "symbol", "expectations", "liquidity", "funding"],
+                        index=0,
+                        key=f"policy_lab_event_scope_{presentation_mode}",
+                    )
+                    event_effective_day = st.number_input(
+                        "进入交易日",
+                        min_value=current_day + 1,
+                        max_value=max(total_days, current_day + 1),
+                        value=min(max(current_day + 1, 1), max(total_days, current_day + 1)),
+                        step=1,
+                        key=f"policy_lab_event_effective_day_{presentation_mode}",
+                    )
+                    event_strength = st.slider(
+                        "事件强度",
+                        min_value=0.1,
+                        max_value=2.0,
+                        value=1.0,
+                        step=0.1,
+                        key=f"policy_lab_event_strength_{presentation_mode}",
+                    )
+                    event_half_life = st.slider(
+                        "事件半衰期（交易日）",
+                        min_value=1,
+                        max_value=60,
+                        value=7,
+                        step=1,
+                        key=f"policy_lab_event_half_life_{presentation_mode}",
+                    )
+                    event_submitted = st.form_submit_button("注入事件", use_container_width=True, disabled=not can_append)
+            if event_submitted:
+                if not can_append:
+                    st.warning("请先开始仿真，再注入运行时事件。")
+                elif not str(event_text).strip():
+                    st.warning("事件正文不能为空。")
+                else:
+                    _policy_session_enqueue_runtime_event(
+                        session,
+                        event_type=str(event_type_label),
+                        title=str(event_title or "运行时事件"),
+                        raw_text=str(event_text),
+                        effective_day=int(event_effective_day),
+                        strength=float(event_strength),
+                        half_life_days=int(event_half_life),
+                        scope=str(event_scope),
+                    )
+                    _store_session(session)
+                    st.success("运行时事件已加入时间轴。")
 
             st.markdown("#### 日度明细")
             display_frame = _policy_session_display_frame(session_frame)

@@ -10,7 +10,10 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 import numpy as np
-import akshare as ak 
+try:
+    import akshare as ak
+except Exception:
+    ak = None
 import uuid
 import os
 
@@ -1338,5 +1341,4 @@ if __name__ == "__main__":
     # 4. Finalize
     candle = manager.finalize_step(1, "2024-01-01")
     print(f"Daily Candle Generated: {candle}")
-
 

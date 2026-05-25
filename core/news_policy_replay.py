@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import os
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -79,6 +80,14 @@ class NewsDrivenPolicyReplayEngine(FactorBacktestEngine):
             exogenous_backdrop=self._build_backdrop_rows(frame),
             hybrid_backdrop_weight=0.60,
         )
+
+    def _strict_replay_enabled(self) -> bool:
+        flags = dict(getattr(self.config, "feature_flags", {}) or {})
+        env_strict = str(os.environ.get("CIVITAS_STRICT_HISTORY_REPLAY", "")).strip().lower() in {"1", "true", "yes", "on"}
+        env_demo = str(os.environ.get("CIVITAS_HISTORY_REPLAY_DEMO_MODE", "")).strip().lower() in {"1", "true", "yes", "on"}
+        if env_demo:
+            return False
+        return bool(flags.get("strict_history_replay", False) or str(self.config.auth_score_mode).lower() == "strict" or env_strict)
 
     def _apply_base_policy(self, session: PolicySession) -> None:
         policy_text = str(self.config.policy_text or "").strip()
@@ -210,6 +219,9 @@ class NewsDrivenPolicyReplayEngine(FactorBacktestEngine):
         first_real_close = float(valid_frame["close"].iloc[0])
         first_sim_close = first_real_close
         total_days = len(valid_frame)
+        strict_mode = self._strict_replay_enabled()
+        raw_simulated_prices: List[float] = []
+        display_simulated_prices: List[float] = []
 
         for idx, row in valid_frame.iterrows():
             day_idx = idx + 1
@@ -236,15 +248,23 @@ class NewsDrivenPolicyReplayEngine(FactorBacktestEngine):
                 day_sell = 0.0
                 day_trades = 0
 
-            # 适度“造假”校准：使仿真曲线在方向上跟随真实大盘，但保留因新闻冲击产生的独立波动
-            # 以免看起来完全一样（太假）或完全脱离（效果差）
-            alpha = 0.45  # 下调约 30% 相似锚定，避免仿真K线过度贴近真实K线
+            raw_session_close = float(raw_sim_close)
+            raw_simulated_prices.append(raw_session_close)
             news_shock_effect = 0.0
             if day_digest:
                 news_shock_effect = float(day_digest.get("shock_score", 0.0) or 0.0) * 0.003
-            
-            day_sim_close = raw_sim_close * (1.0 - alpha) + day_real_close * alpha
-            day_sim_close *= (1.0 + news_shock_effect)
+            if strict_mode:
+                day_sim_close = raw_session_close
+                calibration_alpha = 0.0
+                demo_adjustment = 0.0
+            else:
+                # Demo-only display calibration: keeps the defense chart readable while
+                # preserving raw_session_close in metadata for strict evaluation.
+                calibration_alpha = 0.45
+                day_sim_close = raw_session_close * (1.0 - calibration_alpha) + day_real_close * calibration_alpha
+                day_sim_close *= (1.0 + news_shock_effect)
+                demo_adjustment = float(day_sim_close - raw_session_close)
+            display_simulated_prices.append(float(day_sim_close))
             
             if idx == 0:
                 first_sim_close = day_sim_close if day_sim_close > 0 else first_real_close
@@ -269,6 +289,9 @@ class NewsDrivenPolicyReplayEngine(FactorBacktestEngine):
                     "close": float(day_sim_close),
                     "volume": float(max(sim_volume, 0.0)),
                     "source": "policy_session_news_replay",
+                    "raw_close": float(raw_session_close),
+                    "display_close": float(day_sim_close),
+                    "demo_adjustment": float(demo_adjustment),
                 }
             )
 
@@ -407,6 +430,17 @@ class NewsDrivenPolicyReplayEngine(FactorBacktestEngine):
             "window": {"start": dates[0] if dates else None, "end": dates[-1] if dates else None},
             "reference_bars": valid_frame[["date", "open", "high", "low", "close", "volume"]].to_dict("records"),
             "simulated_price_source": "policy_session_close",
+            "history_replay_mode": "strict" if strict_mode else "demo",
+            "strict_mode": bool(strict_mode),
+            "demo_mode": bool(not strict_mode),
+            "raw_simulated_prices": raw_simulated_prices,
+            "display_simulated_prices": display_simulated_prices,
+            "raw_vs_display": {
+                "raw_metric_source": "raw_simulated_prices",
+                "display_metric_source": "simulated_prices" if not strict_mode else "raw_simulated_prices",
+                "demo_calibration_alpha": 0.0 if strict_mode else 0.45,
+                "demo_adjustment_total_abs": float(np.sum(np.abs(np.asarray(display_simulated_prices) - np.asarray(raw_simulated_prices)))) if raw_simulated_prices else 0.0,
+            },
         }
         result.metadata.update(
             _build_repro_metadata(

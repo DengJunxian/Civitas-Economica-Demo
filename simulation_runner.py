@@ -24,7 +24,10 @@ from core.types import Order, OrderSide, OrderType
 from simulation_ipc import FileSystemIPC, IPCEnvelope
 
 try:
-    from core.exchange.order_book_cpp import OrderBookCPP
+    from core.exchange.order_book_cpp import OrderBookCPP, _civitas_lob
+
+    if _civitas_lob is None:
+        raise ImportError("C++ extension _civitas_lob not available")
 
     ORDER_BOOK_CLASS = OrderBookCPP
 except Exception:

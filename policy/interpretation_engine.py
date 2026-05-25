@@ -22,7 +22,18 @@ class AgentBelief:
     confidence: float
     latency_bars: int
     disagreement_tags: List[str] = field(default_factory=list)
+    expected_holding_period_shift: Dict[str, float] = field(default_factory=dict)
+    leverage_pressure: Dict[str, float] = field(default_factory=dict)
+    funding_stress: Dict[str, float] = field(default_factory=dict)
+    sentiment_susceptibility: Dict[str, float] = field(default_factory=dict)
+    sector_rotation_preference: Dict[str, float] = field(default_factory=dict)
+    safe_haven_bias: Dict[str, float] = field(default_factory=dict)
+    regulation_fear: Dict[str, float] = field(default_factory=dict)
+    compliance_pressure: Dict[str, float] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+EventBelief = AgentBelief
 
 
 class PolicyInterpretationEngine:
@@ -224,7 +235,21 @@ class PolicyInterpretationEngine:
         expected_return: Dict[str, float] = {}
         expected_risk: Dict[str, float] = {}
         liquidity_score: Dict[str, float] = {}
+        expected_holding_period_shift: Dict[str, float] = {}
+        leverage_pressure: Dict[str, float] = {}
+        funding_stress: Dict[str, float] = {}
+        sentiment_susceptibility: Dict[str, float] = {}
+        sector_rotation_preference: Dict[str, float] = {}
+        safe_haven_bias: Dict[str, float] = {}
+        regulation_fear: Dict[str, float] = {}
+        compliance_pressure: Dict[str, float] = {}
         disagreement_tags: List[str] = []
+        compliance_signal = float(market_effects.get("compliance_pressure", 0.0) or 0.0)
+        funding_signal = float(market_effects.get("funding_stress", 0.0) or 0.0)
+        if not compliance_signal:
+            compliance_signal = float((policy_pkg.agent_class_effects or {}).get("rumor_trader", 0.0)) * -0.35
+        if not funding_signal:
+            funding_signal = float(max(0.0, volatility_bias) + max(0.0, -liquidity_bias)) * 0.35
 
         for symbol in symbols:
             sector = self._resolve_sector(symbol)
@@ -237,6 +262,26 @@ class PolicyInterpretationEngine:
 
             liq = 0.50 + 0.40 * liquidity_bias * effective_pass_through - 0.25 * liquidity_pref
             liquidity_score[symbol] = _clip(liq, 0.0, 1.0)
+            expected_holding_period_shift[symbol] = _clip(
+                0.35 * confidence + 0.30 * sector_bias - 0.40 * abs(volatility_bias) - 0.20 * self._persona_benchmark_pressure(persona),
+                -1.0,
+                1.0,
+            )
+            leverage_pressure[symbol] = _clip(
+                funding_signal + max(0.0, -liquidity_bias) * 0.55 + max(0.0, volatility_bias) * 0.35,
+                0.0,
+                1.0,
+            )
+            funding_stress[symbol] = _clip(funding_signal + max(0.0, -liquidity_bias) * 0.60, 0.0, 1.0)
+            sentiment_susceptibility[symbol] = _clip(
+                self._persona_rumor_sensitivity(persona) * (0.55 + 0.45 * abs(market_bias)),
+                0.0,
+                1.0,
+            )
+            sector_rotation_preference[symbol] = _clip(sector_bias + 0.35 * normalized_channel_bias, -1.0, 1.0)
+            safe_haven_bias[symbol] = _clip(max(0.0, -value) + max(0.0, volatility_bias) * 0.35, 0.0, 1.0)
+            regulation_fear[symbol] = _clip(compliance_signal + max(0.0, -agent_bias) * 0.25, 0.0, 1.0)
+            compliance_pressure[symbol] = _clip(compliance_signal + 0.20 * self._persona_policy_sensitivity(persona), 0.0, 1.0)
 
         if effective_confidence < 0.35:
             disagreement_tags.append("low_policy_confidence")
@@ -271,6 +316,14 @@ class PolicyInterpretationEngine:
             confidence=float(effective_confidence),
             latency_bars=int(latency_bars),
             disagreement_tags=disagreement_tags,
+            expected_holding_period_shift=expected_holding_period_shift,
+            leverage_pressure=leverage_pressure,
+            funding_stress=funding_stress,
+            sentiment_susceptibility=sentiment_susceptibility,
+            sector_rotation_preference=sector_rotation_preference,
+            safe_haven_bias=safe_haven_bias,
+            regulation_fear=regulation_fear,
+            compliance_pressure=compliance_pressure,
             metadata=metadata,
         )
 

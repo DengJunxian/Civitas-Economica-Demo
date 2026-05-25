@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Tuple
 import numpy as np
 
 from config import GLOBAL_CONFIG
+from core.objective_discovery import ObjectiveDiscoveryEngine
 
 
 DEFAULT_REGULATOR_FEATURE_FLAGS: Dict[str, bool] = {
@@ -1280,6 +1281,76 @@ def _recommend_policy_bundle(
     }
 
 
+def _objective_discovery_for_regulator(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    market_rows: List[Dict[str, Any]] = []
+    reports: List[Dict[str, Any]] = []
+    close = 3000.0
+    for idx, row in enumerate(rows, start=1):
+        stability = float(row.get("macro_stability", 0.0) or 0.0)
+        volatility = float(row.get("volatility", 0.0) or 0.0)
+        panic = float(np.clip(1.0 - float(row.get("welfare_confidence", 1.0 - volatility) or 0.0), 0.0, 1.0))
+        close *= 1.0 + 0.002 * stability - 0.0015 * float(row.get("crash_risk", 0.0) or 0.0)
+        market_rows.append(
+            {
+                "step": idx,
+                "close": close,
+                "open": close / max(1.0 + 0.001 * stability, 1e-9),
+                "high": close * (1.0 + max(volatility, 0.002)),
+                "low": close * (1.0 - max(volatility, 0.002)),
+                "volume": 1_000_000.0 * (1.0 + panic),
+                "panic_level": panic,
+                "csad": float(np.clip(0.04 + 0.12 * panic + volatility, 0.0, 1.0)),
+                "买入量": 500_000.0 * (1.0 + stability),
+                "卖出量": 500_000.0 * (1.0 + panic),
+            }
+        )
+        reports.append(
+            {
+                "macro_state": {
+                    "liquidity_index": float(row.get("liquidity", 0.0) or 0.0),
+                    "credit_spread": float(row.get("crash_risk", 0.0) or 0.0) * 0.01,
+                    "unemployment": max(0.0, 0.08 - 0.03 * stability),
+                    "wage_growth": max(0.0, 0.02 * stability),
+                    "inflation": 0.02 + 0.01 * volatility,
+                },
+                "microstructure_metrics": {
+                    "spread_pct": max(0.0, volatility * 0.20),
+                    "depth_bid_total": 800_000.0 * float(row.get("liquidity", 0.0) or 0.0),
+                    "depth_ask_total": 750_000.0 * float(row.get("liquidity", 0.0) or 0.0),
+                    "cancel_to_trade_ratio": max(0.0, panic * 0.35),
+                    "slippage_bps": max(0.0, volatility * 10_000.0),
+                },
+                "realism_diagnostics": {
+                    "microstructure_score": float(row.get("liquidity", 0.0) or 0.0),
+                    "liquidity_thinness": float(np.clip(1.0 - float(row.get("liquidity", 0.0) or 0.0), 0.0, 1.0)),
+                },
+            }
+        )
+    return ObjectiveDiscoveryEngine().discover(market_rows, reports=reports, top_k=8).to_dict()
+
+
+def _objective_contribution(row: Mapping[str, Any], discovered: Mapping[str, Any]) -> Dict[str, Any]:
+    weights = dict(discovered.get("weight_decomposition", {}) or {})
+    proxy_values = {
+        "liquidity_index": float(row.get("liquidity", 0.0) or 0.0),
+        "financing_function": float(row.get("financing_function", 0.0) or 0.0),
+        "fairness_compliance": float(row.get("fairness_compliance", 0.0) or 0.0),
+        "welfare_confidence": float(row.get("welfare_confidence", 0.0) or 0.0),
+        "intervention_cost": float(row.get("intervention_cost", 0.0) or 0.0),
+        "realized_volatility": float(row.get("volatility", 0.0) or 0.0),
+        "max_drawdown": float(row.get("crash_risk", 0.0) or 0.0),
+        "panic_level": 1.0 - float(row.get("welfare_confidence", 0.0) or 0.0),
+    }
+    contributions = {
+        name: float(weight) * float(proxy_values.get(name, row.get(name, 0.0) or 0.0))
+        for name, weight in weights.items()
+    }
+    return {
+        "weighted_sum": float(sum(contributions.values())),
+        "top_contributions": contributions,
+    }
+
+
 def run_regulatory_closed_loop(
     *,
     episodes: int = 300,
@@ -1394,11 +1465,18 @@ def run_regulatory_closed_loop(
         )
 
     pareto = _pareto_frontier(candidates if candidates else evaluated)
+    discovered_objectives = _objective_discovery_for_regulator(evaluated)
+    for row in evaluated:
+        row["objective_contribution"] = _objective_contribution(row, discovered_objectives)
     recommendation = _recommend_policy_bundle(
         baseline_row=baseline_row,
         candidates=candidates,
         pareto=pareto,
     )
+    recommended_sig = str(recommendation.get("action_signature", ""))
+    recommended_row = next((row for row in evaluated if str(row.get("action_signature", "")) == recommended_sig), {})
+    recommendation["discovered_objective_contribution"] = _objective_contribution(recommended_row, discovered_objectives)
+    recommendation["discovered_objectives"] = discovered_objectives
     reproducibility = {
         "seed": int(seed),
         "episodes": int(episodes),
@@ -1429,6 +1507,7 @@ def run_regulatory_closed_loop(
         },
         "pareto_frontier": pareto,
         "recommendation": recommendation,
+        "discovered_objectives": discovered_objectives,
         "reproducibility": reproducibility,
     }
 

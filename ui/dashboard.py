@@ -68,6 +68,82 @@ def metric_value_text(value: float, as_percent: bool = False) -> str:
     return f"{value:.3f}" if abs(value) < 10 else f"{value:.2f}"
 
 
+def normalize_discovered_metrics_payload(payload: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Normalize objective-discovery payloads before UI rendering or export."""
+    data = dict(payload or {})
+    ranked = list(data.get("ranked_metrics", []) or [])
+    top = list(data.get("top_metrics", []) or ranked[:8])
+    pareto = list(data.get("pareto_frontier", []) or [])
+    weights = dict(data.get("weight_decomposition", {}) or {})
+    shanghai = dict(data.get("shanghai_index_metric", {}) or {})
+    if not shanghai:
+        shanghai = next((dict(item) for item in ranked if dict(item).get("name") == "shanghai_index_return"), {})
+    return {
+        "schema_version": str(data.get("schema_version", "objective_discovery_v1")),
+        "ranked_metrics": ranked,
+        "top_metrics": top,
+        "pareto_frontier": pareto,
+        "composite_score": float(data.get("composite_score", data.get("composite_policy_score", 0.0)) or 0.0),
+        "weight_decomposition": weights,
+        "stability_heatmap": list(data.get("stability_heatmap", []) or []),
+        "candidate_pool": list(data.get("candidate_pool", []) or []),
+        "shanghai_index_metric": shanghai,
+    }
+
+
+def render_discovered_metrics_panel(payload: Optional[Mapping[str, Any]], key_prefix: str = "objective") -> None:
+    data = normalize_discovered_metrics_payload(payload)
+    top_metrics = list(data.get("top_metrics", []) or [])
+    if not top_metrics:
+        st.info("暂无目标发现结果。")
+        return
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Composite Policy Score", f"{float(data.get('composite_score', 0.0)):.3f}")
+    c2.metric("候选指标池", len(data.get("candidate_pool", []) or []))
+    c3.metric("Pareto 指标", len(data.get("pareto_frontier", []) or []))
+
+    frame = pd.DataFrame(top_metrics)
+    cols = [
+        col
+        for col in [
+            "name",
+            "category",
+            "rank_score",
+            "composite_weight",
+            "policy_sensitivity",
+            "robustness",
+            "historical_replay_alignment",
+            "early_warning_utility",
+            "relation_to_shanghai_index",
+        ]
+        if col in frame.columns
+    ]
+    if cols:
+        st.dataframe(frame[cols], use_container_width=True, hide_index=True)
+
+    pareto = pd.DataFrame(data.get("pareto_frontier", []) or [])
+    if not pareto.empty and {"policy_sensitivity", "robustness", "name"}.issubset(pareto.columns):
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=pareto["policy_sensitivity"],
+                y=pareto["robustness"],
+                text=pareto["name"],
+                mode="markers+text",
+                textposition="top center",
+                marker=dict(color=pareto.get("rank_score", 0.0), colorscale="Viridis", showscale=True, size=12),
+            )
+        )
+        fig.update_layout(
+            **PLOTLY_DARK_LAYOUT,
+            title="目标发现 Pareto 前沿",
+            xaxis_title="政策敏感性",
+            yaxis_title="跨场景稳健性",
+            height=340,
+        )
+        st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_pareto")
+
+
 def _render_chart_explanation(title: str, payload: Any, context: str, cache_namespace: str = "dashboard_narrative_cache") -> None:
     render_narrative_block(
         title,

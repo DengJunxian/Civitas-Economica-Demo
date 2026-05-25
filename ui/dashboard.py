@@ -12,9 +12,12 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.utils import PlotlyJSONEncoder
+from plotly.subplots import make_subplots
 import streamlit as st
 
+from core.exchange.trade_tape import TradeTapeRecord, aggregate_trade_tape_to_bars, stable_hash
 from core.ui_text import display_risk_alert, translate_display_text, translate_ui_payload
+from ui.components.event_marker_layer import add_event_marker_layer
 from ui.narrative import narrate_payload, render_narrative_block
 
 
@@ -25,6 +28,333 @@ PLOTLY_DARK_LAYOUT = dict(
     font=dict(color="#e2e8f0", family="Microsoft YaHei"),
     margin=dict(l=20, r=20, t=48, b=20),
 )
+
+
+def build_synthetic_trade_tape_from_market_frame(
+    frame: pd.DataFrame,
+    *,
+    symbol: str = "sh000001",
+    seed: int = 42,
+    config_hash: str = "",
+    data_snapshot_hash: str = "",
+) -> List[TradeTapeRecord]:
+    """Create a deterministic visualization tape, then force OHLCV through tape aggregation."""
+
+    if frame is None or frame.empty:
+        return []
+    records: List[TradeTapeRecord] = []
+    source = frame.copy().reset_index(drop=True)
+    for idx, row in source.iterrows():
+        time_value = row.get("time", row.get("timestamp", row.get("date", idx + 1)))
+        if isinstance(time_value, (int, float, np.integer, np.floating)):
+            trading_day = pd.Timestamp("2026-01-01") + pd.Timedelta(days=int(idx))
+        else:
+            trading_day = pd.to_datetime(time_value, errors="coerce")
+        if pd.isna(trading_day):
+            trading_day = pd.Timestamp("2026-01-01") + pd.Timedelta(days=int(idx))
+        base_ts = float(trading_day.timestamp())
+        prices = [
+            float(row.get("open", row.get("close", 0.0)) or 0.0),
+            float(row.get("high", row.get("close", 0.0)) or 0.0),
+            float(row.get("low", row.get("close", 0.0)) or 0.0),
+            float(row.get("close", row.get("open", 0.0)) or 0.0),
+        ]
+        volume = max(4, int(float(row.get("volume", 1_000_000.0) or 1_000_000.0)))
+        volume_parts = [max(1, int(volume * weight)) for weight in (0.22, 0.24, 0.20, 0.34)]
+        spread = float(row.get("spread", abs(prices[-1] - prices[0]) / max(abs(prices[-1]), 1.0)) or 0.0)
+        depth_imbalance = float(row.get("depth_imbalance", 0.0) or 0.0)
+        for leg, (price, qty) in enumerate(zip(prices, volume_parts)):
+            records.append(
+                TradeTapeRecord(
+                    trade_id=f"synthetic_{symbol}_{idx:04d}_{leg}",
+                    timestamp=base_ts + float(leg),
+                    tick=int(row.get("step", idx + 1) or idx + 1),
+                    trading_day=trading_day.strftime("%Y-%m-%d"),
+                    symbol=symbol,
+                    price=float(max(price, 0.01)),
+                    volume=int(max(qty, 1)),
+                    buy_order_id=f"synthetic_buy_{idx}_{leg}",
+                    sell_order_id=f"synthetic_sell_{idx}_{leg}",
+                    buy_agent_id="synthetic_liquidity_bid",
+                    sell_agent_id="synthetic_liquidity_ask",
+                    aggressor_side="buy" if leg in {0, 3} else "sell",
+                    phase="continuous",
+                    seed=int(seed),
+                    config_hash=str(config_hash),
+                    data_snapshot_hash=str(data_snapshot_hash),
+                    spread=float(spread),
+                    depth_imbalance=float(depth_imbalance),
+                    metadata={
+                        "source": "synthetic_market_frame_fallback",
+                        "bar_step": int(row.get("step", idx + 1) or idx + 1),
+                        "panic_level": float(row.get("panic_level", 0.0) or 0.0),
+                        "csad": float(row.get("csad", 0.0) or 0.0),
+                        "sentiment_index": float(row.get("sentiment_index", 1.0 - float(row.get("panic_level", 0.0) or 0.0)) or 0.0),
+                    },
+                )
+            )
+    return records
+
+
+def aggregate_trade_tape_ohlcv_frame(
+    trade_tape: Iterable[Any],
+    *,
+    symbol: str = "sh000001",
+    freq: str = "1d",
+    prev_close: float = 0.0,
+    fallback_frame: Optional[pd.DataFrame] = None,
+    seed: int = 42,
+    config_hash: str = "",
+    data_snapshot_hash: str = "",
+) -> pd.DataFrame:
+    """Return OHLCV bars that always pass through trade-tape aggregation."""
+
+    tape_items = list(trade_tape or [])
+    fallback_used = False
+    if not tape_items and fallback_frame is not None and not fallback_frame.empty:
+        tape_items = build_synthetic_trade_tape_from_market_frame(
+            fallback_frame,
+            symbol=symbol,
+            seed=seed,
+            config_hash=config_hash,
+            data_snapshot_hash=data_snapshot_hash,
+        )
+        fallback_used = True
+    bars = aggregate_trade_tape_to_bars(
+        tape_items,
+        freq=freq,
+        symbol=symbol,
+        prev_close=float(prev_close),
+        is_simulated=True,
+    )
+    rows: List[Dict[str, Any]] = []
+    for bar in bars:
+        metadata = dict(getattr(bar, "metadata", {}) or {})
+        rows.append(
+            {
+                "step": int(bar.step) + 1,
+                "time": str(bar.timestamp),
+                "open": float(bar.open),
+                "high": float(bar.high),
+                "low": float(bar.low),
+                "close": float(bar.close),
+                "volume": float(bar.volume),
+                "amount": float(bar.amount),
+                "symbol": str(bar.symbol),
+                "is_simulated": bool(bar.is_simulated),
+                "source": "trade_tape",
+                "trade_count": int(metadata.get("trade_count", 0) or 0),
+                "tape_hash": str(metadata.get("tape_hash", "")),
+                "synthetic_tape_fallback": bool(fallback_used),
+            }
+        )
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return pd.DataFrame(columns=["step", "time", "open", "high", "low", "close", "volume", "source"])
+    if fallback_frame is not None and not fallback_frame.empty:
+        extras = fallback_frame.copy().reset_index(drop=True)
+        for col in ("panic_level", "csad", "spread", "depth_imbalance", "sentiment_index"):
+            if col in extras.columns and col not in out.columns:
+                out[col] = pd.to_numeric(extras[col].head(len(out)).reset_index(drop=True), errors="coerce").fillna(0.0)
+    out.attrs["trade_tape_hash"] = stable_hash({"records": [getattr(item, "to_dict", lambda: item)() for item in tape_items]})
+    out.attrs["synthetic_tape_fallback"] = bool(fallback_used)
+    return out
+
+
+def _add_technical_indicators(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    close = pd.to_numeric(out["close"], errors="coerce").ffill().bfill()
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    out["macd"] = ema12 - ema26
+    out["macd_signal"] = out["macd"].ewm(span=9, adjust=False).mean()
+    out["macd_hist"] = out["macd"] - out["macd_signal"]
+    delta = close.diff().fillna(0.0)
+    gain = delta.clip(lower=0.0).rolling(14, min_periods=1).mean()
+    loss = (-delta.clip(upper=0.0)).rolling(14, min_periods=1).mean()
+    rs = gain / loss.replace(0.0, np.nan)
+    out["rsi"] = (100.0 - (100.0 / (1.0 + rs))).fillna(50.0)
+    mid = close.rolling(20, min_periods=1).mean()
+    std = close.rolling(20, min_periods=1).std().fillna(0.0)
+    out["boll_mid"] = mid
+    out["boll_upper"] = mid + 2.0 * std
+    out["boll_lower"] = mid - 2.0 * std
+    return out
+
+
+def build_trade_tape_kline_figure(
+    trade_tape: Iterable[Any],
+    *,
+    symbol: str = "sh000001",
+    benchmark_symbol: str = "sh000001",
+    freq: str = "1d",
+    market_frame: Optional[pd.DataFrame] = None,
+    real_index_frame: Optional[pd.DataFrame] = None,
+    events: Optional[Iterable[Mapping[str, Any]]] = None,
+    selected_indicators: Optional[List[str]] = None,
+    title: str = "上证指数 K 线研究主图",
+    seed: int = 42,
+    config_hash: str = "",
+    data_snapshot_hash: str = "",
+) -> Tuple[go.Figure, pd.DataFrame]:
+    ohlcv = aggregate_trade_tape_ohlcv_frame(
+        trade_tape,
+        symbol=symbol,
+        freq=freq,
+        fallback_frame=market_frame,
+        seed=seed,
+        config_hash=config_hash,
+        data_snapshot_hash=data_snapshot_hash,
+    )
+    if ohlcv.empty:
+        fig = go.Figure()
+        fig.update_layout(**PLOTLY_DARK_LAYOUT, title=title, height=420)
+        return fig, ohlcv
+
+    chart = _add_technical_indicators(ohlcv)
+    indicators = selected_indicators if selected_indicators is not None else ["MACD", "RSI", "BOLL"]
+    metric_cols = [col for col in ("panic_level", "csad", "spread", "depth_imbalance", "sentiment_index") if col in chart.columns]
+    has_indicator_row = bool(indicators or metric_cols)
+    rows = 3 if has_indicator_row else 2
+    heights = [0.62, 0.18, 0.20] if has_indicator_row else [0.74, 0.26]
+    fig = make_subplots(
+        rows=rows,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.035,
+        row_heights=heights,
+        specs=[[{"secondary_y": True}], [{}], [{}]] if has_indicator_row else [[{"secondary_y": True}], [{}]],
+    )
+    fig.add_trace(
+        go.Candlestick(
+            x=chart["time"],
+            open=chart["open"],
+            high=chart["high"],
+            low=chart["low"],
+            close=chart["close"],
+            name="仿真指数 OHLC（trade tape 聚合）",
+            increasing_line_color="#ef4444",
+            decreasing_line_color="#22c55e",
+            increasing_fillcolor="#ef4444",
+            decreasing_fillcolor="#22c55e",
+        ),
+        row=1,
+        col=1,
+        secondary_y=False,
+    )
+    if real_index_frame is not None and not real_index_frame.empty:
+        real = real_index_frame.copy().tail(len(chart)).reset_index(drop=True)
+        real_time = real["time"] if "time" in real.columns else chart["time"].head(len(real))
+        fig.add_trace(
+            go.Scatter(
+                x=real_time,
+                y=pd.to_numeric(real["close"], errors="coerce"),
+                mode="lines",
+                name=f"真实基准 {benchmark_symbol}",
+                line=dict(color="#facc15", width=2.0),
+            ),
+            row=1,
+            col=1,
+            secondary_y=False,
+        )
+    y_lookup = dict(zip(chart["time"].astype(str), pd.to_numeric(chart["high"], errors="coerce").fillna(chart["close"])))
+    add_event_marker_layer(
+        fig,
+        events,
+        time_values=chart["time"].tolist(),
+        y_lookup=y_lookup,
+        y_default=float(pd.to_numeric(chart["high"], errors="coerce").max()),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Bar(
+            x=chart["time"],
+            y=chart["volume"],
+            name="成交量",
+            marker_color="#64748b",
+            opacity=0.58,
+        ),
+        row=2,
+        col=1,
+    )
+
+    if has_indicator_row:
+        if "MACD" in indicators:
+            fig.add_trace(go.Scatter(x=chart["time"], y=chart["macd"], name="MACD", line=dict(color="#38bdf8", width=1.4)), row=3, col=1)
+            fig.add_trace(go.Scatter(x=chart["time"], y=chart["macd_signal"], name="MACD signal", line=dict(color="#f59e0b", width=1.1)), row=3, col=1)
+        if "RSI" in indicators:
+            fig.add_trace(go.Scatter(x=chart["time"], y=chart["rsi"], name="RSI", line=dict(color="#a78bfa", width=1.3)), row=3, col=1)
+        if "BOLL" in indicators:
+            fig.add_trace(go.Scatter(x=chart["time"], y=chart["boll_upper"], name="BOLL upper", line=dict(color="#94a3b8", width=0.9, dash="dot")), row=1, col=1)
+            fig.add_trace(go.Scatter(x=chart["time"], y=chart["boll_mid"], name="BOLL mid", line=dict(color="#60a5fa", width=0.9)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=chart["time"], y=chart["boll_lower"], name="BOLL lower", line=dict(color="#94a3b8", width=0.9, dash="dot")), row=1, col=1)
+        metric_styles = {
+            "panic_level": ("恐慌度", "#fb7185"),
+            "csad": ("CSAD", "#facc15"),
+            "spread": ("spread", "#2dd4bf"),
+            "depth_imbalance": ("depth imbalance", "#818cf8"),
+            "sentiment_index": ("sentiment index", "#34d399"),
+        }
+        for col_name in metric_cols:
+            label, color = metric_styles[col_name]
+            fig.add_trace(
+                go.Scatter(x=chart["time"], y=pd.to_numeric(chart[col_name], errors="coerce"), mode="lines", name=label, line=dict(color=color, width=1.25)),
+                row=3,
+                col=1,
+            )
+    fig.update_layout(
+        **PLOTLY_DARK_LAYOUT,
+        title=title,
+        height=720 if has_indicator_row else 580,
+        hovermode="x unified",
+        xaxis_rangeslider_visible=False,
+        legend=dict(orientation="h", y=1.02, x=0.0),
+    )
+    fig.update_yaxes(title_text="指数点位", row=1, col=1)
+    fig.update_yaxes(title_text="成交量", row=2, col=1)
+    if has_indicator_row:
+        fig.update_yaxes(title_text="指标", row=3, col=1)
+    return fig, chart
+
+
+def render_trade_tape_kline_workbench(
+    trade_tape: Iterable[Any],
+    *,
+    symbol: str = "sh000001",
+    benchmark_symbol: str = "sh000001",
+    market_frame: Optional[pd.DataFrame] = None,
+    real_index_frame: Optional[pd.DataFrame] = None,
+    events: Optional[Iterable[Mapping[str, Any]]] = None,
+    key_prefix: str = "trade_tape_kline",
+    seed: int = 42,
+    config_hash: str = "",
+    data_snapshot_hash: str = "",
+) -> Tuple[go.Figure, pd.DataFrame]:
+    indicator_options = ["MACD", "RSI", "BOLL"]
+    selected = st.multiselect(
+        "指标副图",
+        options=indicator_options,
+        default=indicator_options,
+        key=f"{key_prefix}_indicators",
+    )
+    fig, chart = build_trade_tape_kline_figure(
+        trade_tape,
+        symbol=symbol,
+        benchmark_symbol=benchmark_symbol,
+        market_frame=market_frame,
+        real_index_frame=real_index_frame,
+        events=events,
+        selected_indicators=selected,
+        seed=seed,
+        config_hash=config_hash,
+        data_snapshot_hash=data_snapshot_hash,
+    )
+    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_fig")
+    fallback = bool(chart.attrs.get("synthetic_tape_fallback", False)) if hasattr(chart, "attrs") else False
+    source_note = "synthetic tape fallback -> trade tape aggregation" if fallback else "trade tape aggregation"
+    st.caption(f"K 线数据来源：{source_note}；前端 OHLCV 未直接从价格序列补造。")
+    return fig, chart
 
 
 def _json_default(value: Any) -> Any:
@@ -262,12 +592,15 @@ def render_market_overview(metrics: pd.DataFrame, upto_step: Optional[int], key_
     frame = metrics.copy()
     if upto_step is not None:
         frame = frame[frame["step"] <= int(upto_step)]
-    
-    if "open" not in frame.columns:
-        frame["open"] = frame["close"].shift(1).fillna(frame["close"].iloc[0])
-        noise = frame["close"].std() * 0.15 if len(frame) > 1 else 1.0
-        frame["high"] = frame[["open", "close"]].max(axis=1) + np.abs(np.random.randn(len(frame))) * noise
-        frame["low"] = frame[["open", "close"]].min(axis=1) - np.abs(np.random.randn(len(frame))) * noise
+
+    if not frame.empty:
+        if "open" not in frame.columns:
+            frame["open"] = frame["close"].shift(1).fillna(frame["close"].iloc[0])
+            span = frame["close"].pct_change().abs().fillna(0.002).clip(lower=0.001, upper=0.02)
+            frame["high"] = frame[["open", "close"]].max(axis=1) * (1.0 + span)
+            frame["low"] = frame[["open", "close"]].min(axis=1) * (1.0 - span)
+        tape = build_synthetic_trade_tape_from_market_frame(frame, symbol="sh000001")
+        frame = aggregate_trade_tape_ohlcv_frame(tape, symbol="sh000001", freq="1d", fallback_frame=frame)
 
     fig = go.Figure()
     fig.add_trace(go.Candlestick(

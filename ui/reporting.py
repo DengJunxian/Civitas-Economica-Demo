@@ -10,6 +10,8 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+import pandas as pd
+
 try:
     from docx import Document
     from docx.enum.section import WD_SECTION
@@ -484,6 +486,29 @@ def write_report_artifacts(
         "docx_bytes": docx_bytes,
         "pdf_bytes": pdf_bytes,
         "export_capabilities": capabilities,
+        "disabled_reasons": disabled_reasons,
+    }
+
+
+def dataframe_export_bundle(frame: pd.DataFrame, *, stem: str) -> Dict[str, Any]:
+    """Build CSV and optional Parquet bytes for report-side data exports."""
+
+    safe_stem = safe_slug(stem, fallback="research_data")
+    data = frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame()
+    csv_text = data.to_csv(index=False)
+    parquet_bytes: Optional[bytes] = None
+    disabled_reasons: Dict[str, str] = {}
+    try:
+        output = BytesIO()
+        data.to_parquet(output, index=False)
+        parquet_bytes = output.getvalue()
+    except Exception as exc:
+        disabled_reasons["parquet"] = f"parquet export unavailable: {exc}"
+    return {
+        "stem": safe_stem,
+        "csv_text": csv_text,
+        "csv_bytes": csv_text.encode("utf-8-sig"),
+        "parquet_bytes": parquet_bytes,
         "disabled_reasons": disabled_reasons,
     }
 

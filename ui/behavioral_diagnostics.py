@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import streamlit as st
 
+from ui.components.scorecard_panel import mock_scorecard, render_scorecard_panel
 from ui.narrative import narrate_payload, render_narrative_block
 
 
@@ -28,6 +29,10 @@ def _load_social_propagation_report(report_path: Optional[Path] = None) -> Optio
     path = report_path or Path("outputs") / "social_propagation_report.json"
     if not path.exists():
         return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
 
 
 def _scorecard_behavioral_metrics(report: Dict[str, Any]) -> Dict[str, Any]:
@@ -36,10 +41,6 @@ def _scorecard_behavioral_metrics(report: Dict[str, Any]) -> Dict[str, Any]:
         return {}
     metrics = scorecard.get("behavioral_metrics", {})
     return dict(metrics) if isinstance(metrics, dict) else {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
 
 
 def _render_social_propagation_report(report: Dict[str, Any]) -> None:
@@ -152,6 +153,9 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
             ]
         )
     st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+    st.markdown("### Replay Scorecard 行为分解")
+    scorecard_payload = report.get("replay_scorecard", report.get("scorecard", mock_scorecard()))
+    render_scorecard_panel(scorecard_payload if isinstance(scorecard_payload, dict) else mock_scorecard(), key_prefix="behavioral_scorecard")
     render_narrative_block(
         "行为金融关键指标解读",
         summary_rows,

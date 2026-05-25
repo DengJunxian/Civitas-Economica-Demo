@@ -18,6 +18,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from core.data.market_data_provider import MarketDataProvider, MarketDataQuery
+from core.eval import build_replay_scorecard
 from core.event_store import EventRecord, EventStore, EventType
 from core.macro.government import GovernmentAgent, PolicyShock
 from core.objective_discovery import ObjectiveDiscoveryEngine
@@ -26,8 +27,19 @@ from core.runtime_paths import resolve_runtime_path
 from core.runtime_mode import RuntimeModeProfile, resolve_runtime_mode_profile
 from core.ui_text import translate_display_text
 from policy.structured import PolicyPackage
+from ui.components.replay_scrubber import render_replay_scrubber
+from ui.components.repro_meta import (
+    build_experiment_registry_entry,
+    build_reproducibility_meta,
+    render_experiment_registry,
+    render_reproducibility_panel,
+    stable_payload_hash,
+)
+from ui.components.scenario_diff import render_scenario_diff
+from ui.components.scorecard_panel import mock_scorecard, render_scorecard_panel
+from ui import dashboard as dashboard_workbench
 from ui.narrative import render_narrative_block
-from ui.reporting import official_report_meta, write_report_artifacts
+from ui.reporting import dataframe_export_bundle, official_report_meta, write_report_artifacts
 
 
 POLICY_TYPE_OPTIONS = {
@@ -1619,6 +1631,15 @@ def _policy_session_report_payload(session: Dict[str, Any], runtime_profile: Run
                 "index_label": session.get("index_label", ""),
                 "index_symbol": session.get("index_symbol", ""),
             },
+            "experiment_registry": dict(session.get("experiment_registry", {}) or {}),
+            "reproducibility": dict(session.get("reproducibility", {}) or {}),
+            "scorecard": dict(session.get("scorecard", {}) or {}),
+            "scenario_diff": dict(session.get("scenario_diff", {}) or {}),
+            "kline": {
+                "source": "trade_tape_aggregation",
+                "benchmark": session.get("index_symbol", "sh000001"),
+                "ohlcv": list(session.get("workbench_ohlcv_rows", []) or []),
+            },
             "runner_payload": payload,
         }
     frame = _policy_session_frame(session)
@@ -1698,7 +1719,81 @@ def _policy_session_report_payload(session: Dict[str, Any], runtime_profile: Run
             "index_label": session.get("index_label", ""),
             "index_symbol": session.get("index_symbol", ""),
         },
+        "experiment_registry": dict(session.get("experiment_registry", {}) or {}),
+        "reproducibility": dict(session.get("reproducibility", {}) or {}),
+        "scorecard": dict(session.get("scorecard", {}) or {}),
+        "scenario_diff": dict(session.get("scenario_diff", {}) or {}),
+        "kline": {
+            "source": "trade_tape_aggregation",
+            "benchmark": session.get("index_symbol", "sh000001"),
+            "ohlcv": list(session.get("workbench_ohlcv_rows", []) or []),
+        },
     }
+
+
+def _research_workbench_report_appendix(payload: Dict[str, Any]) -> str:
+    summary = dict(payload.get("summary", {}) or {})
+    session_meta = dict(payload.get("session", {}) or {})
+    kline = dict(payload.get("kline", {}) or {})
+    scorecard = dict(payload.get("scorecard", {}) or {})
+    repro = dict(payload.get("reproducibility", {}) or {})
+    registry = dict(payload.get("experiment_registry", {}) or {})
+    policy_package = dict(payload.get("policy_package", {}) or {})
+    scenario_diff = dict(payload.get("scenario_diff", {}) or {})
+    path_fit = dict(scorecard.get("path_fit_metrics", {}) or {})
+    risk = dict(scorecard.get("risk_metrics", {}) or {})
+    lines = [
+        "",
+        "## Research Workbench 附录",
+        "",
+        "### 项目标题",
+        f"- {payload.get('title', '政策试验台研究报告')}",
+        "",
+        "### 政策文本",
+        f"- {payload.get('policy_text', '')}",
+        "",
+        "### 结构化政策包",
+        "```json",
+        json.dumps(policy_package, ensure_ascii=False, indent=2, sort_keys=True, default=str)[:6000],
+        "```",
+        "",
+        "### 历史窗口与上证指数对照",
+        f"- 历史窗口：{session_meta.get('calendar_start', '')} 至 当前第 {session_meta.get('current_day', 0)} 个交易日",
+        f"- 上证指数对照：{kline.get('benchmark', session_meta.get('index_symbol', 'sh000001'))}",
+        f"- K 线来源：{kline.get('source', 'trade_tape_aggregation')}",
+        f"- K 线图：报告 JSON 中 `kline.ohlcv` 保留主图 OHLCV，前端以 trade tape 聚合渲染。",
+        "",
+        "### 关键指标",
+        f"- 累计收益率：{float(summary.get('return_pct', 0.0) or 0.0):+.2%}",
+        f"- 最大回撤：{float(summary.get('max_drawdown', 0.0) or 0.0):.2%}",
+        f"- 波动率：{float(summary.get('volatility', 0.0) or 0.0):.4f}",
+        f"- 平均恐慌度：{float(summary.get('avg_panic', 0.0) or 0.0):.4f}",
+        "",
+        "### 风险传播链",
+        f"- tracking_rmse：{float(path_fit.get('tracking_rmse', path_fit.get('normalized_rmse', 0.0)) or 0.0):.4f}",
+        f"- direction_hit_rate：{float(path_fit.get('direction_hit_rate', 0.0) or 0.0):.2%}",
+        f"- sim_max_drawdown：{float(risk.get('sim_max_drawdown', risk.get('max_drawdown', 0.0)) or 0.0):.2%}",
+        "",
+        "### 多智能体行为解释",
+        f"- 当前 Scorecard behavioral metrics：{json.dumps(scorecard.get('behavioral_metrics', {}), ensure_ascii=False, sort_keys=True, default=str)}",
+        "",
+        "### 监管优化结果",
+        f"- 场景差异表数量：{len(scenario_diff.get('deltas', []) or [])}",
+        f"- 推荐/优化路径：{payload.get('deep_mode_meta', {}).get('counterfactual_regulation', {}).get('recommended_timing', '-') if isinstance(payload.get('deep_mode_meta'), dict) else '-'}",
+        "",
+        "### 结论与建议",
+        f"- {payload.get('impact_evaluation', {}).get('overall_verdict', '请结合主图、事件层和 Scorecard 进行复核。')}",
+        "",
+        "### 可复现信息",
+        f"- experiment_id：{registry.get('experiment_id', '')}",
+        f"- config_hash：{repro.get('config_hash', registry.get('config_hash', ''))}",
+        f"- data_snapshot_hash：{repro.get('data_snapshot_hash', registry.get('data_snapshot_id', ''))}",
+        f"- git_commit_hash：{repro.get('git_commit_hash', '')}",
+        f"- random_seed：{repro.get('random_seed', registry.get('seed', 42))}",
+        f"- LLM provider chain：{', '.join(map(str, repro.get('llm_provider_chain', []) or []))}",
+        f"- calibration parameter set：{repro.get('calibration_parameter_set_id', '')}",
+    ]
+    return "\n".join(lines)
 
 
 def _policy_session_generate_report(session: Dict[str, Any], runtime_profile: RuntimeModeProfile) -> Dict[str, Any]:
@@ -1707,6 +1802,9 @@ def _policy_session_generate_report(session: Dict[str, Any], runtime_profile: Ru
         report = runner.generate_report(use_llm=bool(runtime_profile.use_live_api))
         report_markdown = _sanitize_report_markdown_for_frontend(str(report.get("报告正文", "")))
         payload = _policy_session_report_payload(session, runtime_profile)
+        report_markdown = _sanitize_report_markdown_for_frontend(
+            "\n\n".join([report_markdown, _research_workbench_report_appendix(payload)])
+        )
         report_meta = official_report_meta("policy_lab_session", str(payload["title"]))
         report_bundle = write_report_artifacts(
             root_dir=POLICY_REPORT_DIR / "session_reports",
@@ -1797,6 +1895,7 @@ def _policy_session_generate_report(session: Dict[str, Any], runtime_profile: Ru
             "- 政策影响会随时间自然衰减。",
         ]
     )
+    markdown_lines.append(_research_workbench_report_appendix(payload))
     report_markdown = _sanitize_report_markdown_for_frontend("\n".join(markdown_lines))
     report_bundle = write_report_artifacts(
         root_dir=POLICY_REPORT_DIR / "session_reports",
@@ -3025,6 +3124,164 @@ def _close_policy_lab_session() -> None:
     st.session_state.pop("policy_lab_session_meta", None)
 
 
+def _policy_session_event_markers(session: Dict[str, Any]) -> List[Dict[str, Any]]:
+    markers: List[Dict[str, Any]] = []
+    for item in list(session.get("policy_timeline", []) or _policy_session_timeline(session)):
+        if not isinstance(item, dict):
+            continue
+        markers.append(
+            {
+                "event_id": str(item.get("policy_id", item.get("政策名称", ""))),
+                "event_type": "policy",
+                "title": str(item.get("政策名称", item.get("policy_name", "政策事件"))),
+                "raw_text": str(item.get("政策文本", item.get("policy_text", ""))),
+                "effective_day": int(item.get("生效交易日", item.get("effective_day", 1)) or 1),
+                "strength": float(item.get("初始强度", item.get("remaining_effect", 1.0)) or 0.0),
+                "source": "policy_session",
+            }
+        )
+    for item in list(session.get("runtime_event_timeline", []) or []):
+        if not isinstance(item, dict):
+            continue
+        raw_type = str(item.get("event_type", "news") or "news")
+        event_type = "regulatory_action" if raw_type == "regulatory_action" else raw_type
+        markers.append(
+            {
+                "event_id": str(item.get("event_id", item.get("id", ""))),
+                "event_type": event_type,
+                "title": str(item.get("title", raw_type)),
+                "raw_text": str(item.get("raw_text", item.get("description", ""))),
+                "effective_day": int(item.get("effective_day", item.get("step", 1)) or 1),
+                "strength": float(item.get("current_strength", item.get("strength", 1.0)) or 0.0),
+                "confidence": float(item.get("confidence", 0.0) or 0.0),
+                "source": str(item.get("source", "runtime_event")),
+            }
+        )
+    if not any(str(item.get("event_type")) in {"major_news", "news", "rumor", "refute"} for item in markers):
+        markers.append(
+            {
+                "event_type": "major_news",
+                "title": "市场新闻基线",
+                "raw_text": "用于展示新闻事件标记层的合成基线事件。",
+                "effective_day": max(1, int(session.get("current_day", 1) or 1) // 2 or 1),
+                "strength": 0.45,
+                "source": "synthetic_fallback",
+            }
+        )
+    if not any(str(item.get("event_type")) == "regulatory_action" for item in markers):
+        markers.append(
+            {
+                "event_type": "regulatory_action",
+                "title": "监管观察窗口",
+                "raw_text": "当恐慌度或订单失衡超过阈值时进入监管观察。",
+                "effective_day": max(1, int(session.get("current_day", 1) or 1)),
+                "strength": float(dict(session.get("summary", {}) or {}).get("max_panic", 0.35) or 0.35),
+                "source": "synthetic_fallback",
+            }
+        )
+    return markers
+
+
+def _policy_session_real_index_frame(session: Dict[str, Any]) -> pd.DataFrame:
+    stored = session.get("real_index_frame")
+    if isinstance(stored, list) and stored:
+        return pd.DataFrame(stored)
+    symbol = str(session.get("index_symbol", "sh000001") or "sh000001")
+    total_days = int(session.get("history_window_days", session.get("total_days", 120)) or 120)
+    end_date = _policy_anchor_date() - pd.Timedelta(days=1)
+    return _load_real_index_history(symbol, max(60, total_days), end_date)
+
+
+def _policy_session_registry_entry(session: Dict[str, Any], chart_frame: pd.DataFrame) -> Dict[str, Any]:
+    config_payload = {
+        "session_id": session.get("session_id", ""),
+        "policy_name": session.get("policy_name", ""),
+        "policy_text": session.get("policy_text", ""),
+        "total_days": session.get("total_days", 0),
+        "index_symbol": session.get("index_symbol", "sh000001"),
+        "runtime_profile": session.get("runtime_profile", {}),
+    }
+    config_hash = str(session.get("config_hash") or stable_payload_hash(config_payload))
+    data_snapshot_id = str(session.get("data_snapshot_id") or chart_frame.attrs.get("trade_tape_hash", "synthetic_or_cached_snapshot"))
+    entry = build_experiment_registry_entry(
+        experiment_id=str(session.get("experiment_id", "")),
+        scenario_name=str(session.get("policy_name", session.get("template_title", "policy_lab"))),
+        config_hash=config_hash,
+        data_snapshot_id=data_snapshot_id,
+        seed=int(session.get("seed", 42) or 42),
+        selected_benchmark=str(session.get("index_symbol", "sh000001") or "sh000001"),
+        status=str(session.get("status", "created")),
+        created_at=str(session.get("created_at", "")) or None,
+    )
+    session["experiment_id"] = entry["experiment_id"]
+    session["config_hash"] = entry["config_hash"]
+    session["data_snapshot_id"] = entry["data_snapshot_id"]
+    session["created_at"] = entry["created_at"]
+    return entry
+
+
+def _policy_session_repro_meta(
+    session: Dict[str, Any],
+    *,
+    registry_entry: Dict[str, Any],
+    chart_frame: pd.DataFrame,
+    runtime_profile: RuntimeModeProfile,
+) -> Dict[str, Any]:
+    return build_reproducibility_meta(
+        data_snapshot_hash=str(registry_entry.get("data_snapshot_id", chart_frame.attrs.get("trade_tape_hash", ""))),
+        config_hash=str(registry_entry.get("config_hash", "")),
+        random_seed=int(registry_entry.get("seed", 42) or 42),
+        llm_provider_chain=list(runtime_profile.model_priority or ["GLM-4-flashx", "offline_fallback"]),
+        calibration_parameter_set_id=str(session.get("calibration_parameter_set_id", "policy_lab_default_calibration_v1")),
+        extra={
+            "selected_benchmark": registry_entry.get("selected_benchmark", "sh000001"),
+            "runtime_mode": runtime_profile.mode,
+            "session_id": session.get("session_id", ""),
+        },
+    )
+
+
+def _policy_session_scorecard(
+    session: Dict[str, Any],
+    chart_frame: pd.DataFrame,
+    real_index_frame: pd.DataFrame,
+    events: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if chart_frame.empty:
+        return mock_scorecard()
+    real_close = (
+        pd.to_numeric(real_index_frame["close"], errors="coerce").tail(len(chart_frame)).tolist()
+        if real_index_frame is not None and not real_index_frame.empty and "close" in real_index_frame.columns
+        else pd.to_numeric(chart_frame["close"], errors="coerce").tolist()
+    )
+    scorecard = build_replay_scorecard(
+        sim_close=pd.to_numeric(chart_frame["close"], errors="coerce").tolist(),
+        real_close=real_close,
+        benchmark_symbol=str(session.get("index_symbol", "sh000001") or "sh000001"),
+        replay_window={
+            "start": str(chart_frame.iloc[0].get("time", "")),
+            "end": str(chart_frame.iloc[-1].get("time", "")),
+        },
+        seed=int(session.get("seed", 42) or 42),
+        config_hash=str(session.get("config_hash", "")),
+        data_snapshot_hash=str(session.get("data_snapshot_id", chart_frame.attrs.get("trade_tape_hash", ""))),
+        microstructure_metrics={
+            "spread": float(pd.to_numeric(chart_frame.get("spread", pd.Series([0.0])), errors="coerce").fillna(0.0).mean()),
+            "depth_imbalance": float(pd.to_numeric(chart_frame.get("depth_imbalance", pd.Series([0.0])), errors="coerce").fillna(0.0).mean()),
+            "trade_count": float(pd.to_numeric(chart_frame.get("trade_count", pd.Series([0.0])), errors="coerce").fillna(0.0).sum()),
+        },
+        behavioral_metrics={
+            "csad_mean": float(pd.to_numeric(chart_frame.get("csad", pd.Series([0.0])), errors="coerce").fillna(0.0).mean()),
+            "sentiment_index": float(pd.to_numeric(chart_frame.get("sentiment_index", pd.Series([0.0])), errors="coerce").fillna(0.0).mean()),
+        },
+        regulatory_metrics={"event_count": float(len(events))},
+        event_points=[item.get("effective_day", item.get("step", 1)) for item in events],
+        dates=chart_frame["time"].tolist(),
+        panic_series=pd.to_numeric(chart_frame.get("panic_level", pd.Series(dtype=float)), errors="coerce").fillna(0.0).tolist(),
+    )
+    return scorecard.to_dict()
+
+
 def _session_frame_to_market_frame(session_frame: pd.DataFrame, *, anchor_close: float = 0.0) -> pd.DataFrame:
     if session_frame.empty:
         return pd.DataFrame(columns=["step", "time", "open", "high", "low", "close", "volume", "csad", "panic_level"])
@@ -3540,6 +3797,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
             session["calendar_start"] = pd.bdate_range(start=pd.Timestamp(history_end).normalize(), periods=2)[-1].strftime("%Y-%m-%d")
             session["autoplay"] = {"enabled": True, "step_days": 1, "interval_seconds": 1.0, "last_wallclock_ts": 0.0}
             session["history_window_days"] = int(history_window_days)
+            session["real_index_frame"] = real_history.to_dict(orient="records") if not real_history.empty else []
             session["template_id"] = str(selected_template.get("id", "custom")) if isinstance(selected_template, dict) else "custom"
             session["template_title"] = policy_name
             session["template_category"] = str(selected_template.get("category", "自定义场景")) if isinstance(selected_template, dict) else "自定义场景"
@@ -3722,32 +3980,64 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
     market_tab, behavior_tab, agent_tab = st.tabs(["结果总览", "行为金融", "主体决策剖面"])
 
     with market_tab:
-        chart_mode = st.radio(
-            "图表模式",
-            options=CHART_MODE_OPTIONS,
-            horizontal=True,
-            index=0,
-            key=f"policy_lab_chart_mode_{presentation_mode}",
+        selected_benchmark_label = st.selectbox(
+            "benchmark selector",
+            options=list(INDEX_BENCHMARK_OPTIONS.keys()),
+            index=list(INDEX_BENCHMARK_OPTIONS.values()).index(str(session.get("index_symbol", "sh000001")))
+            if str(session.get("index_symbol", "sh000001")) in INDEX_BENCHMARK_OPTIONS.values()
+            else 0,
+            key=f"policy_lab_workbench_benchmark_{presentation_mode}",
+        )
+        selected_benchmark_symbol = INDEX_BENCHMARK_OPTIONS[selected_benchmark_label]
+        real_index_frame = _policy_session_real_index_frame({**session, "index_symbol": selected_benchmark_symbol})
+        event_markers = _policy_session_event_markers(session)
+        synthetic_tape = dashboard_workbench.build_synthetic_trade_tape_from_market_frame(
+            session_frame,
+            symbol=selected_benchmark_symbol,
+            seed=int(session.get("seed", 42) or 42),
+            config_hash=str(session.get("config_hash", "")),
+            data_snapshot_hash=str(session.get("data_snapshot_id", "")),
         )
         if not session_frame.empty:
             st.caption(f"区间：{session_frame.iloc[0]['time']} 至 {session_frame.iloc[-1]['time']}")
             _render_quote_banner(
                 session_frame,
-                index_label=str(session.get("index_label", "指数基准")),
-                index_symbol=str(session.get("index_symbol", "")),
-                source_text="会话式多智能体仿真",
+                index_label=selected_benchmark_label,
+                index_symbol=selected_benchmark_symbol,
+                source_text="trade tape 聚合 K 线 + 真实指数叠加",
                 history_end=str(session_frame.iloc[-1]["time"]),
             )
-            st.plotly_chart(
-                _build_chart(
-                    session_frame,
-                    chart_title=f"{session.get('policy_name', '政策仿真')} - 市场路径",
-                    mode=chart_mode,
-                ),
-                use_container_width=True,
+            kline_fig, chart_frame = dashboard_workbench.render_trade_tape_kline_workbench(
+                synthetic_tape,
+                symbol=selected_benchmark_symbol,
+                benchmark_symbol=selected_benchmark_symbol,
+                market_frame=session_frame,
+                real_index_frame=real_index_frame,
+                events=event_markers,
+                key_prefix=f"policy_lab_trade_tape_kline_{presentation_mode}",
+                seed=int(session.get("seed", 42) or 42),
+                config_hash=str(session.get("config_hash", "")),
+                data_snapshot_hash=str(session.get("data_snapshot_id", "")),
             )
+            registry_entry = _policy_session_registry_entry(session, chart_frame)
+            repro_meta = _policy_session_repro_meta(
+                session,
+                registry_entry=registry_entry,
+                chart_frame=chart_frame,
+                runtime_profile=runtime_profile,
+            )
+            session["experiment_registry"] = registry_entry
+            session["reproducibility"] = repro_meta
+            session["workbench_ohlcv_rows"] = chart_frame.to_dict(orient="records")
+            _store_session(session)
         else:
             st.info("尚未生成交易路径，请点击“继续 1 天”或“运行到结束”。")
+            chart_frame = pd.DataFrame()
+            real_index_frame = pd.DataFrame()
+            event_markers = []
+            synthetic_tape = []
+            registry_entry = {}
+            repro_meta = {}
 
         if package_dict and not session_frame.empty:
             left, right = st.columns(2)
@@ -3794,6 +4084,44 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
             st.info("当前数据量不足，继续推进会话后可查看反事实对照结果。")
 
         _render_discovered_metrics_panel(dict(session.get("discovered_metrics", {}) or {}))
+
+        st.markdown("### Research workbench")
+        workbench_tabs = st.tabs(["场景对比", "回放", "Scorecard", "复现信息"])
+        with workbench_tabs[0]:
+            scenario_frames = {}
+            if counterfactual.get("worlds"):
+                worlds = dict(counterfactual.get("worlds", {}) or {})
+                scenario_frames = {
+                    "baseline": pd.DataFrame(worlds.get("no_intervention", []) or []),
+                    "policy_a": pd.DataFrame(worlds.get("early_intervention", []) or []),
+                    "policy_b": pd.DataFrame(worlds.get("late_intervention", []) or []),
+                    "optimized_policy": pd.DataFrame(worlds.get(counterfactual.get("recommended_timing", "early_intervention"), []) or []),
+                }
+            scenario_diff = render_scenario_diff(
+                scenario_frames,
+                base_frame=chart_frame if not chart_frame.empty else session_frame,
+                key_prefix=f"policy_lab_scenario_diff_{presentation_mode}",
+            )
+            session["scenario_diff"] = {
+                key: value.to_dict(orient="records") for key, value in scenario_diff.items() if isinstance(value, pd.DataFrame)
+            }
+        with workbench_tabs[1]:
+            replay_snapshot = render_replay_scrubber(
+                chart_frame if not chart_frame.empty else session_frame,
+                events=event_markers,
+                trade_tape=[item.to_dict() if hasattr(item, "to_dict") else dict(item) for item in synthetic_tape],
+                reports=[dict(session.get("latest_step_report", {}) or {})],
+                key_prefix=f"policy_lab_replay_{presentation_mode}",
+            )
+            session["last_replay_snapshot"] = replay_snapshot
+        with workbench_tabs[2]:
+            scorecard = _policy_session_scorecard(session, chart_frame if not chart_frame.empty else session_frame, real_index_frame, event_markers)
+            session["scorecard"] = scorecard
+            render_scorecard_panel(scorecard, key_prefix=f"policy_lab_scorecard_{presentation_mode}")
+        with workbench_tabs[3]:
+            render_experiment_registry(registry_entry or session.get("experiment_registry", {}), key_prefix=f"policy_lab_registry_{presentation_mode}")
+            render_reproducibility_panel(repro_meta or session.get("reproducibility", {}), key_prefix=f"policy_lab_repro_{presentation_mode}")
+        _store_session(session)
 
         with st.expander("查看政策时间轴、追加政策与日度明细", expanded=False):
             st.markdown("#### 政策时间轴")
@@ -4021,7 +4349,11 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
             st.caption("报告正文已在页面直接展示，可按需下载不同格式文件。")
             st.markdown("#### 报告正文预览")
             st.markdown(report_preview)
-            download_cols = st.columns(4)
+            export_frame = pd.DataFrame(session.get("workbench_ohlcv_rows", []) or session_frame.to_dict(orient="records"))
+            table_exports = dataframe_export_bundle(export_frame, stem=f"{report_bundle['stem']}_ohlcv")
+            if table_exports.get("disabled_reasons"):
+                st.caption("Parquet 导出降级：" + "；".join(table_exports["disabled_reasons"].values()))
+            download_cols = st.columns(6)
             with download_cols[0]:
                 st.download_button(
                     "下载 Word（文档）",
@@ -4059,6 +4391,25 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                     mime="application/json",
                     use_container_width=True,
                     key=f"policy_lab_report_json_{presentation_mode}_{report_bundle['stem']}",
+                )
+            with download_cols[4]:
+                st.download_button(
+                    "下载 CSV（K线数据）",
+                    data=table_exports["csv_bytes"],
+                    file_name=f"{table_exports['stem']}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    key=f"policy_lab_report_csv_{presentation_mode}_{report_bundle['stem']}",
+                )
+            with download_cols[5]:
+                st.download_button(
+                    "下载 Parquet",
+                    data=table_exports.get("parquet_bytes") or b"",
+                    file_name=f"{table_exports['stem']}.parquet",
+                    mime="application/octet-stream",
+                    use_container_width=True,
+                    disabled=table_exports.get("parquet_bytes") is None,
+                    key=f"policy_lab_report_parquet_{presentation_mode}_{report_bundle['stem']}",
                 )
 
     with behavior_tab:

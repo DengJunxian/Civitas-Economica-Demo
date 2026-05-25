@@ -30,6 +30,16 @@ from core.runtime_mode import merge_mode_feature_flags, resolve_runtime_mode_pro
 from core.ui_text import display_runtime_mode, display_scenario_name
 from ui.backtest_panel import render_backtest_panel
 from ui.behavioral_diagnostics import render_behavioral_diagnostics
+from ui.components.replay_scrubber import render_replay_scrubber
+from ui.components.repro_meta import (
+    build_experiment_registry_entry,
+    build_reproducibility_meta,
+    render_experiment_registry,
+    render_reproducibility_panel,
+    stable_payload_hash,
+)
+from ui.components.scenario_diff import render_scenario_diff
+from ui.components.scorecard_panel import render_scorecard_panel
 from ui.demo_wind_tunnel import render_demo_tab
 from ui.history_replay import render_history_replay
 from ui.policy_lab import _build_regulation_counterfactual_worlds, render_policy_lab
@@ -771,6 +781,95 @@ def _build_overview_chain_payload(metrics: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
+def _render_research_workbench_tab() -> None:
+    st.markdown("### Research workbench")
+    st.caption("主图、事件层、场景对比、回放、scorecard 和可复现信息集中展示。")
+    _ensure_demo_loaded()
+    scenario = st.session_state.get("demo_scenario")
+    metrics = scenario.metrics.copy() if scenario is not None and hasattr(scenario, "metrics") else pd.DataFrame()
+    if metrics.empty:
+        dashboard_ui.render_empty_market_board(key_prefix="research_empty")
+        return
+
+    benchmark = st.selectbox(
+        "benchmark selector",
+        options=["sh000001", "sh000300", "sz399001", "sz399006"],
+        index=0,
+        key="research_workbench_benchmark",
+    )
+    if "sentiment_index" not in metrics.columns and "panic_level" in metrics.columns:
+        metrics["sentiment_index"] = 1.0 - pd.to_numeric(metrics["panic_level"], errors="coerce").fillna(0.0)
+    if "spread" not in metrics.columns:
+        metrics["spread"] = pd.to_numeric(metrics["close"], errors="coerce").pct_change().abs().fillna(0.001)
+    if "depth_imbalance" not in metrics.columns:
+        panic_series = (
+            pd.to_numeric(metrics["panic_level"], errors="coerce").fillna(0.0)
+            if "panic_level" in metrics.columns
+            else pd.Series(0.0, index=metrics.index)
+        )
+        metrics["depth_imbalance"] = (0.5 - panic_series).clip(-1.0, 1.0)
+    tape = dashboard_ui.build_synthetic_trade_tape_from_market_frame(metrics, symbol=benchmark)
+    events = [
+        {"event_type": "policy", "title": "政策冲击", "effective_day": 1, "strength": 1.0, "source": "demo_scenario"},
+        {"event_type": "major_news", "title": "新闻扰动", "effective_day": max(2, int(len(metrics) * 0.35)), "strength": 0.7, "source": "demo_scenario"},
+        {"event_type": "regulatory_action", "title": "监管观察", "effective_day": max(3, int(len(metrics) * 0.70)), "strength": 0.8, "source": "demo_scenario"},
+    ]
+    fig, chart_frame = dashboard_ui.render_trade_tape_kline_workbench(
+        tape,
+        symbol=benchmark,
+        benchmark_symbol=benchmark,
+        market_frame=metrics,
+        real_index_frame=pd.DataFrame(),
+        events=events,
+        key_prefix="research_workbench",
+    )
+    tabs = st.tabs(["场景对比", "回放", "Scorecard", "复现信息"])
+    with tabs[0]:
+        counterfactual = _build_regulation_counterfactual_worlds(metrics, intensity=1.0)
+        worlds = dict(counterfactual.get("worlds", {}) or {})
+        render_scenario_diff(
+            {
+                "baseline": pd.DataFrame(worlds.get("no_intervention", []) or []),
+                "policy_a": pd.DataFrame(worlds.get("early_intervention", []) or []),
+                "policy_b": pd.DataFrame(worlds.get("late_intervention", []) or []),
+                "optimized_policy": pd.DataFrame(worlds.get(counterfactual.get("recommended_timing", "early_intervention"), []) or []),
+            },
+            base_frame=chart_frame,
+            key_prefix="research_workbench_diff",
+        )
+    with tabs[1]:
+        render_replay_scrubber(
+            chart_frame,
+            events=events,
+            trade_tape=[item.to_dict() for item in tape],
+            key_prefix="research_workbench_replay",
+        )
+    with tabs[2]:
+        render_scorecard_panel(st.session_state.get("policy_lab_session", {}).get("scorecard") if isinstance(st.session_state.get("policy_lab_session"), dict) else None, key_prefix="research_workbench_scorecard")
+    with tabs[3]:
+        config_hash = stable_payload_hash({"scenario": getattr(scenario, "name", "demo"), "benchmark": benchmark})
+        registry = build_experiment_registry_entry(
+            scenario_name=display_scenario_name(getattr(scenario, "name", "demo")),
+            config_hash=config_hash,
+            data_snapshot_id=chart_frame.attrs.get("trade_tape_hash", "demo_synthetic_tape"),
+            seed=42,
+            selected_benchmark=benchmark,
+            status="ready",
+        )
+        render_experiment_registry(registry, key_prefix="research_workbench_registry")
+        render_reproducibility_panel(
+            build_reproducibility_meta(
+                data_snapshot_hash=str(registry["data_snapshot_id"]),
+                config_hash=config_hash,
+                random_seed=42,
+                llm_provider_chain=["GLM-4-flashx", "DeepSeek", "offline_fallback"],
+                calibration_parameter_set_id="demo_default_calibration_v1",
+                extra={"figure_trace_count": len(fig.data)},
+            ),
+            key_prefix="research_workbench_repro",
+        )
+
+
 def _render_overview_home() -> None:
     st.markdown(
         """
@@ -1017,8 +1116,10 @@ def _render_advanced_analysis() -> None:
             """,
             unsafe_allow_html=True,
         )
-    tab1, tab2, tab3, tab4 = st.tabs(["AI 决策证据", "行为与风险诊断", "监管优化与 A/B", "研究验证与归档"])
+    tab0, tab1, tab2, tab3, tab4 = st.tabs(["研究工作台", "AI 决策证据", "行为与风险诊断", "监管优化与 A/B", "研究验证与归档"])
 
+    with tab0:
+        _render_research_workbench_tab()
     with tab1:
         _render_ai_decision_tab()
     with tab2:

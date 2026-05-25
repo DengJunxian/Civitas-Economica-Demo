@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import date, datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Optional
 import json
@@ -26,6 +27,7 @@ from core.tear_sheet import (
     export_tear_sheet_html,
     export_tear_sheet_json,
 )
+from ui.components.scorecard_panel import render_scorecard_panel
 from ui.narrative import render_narrative_block
 
 INDEX_OPTIONS = {
@@ -309,16 +311,8 @@ def _build_result_replay_scorecard(result: BacktestResult) -> Dict[str, Any]:
 
 def _render_replay_scorecard(result: BacktestResult) -> None:
     scorecard = _build_result_replay_scorecard(result)
-    st.markdown("### Replay Scorecard")
     st.caption("Scorecard 使用回测原始序列和 replay 指标生成，展示层不重新编造 OHLC。")
-    path_metrics = scorecard.get("path_fit_metrics", {})
-    risk_metrics = scorecard.get("risk_metrics", {})
-    flags = scorecard.get("pass_fail_flags", {})
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("方向命中率", f"{float(path_metrics.get('direction_hit_rate', 0.0)):.2%}")
-    c2.metric("归一化 RMSE", f"{float(path_metrics.get('normalized_rmse', 0.0)):.4f}")
-    c3.metric("波动差", f"{float(risk_metrics.get('volatility_gap', 0.0)):.4f}")
-    c4.metric("回撤差", f"{float(risk_metrics.get('max_drawdown_gap', 0.0)):.2%}")
+    render_scorecard_panel(scorecard, key_prefix="backtest_replay_scorecard")
     meta_df = pd.DataFrame(
         [
             {
@@ -331,9 +325,6 @@ def _render_replay_scorecard(result: BacktestResult) -> None:
         ]
     )
     st.dataframe(meta_df, use_container_width=True, hide_index=True)
-    flag_df = pd.DataFrame([flags]) if isinstance(flags, dict) else pd.DataFrame()
-    if not flag_df.empty:
-        st.dataframe(_localize_table(flag_df), use_container_width=True, hide_index=True)
 
 
 def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None:
@@ -596,8 +587,16 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
     perf_export["date"] = perf_export["date"].dt.strftime("%Y-%m-%d")
     perf_csv = perf_export.to_csv(index=False).encode("utf-8-sig")
     payload_json = json.dumps(_result_payload(result), ensure_ascii=False, indent=2).encode("utf-8")
+    parquet_bytes: Optional[bytes] = None
+    parquet_error = ""
+    try:
+        parquet_buffer = BytesIO()
+        perf_export.to_parquet(parquet_buffer, index=False)
+        parquet_bytes = parquet_buffer.getvalue()
+    except Exception as exc:
+        parquet_error = str(exc)
 
-    dl_col1, dl_col2, dl_col3 = st.columns(3)
+    dl_col1, dl_col2, dl_col3, dl_col4 = st.columns(4)
     with dl_col1:
         st.download_button(
             "下载 CSV（绩效序列）",
@@ -615,6 +614,16 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
             use_container_width=True,
         )
     with dl_col3:
+        st.download_button(
+            "下载 Parquet（绩效序列）",
+            data=parquet_bytes or b"",
+            file_name="backtest_performance.parquet",
+            mime="application/octet-stream",
+            use_container_width=True,
+            disabled=parquet_bytes is None,
+            help=parquet_error or None,
+        )
+    with dl_col4:
         if st.button("导出量化研究数据包", use_container_width=True):
             session_backtester: Optional[HistoricalBacktester] = st.session_state.get("backtester")
             if not session_backtester:

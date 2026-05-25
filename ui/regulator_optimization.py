@@ -10,6 +10,8 @@ import plotly.express as px
 import streamlit as st
 
 from regulator_agent import run_regulatory_closed_loop
+from ui.components.optimization_report_panel import render_optimization_report_panel
+from ui.components.repro_meta import build_reproducibility_meta, render_reproducibility_panel
 from ui.dashboard import render_discovered_metrics_panel
 from ui.narrative import narrate_payload, render_narrative_block
 
@@ -131,6 +133,17 @@ def render_regulator_optimization() -> None:
             f"path={env_selection.get('selected_path', '')} | "
             f"fallback={env_selection.get('fallback_used', False)}"
         )
+    render_reproducibility_panel(
+        build_reproducibility_meta(
+            data_snapshot_hash=str(reproducibility.get("data_snapshot_hash", reproducibility.get("dataset_snapshot_id", "regulator_env_snapshot"))),
+            config_hash=str(reproducibility.get("config_hash", "")),
+            random_seed=int(reproducibility.get("seed", 42) or 42),
+            llm_provider_chain=["regulator_q_learning", "bayesian_optimization", "nsga_ii"],
+            calibration_parameter_set_id=str(reproducibility.get("calibration_parameter_set_id", "regulator_default_v1")),
+            extra={"env_selection": env_selection},
+        ),
+        key_prefix="regulator_repro",
+    )
 
     st.markdown("### 黑箱多目标优化")
     if isinstance(blackbox, dict) and blackbox:
@@ -173,6 +186,8 @@ def render_regulator_optimization() -> None:
         )
     else:
         st.info("暂无黑箱优化输出。")
+
+    render_optimization_report_panel(result, key_prefix="regulator_optimization_report")
 
     st.markdown("### 反事实对照（A/B）")
     left, right = st.columns(2)

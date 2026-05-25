@@ -638,6 +638,8 @@ class PolicySession:
 
     def _record_for_day(self, day_index: int, report: Dict[str, Any], active_timeline: List[Dict[str, Any]]) -> Dict[str, Any]:
         trade_date = self.calendar[min(max(day_index - 1, 0), len(self.calendar) - 1)]
+        raw_close_price = float(report.get("new_price", report.get("old_price", 0.0)) or 0.0)
+        raw_old_price = float(report.get("old_price", raw_close_price) or raw_close_price)
         old_price, close_price = self._resolve_day_prices(report, active_timeline)
         market_return = float((close_price - old_price) / old_price) if old_price > 0 else 0.0
         event_digest = dict(report.get("runtime_event_digest", {}) or self._last_event_digest.to_dict())
@@ -658,6 +660,16 @@ class PolicySession:
             "恐慌度": float(max(0.0, 1.0 - float(report.get("macro_state", {}).get("sentiment_index", 0.0) or 0.0))),
             "羊群度": float(report.get("behavioral_diagnostics", {}).get("csad", 0.0) or 0.0),
             "阶段": "运行中" if self.is_running else self.status,
+            "展示校准": {
+                "visualization_only": bool(active_timeline),
+                "evaluation_allowed": False if active_timeline else bool(report.get("evaluation_allowed", True)),
+                "raw_old_price": float(raw_old_price),
+                "raw_close_price": float(raw_close_price),
+                "display_old_price": float(old_price),
+                "display_close_price": float(close_price),
+                "price_source": str(report.get("price_source", "policy_session_report")),
+                "note": "PolicySession display smoothing is excluded from reward, optimizer, and replay scorecard.",
+            },
             "原始报告": dict(report),
             "政策时间轴": list(active_timeline),
             "事件时间轴": list(event_digest.get("active_events", [])),

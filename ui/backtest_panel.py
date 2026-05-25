@@ -19,6 +19,7 @@ from core.backtester import (
     BacktestResult,
     HistoricalBacktester,
 )
+from core.calibration.scorecard import build_replay_scorecard
 from core.tear_sheet import (
     build_standard_tear_sheet,
     compare_scenarios,
@@ -273,6 +274,66 @@ def _localize_table(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
 
 
+def _build_result_replay_scorecard(result: BacktestResult) -> Dict[str, Any]:
+    metadata = dict(result.metadata or {})
+    data_snapshot = dict(metadata.get("data_snapshot", {}) or {})
+    window = dict(metadata.get("window", {}) or {})
+    if not window:
+        window = {
+            "start": result.dates[0] if result.dates else None,
+            "end": result.dates[-1] if result.dates else None,
+        }
+    scorecard = build_replay_scorecard(
+        sim_close=list(result.simulated_prices or []),
+        real_close=list(result.real_prices or []),
+        benchmark_symbol=str(metadata.get("benchmark_symbol", "sh000001")),
+        replay_window=window,
+        seed=int(metadata.get("random_seed", metadata.get("seed", 42)) or 42),
+        config_hash=str(metadata.get("config_hash", "")),
+        data_snapshot_hash=str(data_snapshot.get("sha256", data_snapshot.get("snapshot_id", ""))),
+        microstructure_metrics={
+            "turnover": float(result.agent_turnover_rate),
+            "trade_count": float(result.total_trades),
+        },
+        behavioral_metrics={
+            "leverage": float(result.agent_leverage_ratio),
+        },
+        regulatory_metrics={
+            "cost_ratio": float(result.cost_ratio),
+        },
+    )
+    return scorecard.to_dict()
+
+
+def _render_replay_scorecard(result: BacktestResult) -> None:
+    scorecard = _build_result_replay_scorecard(result)
+    st.markdown("### Replay Scorecard")
+    st.caption("Scorecard 使用回测原始序列和 replay 指标生成，展示层不重新编造 OHLC。")
+    path_metrics = scorecard.get("path_fit_metrics", {})
+    risk_metrics = scorecard.get("risk_metrics", {})
+    flags = scorecard.get("pass_fail_flags", {})
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("方向命中率", f"{float(path_metrics.get('direction_hit_rate', 0.0)):.2%}")
+    c2.metric("归一化 RMSE", f"{float(path_metrics.get('normalized_rmse', 0.0)):.4f}")
+    c3.metric("波动差", f"{float(risk_metrics.get('volatility_gap', 0.0)):.4f}")
+    c4.metric("回撤差", f"{float(risk_metrics.get('max_drawdown_gap', 0.0)):.2%}")
+    meta_df = pd.DataFrame(
+        [
+            {
+                "experiment_id": scorecard.get("experiment_id", ""),
+                "benchmark_symbol": scorecard.get("benchmark_symbol", ""),
+                "seed": scorecard.get("seed", ""),
+                "config_hash": str(scorecard.get("config_hash", ""))[:16],
+                "data_snapshot_hash": str(scorecard.get("data_snapshot_hash", ""))[:16],
+            }
+        ]
+    )
+    st.dataframe(meta_df, use_container_width=True, hide_index=True)
+    flag_df = pd.DataFrame([flags]) if isinstance(flags, dict) else pd.DataFrame()
+    if not flag_df.empty:
+        st.dataframe(_localize_table(flag_df), use_container_width=True, hide_index=True)
+
+
 def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None:
     if show_header:
         st.markdown("## 因子回测")
@@ -523,6 +584,8 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
         )
     else:
         st.info("暂无可展示的摘要信息。")
+
+    _render_replay_scorecard(result)
 
     with st.expander("查看技术报告（开发用）", expanded=False):
         st.markdown(BacktestReportGenerator.generate_html_report(result), unsafe_allow_html=True)

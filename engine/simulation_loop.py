@@ -1397,7 +1397,9 @@ class MarketEnvironment:
                     snapshot = self.simulation_runner.advance_time(1)
                 matching_snapshot = dict(snapshot)
                 trade_count = int(snapshot.get("trade_count", 0))
-                if snapshot.get("last_price") is not None:
+                if trade_count > 0 and snapshot.get("tape_last_price") is not None:
+                    self.current_price = float(snapshot["tape_last_price"])
+                elif trade_count > 0 and snapshot.get("last_price") is not None:
                     self.current_price = float(snapshot["last_price"])
                 buffered_intents = int(snapshot.get("buffer_size", buffered_intents))
                 abuse_detection = self._consume_matching_snapshot_for_abuse(snapshot)
@@ -1407,6 +1409,9 @@ class MarketEnvironment:
                 self.current_price = calculate_new_price(buy_volume, sell_volume, self.current_price)
                 matching_snapshot = {
                     "last_price": float(self.current_price),
+                    "price_source": "legacy_impact_model_visualization_only",
+                    "visualization_only": True,
+                    "evaluation_allowed": False,
                     "trade_count": 0,
                     "best_bid": None,
                     "best_ask": None,
@@ -1419,6 +1424,9 @@ class MarketEnvironment:
             self.current_price = calculate_new_price(buy_volume, sell_volume, self.current_price)
             matching_snapshot = {
                 "last_price": float(self.current_price),
+                "price_source": "legacy_impact_model_visualization_only",
+                "visualization_only": True,
+                "evaluation_allowed": False,
                 "trade_count": 0,
                 "best_bid": None,
                 "best_ask": None,
@@ -1446,6 +1454,9 @@ class MarketEnvironment:
                 exogenous_volume=exo_point.get("volume", 0.0),
                 backdrop_weight=self.hybrid_backdrop_weight,
             )
+            matching_snapshot["visualization_only"] = True
+            matching_snapshot["evaluation_allowed"] = False
+            matching_snapshot["price_source"] = "hybrid_backdrop_visualization_only"
         self._abuse_event_count_series.append(int(abuse_detection.get("events_detected", 0)))
         if abuse_detection.get("events_detected", 0) and not self._intervention_active:
             self._intervention_active = True
@@ -1611,6 +1622,9 @@ class MarketEnvironment:
             "matching_mode": matching_mode,
             "pipeline_version": "v2" if self.market_pipeline_v2 else "v1",
             "trade_count": trade_count,
+            "price_source": str(matching_snapshot.get("price_source", "trade_tape")),
+            "visualization_only": bool(matching_snapshot.get("visualization_only", False)),
+            "evaluation_allowed": bool(matching_snapshot.get("evaluation_allowed", True)),
             "buffered_intents": buffered_intents,
             "simulation_mode": self.simulation_mode,
             "mode_runtime": self.runtime_profile.to_dict(),

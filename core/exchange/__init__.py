@@ -12,6 +12,8 @@ from .evolution import (
     hhi_from_shares,
     phase_change_score,
 )
+from .session_rules import AShareSessionEvent, AShareSessionRules
+from .trade_tape import TradeTape, TradeTapeRecord, aggregate_trade_tape_to_bars
 
 __all__ = [
     "StrategyGenome",
@@ -24,4 +26,9 @@ __all__ = [
     "coalition_persistence",
     "approx_modularity",
     "phase_change_score",
+    "AShareSessionEvent",
+    "AShareSessionRules",
+    "TradeTape",
+    "TradeTapeRecord",
+    "aggregate_trade_tape_to_bars",
 ]

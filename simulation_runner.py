@@ -20,6 +20,7 @@ from typing import Any, Deque, Dict, List, Optional
 
 from core.time_manager import SimulationClock
 from core.types import Order, OrderSide, OrderType
+from core.exchange.trade_tape import TradeTape
 
 from simulation_ipc import FileSystemIPC, IPCEnvelope
 
@@ -64,6 +65,7 @@ class BufferedIntent:
             agent_id=self.agent_id,
             timestamp=timestamp,
             order_id=self.intent_id,
+            metadata=dict(self.metadata or {}),
         )
 
 
@@ -87,6 +89,9 @@ class OASISRunner:
         self.ipc = FileSystemIPC(ipc_root)
         self.clock = SimulationClock()
         self.order_book = ORDER_BOOK_CLASS(symbol=symbol, prev_close=prev_close)
+        self.symbol = str(symbol)
+        self.prev_close = float(prev_close)
+        self.trade_tape = TradeTape(symbol=symbol, seed=42, config_hash="simulation_runner_v1")
         self.intent_buffer: Deque[BufferedIntent] = deque()
         self._running = True
 
@@ -148,6 +153,7 @@ class OASISRunner:
         - 同步 GraphRAG / Diagnostic Agent 探针
         """
         all_trades: List[Dict[str, Any]] = []
+        all_tape: List[Dict[str, Any]] = []
         executed_intents: List[str] = []
         cancelled_orders: List[Dict[str, Any]] = []
 
@@ -190,6 +196,22 @@ class OASISRunner:
                 trades = self.order_book.add_order(order)
                 executed_intents.append(intent.intent_id)
                 for trade in trades:
+                    tape_record = self.trade_tape.append_trade(
+                        trade,
+                        tick=int(self.clock.ticks),
+                        trading_day=time.strftime("%Y-%m-%d", time.localtime(float(self.clock.timestamp))),
+                        phase="continuous",
+                        market_timestamp=float(self.clock.timestamp),
+                        metadata={
+                            "source": "simulation_runner",
+                            "intent_id": intent.intent_id,
+                            "intent_type": intent.intent_type,
+                            "aggressor_side": intent.side,
+                            "seed": 42,
+                            "symbol": self.symbol,
+                            **dict(intent.metadata or {}),
+                        },
+                    )
                     all_trades.append(
                         {
                             "trade_id": trade.trade_id,
@@ -202,13 +224,20 @@ class OASISRunner:
                             "timestamp": trade.timestamp,
                         }
                     )
+                    all_tape.append(tape_record.to_dict())
 
         snapshot = self._snapshot()
+        tape_last_price = self.trade_tape.last_price(float(snapshot.get("last_price") or self.prev_close))
         snapshot.update(
             {
                 "executed_intents": executed_intents,
                 "trade_count": len(all_trades),
                 "trades": all_trades,
+                "trade_tape": all_tape,
+                "canonical_trade_tape": all_tape,
+                "tape_last_price": float(tape_last_price),
+                "trade_tape_hash": self.trade_tape.hash(),
+                "price_source": "trade_tape" if all_tape else "previous_trade_tape_price",
                 "cancel_count": len(cancelled_orders),
                 "canceled_orders": cancelled_orders,
             }
@@ -224,6 +253,8 @@ class OASISRunner:
             "best_ask": self.order_book.get_best_ask(),
             "depth": self.order_book.get_depth(5),
             "activity_stats": self.order_book.get_activity_stats() if hasattr(self.order_book, "get_activity_stats") else {},
+            "trade_tape_size": len(self.trade_tape.records),
+            "trade_tape_hash": self.trade_tape.hash(),
         }
 
 

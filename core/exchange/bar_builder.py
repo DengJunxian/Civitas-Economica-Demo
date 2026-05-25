@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 
 import numpy as np
 
+from core.exchange.trade_tape import TradeTapeRecord, aggregate_trade_tape_to_bars
 from core.types import Candle, Trade
 
 
@@ -68,13 +69,44 @@ class TradeTapeEntry:
         return out
 
 
-def _as_trade(entry: Trade | TradeTapeEntry) -> Trade:
+def _as_trade(entry: Trade | TradeTapeEntry | TradeTapeRecord) -> Trade:
+    if isinstance(entry, TradeTapeRecord):
+        return Trade(
+            trade_id=entry.trade_id,
+            price=float(entry.price),
+            quantity=int(entry.volume),
+            maker_id=str(entry.metadata.get("maker_id", entry.sell_order_id)),
+            taker_id=str(entry.metadata.get("taker_id", entry.buy_order_id)),
+            maker_agent_id=str(entry.metadata.get("maker_agent_id", entry.sell_agent_id)),
+            taker_agent_id=str(entry.metadata.get("taker_agent_id", entry.buy_agent_id)),
+            buyer_agent_id=str(entry.buy_agent_id),
+            seller_agent_id=str(entry.sell_agent_id),
+            timestamp=float(entry.timestamp),
+        )
     return entry.trade if isinstance(entry, TradeTapeEntry) else entry
 
 
-def _as_entry(entry: Trade | TradeTapeEntry) -> TradeTapeEntry:
+def _as_entry(entry: Trade | TradeTapeEntry | TradeTapeRecord) -> TradeTapeEntry:
     if isinstance(entry, TradeTapeEntry):
         return entry
+    if isinstance(entry, TradeTapeRecord):
+        return TradeTapeEntry(
+            trade=_as_trade(entry),
+            tick=int(entry.tick),
+            phase=str(entry.phase),
+            event_type="trade",
+            queue_position=int(entry.queue_position),
+            latency_ticks=int(entry.latency_ticks),
+            market_timestamp=float(entry.timestamp),
+            metadata={
+                "symbol": entry.symbol,
+                "trading_day": entry.trading_day,
+                "seed": int(entry.seed),
+                "config_hash": entry.config_hash,
+                "data_snapshot_hash": entry.data_snapshot_hash,
+                **dict(entry.metadata or {}),
+            },
+        )
     return TradeTapeEntry(trade=entry, market_timestamp=float(entry.timestamp), metadata={})
 
 
@@ -106,7 +138,7 @@ class TradeTapeBarBuilder:
 
     def build_bar(
         self,
-        trade_tape: Sequence[Trade | TradeTapeEntry],
+        trade_tape: Sequence[Trade | TradeTapeEntry | TradeTapeRecord],
         *,
         symbol: str,
         step: int,
@@ -161,7 +193,7 @@ class TradeTapeBarBuilder:
 
     def build_bars_from_trade_tape(
         self,
-        trade_tape: Sequence[Trade | TradeTapeEntry],
+        trade_tape: Sequence[Trade | TradeTapeEntry | TradeTapeRecord],
         *,
         symbol: str,
         prev_close: float,
@@ -200,9 +232,26 @@ class TradeTapeBarBuilder:
             running_prev_close = float(bar.close)
         return bars
 
+    def build_bars_from_canonical_tape(
+        self,
+        trade_tape: Sequence[TradeTapeRecord],
+        *,
+        symbol: str,
+        prev_close: float,
+        freq: str = "1m",
+        is_simulated: bool = True,
+    ) -> List[Candle]:
+        return aggregate_trade_tape_to_bars(
+            trade_tape,
+            freq=freq,
+            symbol=symbol,
+            prev_close=prev_close,
+            is_simulated=is_simulated,
+        )
+
     def build_replay_metrics(
         self,
-        trade_tape: Sequence[Trade | TradeTapeEntry],
+        trade_tape: Sequence[Trade | TradeTapeEntry | TradeTapeRecord],
         bars: Sequence[Candle],
     ) -> Dict[str, Any]:
         entries = [_as_entry(item) for item in trade_tape]

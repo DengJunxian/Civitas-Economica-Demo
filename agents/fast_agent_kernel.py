@@ -11,6 +11,10 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
+from agents.learning.persona_prior import PersonaPrior, kl_to_prior
+from agents.learning.policy_heads import HeuristicPolicyHead
+from agents.learning.regime_router import RegimeRouter
+
 
 def _clip(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, float(value)))
@@ -85,6 +89,8 @@ class FastAgentKernel:
     def __init__(self, *, min_quantity: int = 10, max_quantity: int = 650) -> None:
         self.min_quantity = int(min_quantity)
         self.max_quantity = int(max_quantity)
+        self.regime_router = RegimeRouter()
+        self.policy_head = HeuristicPolicyHead(board_lot=max(1, int(min_quantity)), max_qty=int(max_quantity))
 
     @staticmethod
     def _sentiment_signal(event_digest: Mapping[str, Any] | None, macro_state: Mapping[str, Any] | None) -> float:
@@ -144,6 +150,9 @@ class FastAgentKernel:
             archetype, sentiment_bucket, risk_bucket = key
             multiplicity = len(indices)
             avg_risk = risks[key] / max(multiplicity, 1)
+            representative = agents[indices[0]]
+            persona_prior = PersonaPrior.from_persona(getattr(representative, "persona", None), agent_group=archetype)
+            route = self.regime_router.route(macro_state or {}, agent_group=archetype, persona_prior=persona_prior)
             archetype_bias = 1.0
             if "mean_reverter" in archetype or "market_maker" in archetype:
                 archetype_bias = -0.55
@@ -154,6 +163,21 @@ class FastAgentKernel:
             elif "leveraged" in archetype:
                 archetype_bias = 1.55
             net_intent = float(_clip(signal * (0.35 + avg_risk) * archetype_bias, -1.0, 1.0))
+            net_intent = float(_clip(net_intent * max(0.05, route.leverage_multiplier) * max(0.05, route.risk_budget), -1.0, 1.0))
+            head_state = {
+                **dict(macro_state or {}),
+                "sentiment_index": float(dict(macro_state or {}).get("sentiment_index", 0.5) or 0.5),
+                "event_shock": float(dict(dict(event_digest or {}).get("aggregate_impact", {}) or {}).get("sentiment_impact", 0.0) or 0.0),
+                "funding_stress": float(dict(dict(event_digest or {}).get("aggregate_impact", {}) or {}).get("funding_stress", 0.0) or 0.0),
+                "current_price": float(current_price),
+                "news_heat": abs(float(signal)),
+            }
+            policy_output = self.policy_head.decide(
+                head_state,
+                agent_group=archetype,
+                persona_prior=persona_prior,
+                route=route,
+            )
             if abs(net_intent) < 0.035:
                 action = "HOLD"
             else:
@@ -170,6 +194,13 @@ class FastAgentKernel:
                         "cohort_id": self._cohort_id(archetype, sentiment_bucket, risk_bucket),
                         "multiplicity": int(multiplicity),
                         "net_intent": float(net_intent),
+                        "policy_head": "heuristic_policy_head_v1",
+                        "policy_head_action": policy_output.action,
+                        "policy_head_distribution": dict(policy_output.action_distribution),
+                        "persona_prior_kl": float(kl_to_prior(policy_output.action_distribution, persona_prior)),
+                        "regime": route.regime,
+                        "execution_style": route.execution_style,
+                        "slow_model_called": False,
                     },
                 )
             cohorts.append(

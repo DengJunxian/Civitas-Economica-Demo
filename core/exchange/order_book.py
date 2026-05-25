@@ -77,6 +77,13 @@ class OrderBook:
     def _normalize_order_quantity(self, order: Order) -> bool:
         if not self.market_rules.is_feature_enabled("market_rules_v1"):
             return int(order.quantity) > 0
+        original_qty = int(order.quantity)
+        if self.market_rules.enforce_board_lot and not self.market_rules.allow_odd_lots:
+            lot = max(1, int(self.market_rules.board_lot or 1))
+            if original_qty < lot or original_qty % lot != 0:
+                order.status = OrderStatus.REJECTED
+                order.reason = "board lot constraint"
+                return False
         normalized = self.market_rules.normalize_quantity(order.quantity)
         if normalized <= 0:
             order.status = OrderStatus.REJECTED

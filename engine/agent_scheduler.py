@@ -187,6 +187,9 @@ class AgentScheduler:
             "cache_hit_count": int(slow_stats.get("cache_hit_count", 0)),
             "prefix_cache_hit_count": int(slow_stats.get("prefix_cache_hit_count", 0)),
             "avg_slow_agent_latency_ms": float(slow_stats.get("avg_latency_ms", 0.0) or 0.0),
+            "fast_model_call_count": 0,
+            "fast_policy_path": "heuristic_or_vector_policy_head",
+            "slow_model_path": "slow_orchestrator_cadence_only",
             "cohort_count": int(len(cohort_states)),
             "cohorts": [cohort.to_dict() for cohort in cohort_states],
         }

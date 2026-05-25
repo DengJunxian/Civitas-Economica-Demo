@@ -21,6 +21,7 @@ from core.types import Order, Trade, Candle, OrderSide, OrderType, OrderStatus, 
 from core.time_manager import SimulationClock
 from core.policy import PolicyManager
 from core.regulation.risk_control import RiskEngine
+from core.exchange.a_share_session import call_auction_match, find_price_maximizing_volume_and_minimizing_imbalance
 from core.exchange.bar_builder import TradeTapeBarBuilder, TradeTapeEntry
 
 if TYPE_CHECKING:
@@ -487,116 +488,27 @@ class MatchingEngine:
         if not orders:
             return self.prev_close, []
         
-        # 鍒嗙涔板崠璁㈠崟
-        buy_orders = [o for o in orders if o.side == OrderSide.BUY]
-        sell_orders = [o for o in orders if o.side == OrderSide.SELL]
-        
-        if not buy_orders or not sell_orders:
-            return self.prev_close, []
-        
-        # 鏀堕泦鎵€鏈夊彲鑳界殑浠锋牸姘村钩
-        all_prices = set()
-        for o in orders:
-            if self._check_price_limit(o.price):
-                all_prices.add(o.price)
-        
-        if not all_prices:
-            return self.prev_close, []
-        
-        price_levels = sorted(all_prices)
-        
-        # 璁＄畻姣忎釜浠锋牸姘村钩鐨勬垚浜ら噺
-        best_price = self.prev_close
-        max_volume = 0
-        
-        for test_price in price_levels:
-            # 鎰挎剰浠?test_price 鎴栨洿楂樹环鏍间拱鍏ョ殑鎬婚噺
-            buy_volume = sum(o.quantity for o in buy_orders if o.price >= test_price)
-            # 鎰挎剰浠?test_price 鎴栨洿浣庝环鏍煎崠鍑虹殑鎬婚噺
-            sell_volume = sum(o.quantity for o in sell_orders if o.price <= test_price)
-            # 鎴愪氦閲忓彇杈冨皬鍊?
-            match_volume = min(buy_volume, sell_volume)
-            
-            if match_volume > max_volume:
-                max_volume = match_volume
-                best_price = test_price
-            elif match_volume == max_volume and match_volume > 0:
-                # 鐩稿悓鎴愪氦閲忔椂锛岄€夋嫨鏇存帴杩戝墠鏀剁洏浠风殑浠锋牸
-                if abs(test_price - self.prev_close) < abs(best_price - self.prev_close):
-                    best_price = test_price
-        
-        # 浠ュ紑鐩樹环鎵ц鎾悎
-        trades = []
-        opening_price = best_price
-        
-        # 绛涢€夊彲鎴愪氦鐨勮鍗?
-        executable_buys = sorted(
-            [o for o in buy_orders if o.price >= opening_price],
-            key=lambda x: (-x.price, x.timestamp)  # 浠锋牸浼樺厛锛屾椂闂翠紭鍏?
+        lower, upper = self.lob.get_limit_prices() if hasattr(self, "lob") and hasattr(self.lob, "get_limit_prices") else (None, None)
+        opening_price, auction_meta = find_price_maximizing_volume_and_minimizing_imbalance(
+            orders,
+            prev_close=float(self.prev_close),
+            lower_limit=lower,
+            upper_limit=upper,
         )
-        executable_sells = sorted(
-            [o for o in sell_orders if o.price <= opening_price],
-            key=lambda x: (x.price, x.timestamp)
+        if int(auction_meta.get("match_volume", 0)) <= 0:
+            return float(opening_price), []
+
+        trades = call_auction_match(
+            orders,
+            price=float(opening_price),
+            timestamp=float(market_time if market_time is not None else (self.clock.timestamp if self.clock else time.time())),
+            commission_rate=GLOBAL_CONFIG.TAX_RATE_COMMISSION,
+            stamp_duty_rate=GLOBAL_CONFIG.TAX_RATE_STAMP,
+            seller_only_stamp_duty=True,
         )
-        
-        # 鎵ц鎾悎
-        buy_idx, sell_idx = 0, 0
-        while buy_idx < len(executable_buys) and sell_idx < len(executable_sells):
-            buy_order = executable_buys[buy_idx]
-            sell_order = executable_sells[sell_idx]
-            
-            # 璁＄畻鎴愪氦閲?
-            match_qty = min(buy_order.remaining_qty, sell_order.remaining_qty)
-            
-            if match_qty > 0:
-                # 鍒涘缓鎴愪氦璁板綍
-                market_val = opening_price * match_qty
-                comm_rate = GLOBAL_CONFIG.TAX_RATE_COMMISSION
-                stamp_rate = GLOBAL_CONFIG.TAX_RATE_STAMP
-                
-                trade = Trade(
-                    trade_id=str(uuid.uuid4()),
-                    price=opening_price,
-                    quantity=match_qty,
-                    maker_id=buy_order.order_id if buy_order.timestamp <= sell_order.timestamp else sell_order.order_id,
-                    taker_id=sell_order.order_id if buy_order.timestamp <= sell_order.timestamp else buy_order.order_id,
-                    maker_agent_id=buy_order.agent_id if buy_order.timestamp <= sell_order.timestamp else sell_order.agent_id,
-                    taker_agent_id=sell_order.agent_id if buy_order.timestamp <= sell_order.timestamp else buy_order.agent_id,
-                    buyer_agent_id=buy_order.agent_id,
-                    seller_agent_id=sell_order.agent_id,
-                    timestamp=self.clock.timestamp if self.clock else time.time(),
-                    buyer_fee=market_val * comm_rate,
-                    seller_fee=market_val * comm_rate,
-                    seller_tax=0.0,
-                )
-                
-                # 搴旂敤鏀跨瓥鏁堟灉锛堝嵃鑺辩◣绛夛級
-                # Note: RunCallAuction is internal to MatchingEngine but we need policy here.
-                # Ideally MatchingEngine should know about Policy, but for now we apply it here or outside?
-                # Actually, RunCallAuction is in MatchingEngine which doesn't know PolicyManager.
-                # So we should apply tax in MarketDataManager.finalize_step or wrapper.
-                # BUT, wait, this code block is INSIDE MatchingEngine.run_call_auction in the original file?
-                # Ah, I am editing core/market_engine.py. 
-                # run_call_auction is a method of MatchingEngine.
-                # MatchingEngine doesn't have reference to PolicyManager.
-                # Let's simple apply default tax here, OR pass PolicyManager to MatchingEngine.
-                # EASIER: Leave it as default in MatchingEngine, and overwrite it in MarketDataManager if needed.
-                # Or better, let MarketDataManager handle the loop.
-                
-                trade.seller_tax = market_val * stamp_rate # Default
-                
-                trades.append(trade)
-                
-                # 鏇存柊璁㈠崟鐘舵€?
-                buy_order.filled_qty += match_qty
-                sell_order.filled_qty += match_qty
-            
-            if buy_order.is_filled:
-                buy_idx += 1
-            if sell_order.is_filled:
-                sell_idx += 1
-        
-        # 鏇存柊寮曟搸鐘舵€?
+        for idx, trade in enumerate(trades):
+            trade.trade_id = f"auction_{hashlib.sha256(f'{self.symbol}|{market_time}|{opening_price}|{idx}|{trade.buyer_agent_id}|{trade.seller_agent_id}|{trade.quantity}'.encode('utf-8')).hexdigest()[:20]}"
+
         if trades:
             self.last_price = opening_price
             self.total_volume += sum(t.quantity for t in trades)
@@ -1341,4 +1253,3 @@ if __name__ == "__main__":
     # 4. Finalize
     candle = manager.finalize_step(1, "2024-01-01")
     print(f"Daily Candle Generated: {candle}")
-

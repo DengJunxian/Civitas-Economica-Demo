@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
 from config import GLOBAL_CONFIG
 from core.exchange.bar_builder import TradeTapeBarBuilder, TradeTapeEntry
+from core.exchange.session_rules import AShareSessionRules
+from core.exchange.trade_tape import TradeTape, TradeTapeRecord
 from core.exchange.market_rules import resolve_market_rule_schema
 from core.types import ExecutionPlan, Order, OrderSide, OrderStatus, OrderType, Trade
 
@@ -62,6 +64,7 @@ class MarketKernelConfig:
     continuous_end: str = "15:00"
     feature_flags: Dict[str, bool] = field(default_factory=dict)
     market_rules: Optional[Dict[str, Any]] = None
+    data_snapshot_hash: str = ""
 
 
 def _parse_clock_time(value: str, fallback: dt_time) -> dt_time:
@@ -100,6 +103,7 @@ class MarketKernel:
         self.config = config or MarketKernelConfig()
         self.rng = random.Random(int(self.config.seed))
         self.feature_flags = dict(self.config.feature_flags or {})
+        self.a_share_sessions = AShareSessionRules.default()
         self.market_rules = resolve_market_rule_schema(
             symbol=symbol,
             prev_close=prev_close,
@@ -117,6 +121,7 @@ class MarketKernel:
         self._event_queue: List[MarketEvent] = []
         self._deferred_events: List[MarketEvent] = []
         self._auction_orders: List[Any] = []
+        self._auction_phase: str = "open_call"
         self._live_orders: Dict[str, Any] = {}
         self._sequence = 0
         self._halted = False
@@ -124,7 +129,9 @@ class MarketKernel:
         self._current_ts = self._now_ts()
         self._step_trades: List[Trade] = []
         self.trade_tape: List[TradeTapeEntry] = []
+        self.canonical_trade_tape: List[TradeTapeRecord] = []
         self._step_trade_tape: List[TradeTapeEntry] = []
+        self._step_canonical_trade_tape: List[TradeTapeRecord] = []
         self.config_hash = _stable_hash(
             {
                 "symbol": self.symbol,
@@ -142,6 +149,12 @@ class MarketKernel:
             config_hash=self.config_hash,
             feature_flags=self.feature_flags,
             snapshot_info={"symbol": self.symbol, "prev_close": self.prev_close},
+        )
+        self.canonical_tape = TradeTape(
+            symbol=self.symbol,
+            seed=self.config.seed,
+            config_hash=self.config_hash,
+            data_snapshot_hash=self.config.data_snapshot_hash,
         )
         self.replay_metrics: Dict[str, Any] = {}
 
@@ -195,6 +208,8 @@ class MarketKernel:
         return float(timestamp)
 
     def _session_phase(self, timestamp: float) -> str:
+        if self.feature_flags.get("a_share_session_v1", False):
+            return self.a_share_sessions.phase_at(timestamp)
         if self.feature_flags.get("session_rules_v1", False):
             return self._session_phase_from_schema(timestamp)
         dt = datetime.fromtimestamp(float(timestamp))
@@ -215,6 +230,8 @@ class MarketKernel:
         return "closed"
 
     def _next_active_ts(self, timestamp: float) -> float:
+        if self.feature_flags.get("a_share_session_v1", False):
+            return self.a_share_sessions.next_matching_timestamp(timestamp)
         if self.feature_flags.get("session_rules_v1", False):
             return self._next_active_ts_from_schema(timestamp)
         dt = datetime.fromtimestamp(float(timestamp))
@@ -343,7 +360,35 @@ class MarketKernel:
     ) -> None:
         queue_position = int(event.payload.get("queue_position", 0))
         latency_ticks = int(event.payload.get("latency_ticks", 0))
+        depth = {}
+        spread = 0.0
+        depth_imbalance = 0.0
+        try:
+            depth = self.engine.get_order_book_depth(5)
+            bids = depth.get("bids", []) if isinstance(depth, dict) else []
+            asks = depth.get("asks", []) if isinstance(depth, dict) else []
+            bid_qty = sum(int(row.get("qty", 0)) for row in bids if isinstance(row, dict))
+            ask_qty = sum(int(row.get("qty", 0)) for row in asks if isinstance(row, dict))
+            denom = max(1, bid_qty + ask_qty)
+            depth_imbalance = float((bid_qty - ask_qty) / denom)
+            best_bid = self.engine.lob.get_best_bid()
+            best_ask = self.engine.lob.get_best_ask()
+            if best_bid is not None and best_ask is not None:
+                spread = float(best_ask - best_bid)
+        except Exception:
+            depth = {}
+        trading_day = self.a_share_sessions.trading_day_for(event.scheduled_ts)
         for trade in trades:
+            metadata = {
+                "symbol": self.symbol,
+                "trading_day": trading_day,
+                "seed": int(self.config.seed),
+                "config_hash": self.config_hash,
+                "data_snapshot_hash": self.config.data_snapshot_hash,
+                "spread": spread,
+                "depth_imbalance": depth_imbalance,
+                **dict(event.payload),
+            }
             entry = TradeTapeEntry(
                 trade=trade,
                 tick=self._now_tick(),
@@ -352,15 +397,28 @@ class MarketKernel:
                 queue_position=queue_position,
                 latency_ticks=latency_ticks,
                 market_timestamp=float(event.scheduled_ts),
-                metadata=dict(event.payload),
+                metadata=metadata,
+            )
+            canonical = self.canonical_tape.append_trade(
+                trade,
+                tick=self._now_tick(),
+                trading_day=trading_day,
+                phase=phase,
+                queue_position=queue_position,
+                latency_ticks=latency_ticks,
+                market_timestamp=float(event.scheduled_ts),
+                metadata=metadata,
             )
             self.trade_tape.append(entry)
+            self.canonical_trade_tape.append(canonical)
             self._step_trade_tape.append(entry)
+            self._step_canonical_trade_tape.append(canonical)
             self._step_trades.append(trade)
 
     def _flush_auction_if_needed(self, timestamp: float) -> List[Trade]:
         phase = self._session_phase(timestamp)
-        if phase != "continuous" or not self._auction_orders:
+        auction_phases = {"call_auction", "open_call", "close_call"}
+        if phase in auction_phases or not self._auction_orders:
             self._last_phase = phase
             return []
 
@@ -376,12 +434,13 @@ class MarketKernel:
                     priority=self.PRIORITY["auction_flush"],
                     sequence=self._sequence,
                     event_type="auction_flush",
-                    payload={"auction_orders": len(self._auction_orders)},
+                    payload={"auction_orders": len(self._auction_orders), "phase": self._auction_phase},
                     reason="call auction flush",
                 ),
-                phase="call_auction",
+                phase=self._auction_phase,
             )
             self._auction_orders = []
+            self._auction_phase = "open_call"
         self._last_phase = phase
         return trades
 
@@ -410,8 +469,9 @@ class MarketKernel:
             self._deferred_events.append(event)
             return []
 
-        if phase == "call_auction":
+        if phase in {"call_auction", "open_call", "close_call"}:
             self._auction_orders.append(order)
+            self._auction_phase = phase
             return []
 
         trades = self.engine.submit_order(order, liquidity_injection_prob=float(event.payload.get("liquidity_injection_prob", 0.0)))
@@ -512,7 +572,7 @@ class MarketKernel:
         self._current_ts = target_ts
         self._sync_regulatory_state()
         phase = self._session_phase(target_ts)
-        if not self._halted and phase in {"call_auction", "continuous"}:
+        if not self._halted and phase in {"call_auction", "open_call", "close_call", "continuous"}:
             self._release_deferred(target_ts)
 
         generated: List[Trade] = []
@@ -520,7 +580,7 @@ class MarketKernel:
             event = heapq.heappop(self._event_queue)
             if event.event_type in {"halt", "resume", "intervention"}:
                 generated.extend(self._process_event(event))
-                if not self._halted and self._session_phase(event.scheduled_ts) in {"call_auction", "continuous"}:
+                if not self._halted and self._session_phase(event.scheduled_ts) in {"call_auction", "open_call", "close_call", "continuous"}:
                     self._release_deferred(event.scheduled_ts)
                 continue
 
@@ -647,6 +707,14 @@ class MarketKernel:
     def get_trade_tape(self) -> List[TradeTapeEntry]:
         return list(self.trade_tape)
 
+    def flush_step_canonical_trade_tape(self) -> List[TradeTapeRecord]:
+        tape = self._step_canonical_trade_tape[:]
+        self._step_canonical_trade_tape = []
+        return tape
+
+    def get_canonical_trade_tape(self) -> List[TradeTapeRecord]:
+        return list(self.canonical_trade_tape)
+
     def build_replay_metrics(self) -> Dict[str, Any]:
         bars = self.bar_builder.build_bars_from_trade_tape(
             self.trade_tape,
@@ -666,11 +734,20 @@ class MarketKernel:
         self._live_orders.clear()
         self._step_trades.clear()
         self._step_trade_tape.clear()
+        self._step_canonical_trade_tape.clear()
         self.trade_tape.clear()
+        self.canonical_trade_tape.clear()
+        self.canonical_tape = TradeTape(
+            symbol=self.symbol,
+            seed=self.config.seed,
+            config_hash=self.config_hash,
+            data_snapshot_hash=self.config.data_snapshot_hash,
+        )
         self.replay_metrics = {}
         self._sequence = 0
         self._halted = False
         self._last_phase = "closed"
+        self._auction_phase = "open_call"
 
 
 __all__ = ["MarketEvent", "MarketKernel", "MarketKernelConfig"]

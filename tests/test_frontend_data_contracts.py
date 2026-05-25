@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import pandas as pd
 
+from core.ui_text import localize_dataframe_columns
 from core.runtime_mode import resolve_runtime_mode_profile
 from ui.dashboard import normalize_discovered_metrics_payload
 from ui.policy_lab import (
+    _build_regulation_counterfactual_worlds,
     _policy_session_advance,
     _policy_session_enqueue_runtime_event,
     _policy_session_new,
     _policy_session_report_payload,
 )
+from ui.regulator_optimization import _build_regulator_result_frames
 
 
 def _reference_frame() -> pd.DataFrame:
@@ -80,3 +83,61 @@ def test_dashboard_supports_discovered_metrics_schema():
     assert payload["top_metrics"]
     assert payload["shanghai_index_metric"]["name"] == "shanghai_index_return"
     assert payload["composite_score"] == 0.62
+
+
+def test_localized_dataframe_does_not_mutate_internal_keys():
+    frame = pd.DataFrame(
+        [
+            {
+                "name": "shanghai_index_return",
+                "rank_score": 0.6,
+                "relation_to_shanghai_index": "self",
+            }
+        ]
+    )
+    localized = localize_dataframe_columns(frame)
+
+    assert list(frame.columns) == ["name", "rank_score", "relation_to_shanghai_index"]
+    assert "rank_score" in frame.columns
+    assert "综合排序分" in localized.columns
+    assert localized.iloc[0]["与上证指数关系"] == "核心基准"
+
+
+def test_counterfactual_internal_world_keys_remain_stable_after_display_localization():
+    source = _reference_frame()
+    source["step"] = range(1, len(source) + 1)
+    source["panic_level"] = [0.2, 0.25, 0.3, 0.45, 0.5, 0.55]
+    source["csad"] = [0.05, 0.06, 0.07, 0.08, 0.09, 0.1]
+    payload = _build_regulation_counterfactual_worlds(source, intensity=1.0)
+
+    assert {"no_intervention", "early_intervention", "late_intervention"} <= set(payload["worlds"].keys())
+    score_frame = pd.DataFrame(
+        [{"world": key, **value} for key, value in payload["scorecards"].items()]
+    )
+    localized = localize_dataframe_columns(score_frame)
+
+    assert "world" in score_frame.columns
+    assert "世界线" in localized.columns
+    assert set(score_frame["world"]) == {"no_intervention", "early_intervention", "late_intervention"}
+
+
+def test_regulator_frame_builder_keeps_internal_schema_before_display_localization():
+    result = {
+        "counterfactual_ab": {
+            "baseline": {"macro_stability": 0.5, "intervention_cost": 0.1},
+            "candidates": [{"action_signature": "a", "macro_stability": 0.7, "intervention_cost": 0.2}],
+            "deltas": [{"metric": "macro_stability", "delta": 0.2}],
+        },
+        "pareto_frontier": [{"macro_stability": 0.7, "intervention_cost": 0.2, "liquidity": 0.6}],
+        "recommendation": {
+            "scorecard": {"composite_score": 0.72},
+            "evidence_chain": [{"metric": "macro_stability", "value": 0.7}],
+        },
+    }
+    frames = _build_regulator_result_frames(result)
+    localized = localize_dataframe_columns(frames["pareto"])
+
+    assert "macro_stability" in frames["pareto"].columns
+    assert "intervention_cost" in frames["pareto"].columns
+    assert "宏观稳定性" in localized.columns
+    assert "干预成本" in localized.columns

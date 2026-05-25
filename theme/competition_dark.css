@@ -83,7 +83,6 @@ p, span, div, h1, h2, h3, h4, h5, h6 {
   font-size: 13px;
   color: var(--c-muted);
   letter-spacing: 0.8px;
-  text-transform: uppercase;
 }
 
 .kpi-value {
@@ -217,7 +216,6 @@ ul[role="listbox"] li {
   color: #8aa0c2;
   font-size: 12px;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .hero-alert-value {
@@ -256,7 +254,6 @@ ul[role="listbox"] li {
   color: #1890ff;
   font-size: 13px;
   letter-spacing: 0.2em;
-  text-transform: uppercase;
 }
 
 .story-card, .flow-card, .summary-card, .ops-card {
@@ -270,8 +267,39 @@ ul[role="listbox"] li {
   min-height: 100%;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
   height: 100%;
+  min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.section-shell {
+  margin: 18px 0 28px 0;
+}
+
+.chart-explain-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.95fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.chart-card,
+.explain-card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.workflow-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 10px 0 18px 0;
+}
+
+@media (max-width: 980px) {
+  .chart-explain-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .story-card-title, .flow-step-label, .ops-card-title {
@@ -293,7 +321,6 @@ ul[role="listbox"] li {
 .summary-label {
   font-size: 12px;
   letter-spacing: 0.1em;
-  text-transform: uppercase;
 }
 
 .summary-value {
@@ -325,6 +352,7 @@ ul[role="listbox"] li {
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
   overflow-wrap: anywhere;
   word-break: break-word;
+  min-width: 0;
 }
 
 .insight-block-label {
@@ -336,7 +364,6 @@ ul[role="listbox"] li {
   color: #9fd0ff;
   font-size: 12px;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .insight-block-title {
@@ -350,6 +377,16 @@ ul[role="listbox"] li {
   margin-top: 10px;
   color: #d7e5f8;
   line-height: 1.8;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.insight-block-body p,
+.insight-block-body li,
+.summary-note,
+.story-card-summary,
+.ops-card-summary {
+  line-height: 1.65;
 }
 
 .pulse-card {
@@ -533,6 +570,7 @@ div[data-testid="stExpanderDetails"] {
   border: 1px solid rgba(31, 54, 92, 0.9);
   border-radius: 14px;
   overflow: hidden;
+  margin: 8px 0 14px 0;
 }
 
 .flow-card {

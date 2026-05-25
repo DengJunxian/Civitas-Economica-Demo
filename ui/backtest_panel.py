@@ -311,7 +311,7 @@ def _build_result_replay_scorecard(result: BacktestResult) -> Dict[str, Any]:
 
 def _render_replay_scorecard(result: BacktestResult) -> None:
     scorecard = _build_result_replay_scorecard(result)
-    st.caption("Scorecard 使用回测原始序列和 replay 指标生成，展示层不重新编造 OHLC。")
+    st.caption("评估卡使用回测原始序列和回放指标生成，展示层不重新编造 OHLC。")
     render_scorecard_panel(scorecard, key_prefix="backtest_replay_scorecard")
     meta_df = pd.DataFrame(
         [
@@ -572,7 +572,7 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
         render_narrative_block(
             "回测摘要解读",
             summary_df.to_dict(orient="records"),
-            context="请用适合答辩的口径总结这次回测表现，并指出最大的亮点和最大的不确定性。",
+            context="请用政策研判口径总结这次回测表现，并指出最大的亮点和最大的不确定性。",
             cache_namespace="backtest_panel_narrative_cache",
         )
     else:

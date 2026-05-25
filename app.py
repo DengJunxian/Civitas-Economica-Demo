@@ -27,7 +27,7 @@ from core.competition_compliance import (
 )
 from core.model_router import ModelRouter
 from core.runtime_mode import merge_mode_feature_flags, resolve_runtime_mode_profile
-from core.ui_text import display_runtime_mode, display_scenario_name
+from core.ui_text import display_runtime_mode, display_scenario_name, localize_dataframe_columns, zh_world_name
 from ui.backtest_panel import render_backtest_panel
 from ui.behavioral_diagnostics import render_behavioral_diagnostics
 from ui.components.replay_scrubber import render_replay_scrubber
@@ -134,7 +134,7 @@ def _load_theme() -> None:
         css = """
         .stApp { background: #050b14; color: #e2e8f0; }
         .kpi-card { background: rgba(10, 25, 49, 0.65); border: 1px solid #1f365c; border-radius: 12px; padding: 16px; backdrop-filter: blur(8px); }
-        .kpi-title { font-size: 13px; color: #8aa0c2; text-transform: uppercase; }
+        .kpi-title { font-size: 13px; color: #8aa0c2; }
         .kpi-value { font-size: 28px; font-weight: 700; color: #ffffff; }
         .kpi-note { font-size: 12px; color: #7995bc; }
         """
@@ -210,9 +210,17 @@ def _render_value_bridge_tab() -> None:
         st.markdown("#### 事件来源与主题摘要")
         left, right = st.columns(2)
         with left:
-            st.dataframe(pd.DataFrame(flywheel.get("top_sources", []), columns=["source", "count"]), hide_index=True, use_container_width=True)
+            st.dataframe(
+                localize_dataframe_columns(pd.DataFrame(flywheel.get("top_sources", []), columns=["source", "count"])),
+                hide_index=True,
+                use_container_width=True,
+            )
         with right:
-            st.dataframe(pd.DataFrame(flywheel.get("top_topics", []), columns=["topic", "count"]), hide_index=True, use_container_width=True)
+            st.dataframe(
+                localize_dataframe_columns(pd.DataFrame(flywheel.get("top_topics", []), columns=["topic", "count"])),
+                hide_index=True,
+                use_container_width=True,
+            )
 
     _ensure_demo_loaded()
     scenario = st.session_state.get("demo_scenario")
@@ -235,7 +243,7 @@ def _render_value_bridge_tab() -> None:
     scorecards = dict(counterfactual.get("scorecards", {}) or {})
     rec = str(counterfactual.get("recommended_timing", ""))
     if rec:
-        st.caption(f"推荐干预时机：{rec}")
+        st.caption(f"推荐干预时机：{zh_world_name(rec)}")
     cards_df = pd.DataFrame(
         [
             {"world": key, **(value if isinstance(value, dict) else {})}
@@ -243,7 +251,7 @@ def _render_value_bridge_tab() -> None:
         ]
     )
     if not cards_df.empty:
-        st.dataframe(cards_df, use_container_width=True, hide_index=True)
+        st.dataframe(localize_dataframe_columns(cards_df), use_container_width=True, hide_index=True)
     world_keys = list(worlds.keys())
     if len(world_keys) >= 2:
         base = pd.DataFrame(worlds[world_keys[0]])
@@ -310,9 +318,6 @@ def _render_top_entry_selector() -> None:
                 <span style="background: linear-gradient(90deg, #4da6ff, #1890ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">数治观澜</span> 
             <span style="font-size: 1.5rem; font-weight: 500; color: #8aa0c2; text-shadow: none;">面向政府场景的金融政策智能推演与验证平台</span>
             </h1>
-            <div style="font-size: 16px; color: #4da6ff; letter-spacing: 2px; font-weight: 600; text-transform: uppercase;">
-                Policy Intelligence Engineering Platform
-            </div>
         </div>
         """,
         unsafe_allow_html=True
@@ -454,16 +459,16 @@ def _generate_competition_materials() -> Dict[str, Path]:
 - 结合行为金融指标、历史验证分析和结果归档形成完整闭环。
 """
 
-    demo_script_10min = f"""# demo_script_10min
+    analysis_playbook = f"""# analysis_playbook
 
-1. 0:00-0:40 在系统总览页说明平台定位与分析对象
-2. 0:40-1:30 展示系统工作流与核心能力链
-3. 1:30-4:00 进入政策实验，演示政策输入、结构化编译与多智能体推演
-4. 4:00-6:00 进入历史验证，展示仿真走势与真实市场的对照结果
-5. 6:00-7:20 进入行为与风险诊断，说明群体行为与风险扩散机制
-6. 7:20-8:40 展示监管优化、A/B 差分与 Pareto 权衡
-7. 8:40-9:30 展示实验报告、分析摘要与结果归档
-8. 9:30-10:00 回到总览页，总结平台从政策理解到策略建议的闭环价值
+1. 在系统总览页说明平台定位与分析对象
+2. 展示系统工作流与核心能力链
+3. 进入政策实验，查看政策输入、结构化编译与多智能体推演
+4. 进入历史验证，比较仿真走势与真实市场路径
+5. 进入行为与风险诊断，说明群体行为与风险扩散机制
+6. 展示监管优化、A/B 差分与 Pareto 权衡
+7. 沉淀实验报告、分析摘要、证据链与结果归档
+8. 回到总览页，总结平台从政策理解到策略建议的闭环价值
 """
 
     figures_index = {
@@ -476,13 +481,13 @@ def _generate_competition_materials() -> Dict[str, Path]:
     file_map = {
         "experiment_summary.md": MATERIALS_ROOT / "experiment_summary.md",
         "system_design_outline.md": MATERIALS_ROOT / "system_design_outline.md",
-        "video_script_10min.md": MATERIALS_ROOT / "video_script_10min.md",
+        "analysis_playbook.md": MATERIALS_ROOT / "analysis_playbook.md",
         "figures/index.json": figures_dir / "index.json",
         "runtime_mode_evidence.json": MATERIALS_ROOT / "runtime_mode_evidence.json",
     }
     file_map["experiment_summary.md"].write_text(competition_summary, encoding="utf-8")
     file_map["system_design_outline.md"].write_text(design_outline, encoding="utf-8")
-    file_map["video_script_10min.md"].write_text(demo_script_10min, encoding="utf-8")
+    file_map["analysis_playbook.md"].write_text(analysis_playbook, encoding="utf-8")
     file_map["figures/index.json"].write_text(json.dumps(figures_index, ensure_ascii=False, indent=2), encoding="utf-8")
     file_map["runtime_mode_evidence.json"].write_text(
         json.dumps(runtime_summary, ensure_ascii=False, indent=2),
@@ -563,7 +568,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
             policy_ab_markdown="# 反事实与 A/B 说明\n\n- 系统会导出精简版对照材料，用于方案汇报、复盘说明与结果归档。",
             architecture_graph={"nodes": [], "edges": []},
             causal_chain_graph={"nodes": [], "edges": []},
-            defense_outline_markdown=demo_script_10min,
+            defense_outline_markdown=analysis_playbook,
             feature_flags=feature_flags,
             compliance_artifacts={
                 "manifest": compliance["manifest"],
@@ -782,8 +787,8 @@ def _build_overview_chain_payload(metrics: pd.DataFrame) -> Dict[str, Any]:
 
 
 def _render_research_workbench_tab() -> None:
-    st.markdown("### Research workbench")
-    st.caption("主图、事件层、场景对比、回放、scorecard 和可复现信息集中展示。")
+    st.markdown("### 研究工作台")
+    st.caption("主图、事件层、场景对比、回放、评估卡和可复现信息集中展示。")
     _ensure_demo_loaded()
     scenario = st.session_state.get("demo_scenario")
     metrics = scenario.metrics.copy() if scenario is not None and hasattr(scenario, "metrics") else pd.DataFrame()
@@ -792,7 +797,7 @@ def _render_research_workbench_tab() -> None:
         return
 
     benchmark = st.selectbox(
-        "benchmark selector",
+        "基准指数",
         options=["sh000001", "sh000300", "sz399001", "sz399006"],
         index=0,
         key="research_workbench_benchmark",
@@ -823,7 +828,7 @@ def _render_research_workbench_tab() -> None:
         events=events,
         key_prefix="research_workbench",
     )
-    tabs = st.tabs(["场景对比", "回放", "Scorecard", "复现信息"])
+    tabs = st.tabs(["场景对比", "回放", "评估卡", "可复现信息"])
     with tabs[0]:
         counterfactual = _build_regulation_counterfactual_worlds(metrics, intensity=1.0)
         worlds = dict(counterfactual.get("worlds", {}) or {})
@@ -899,22 +904,27 @@ def _render_overview_home() -> None:
     top_stats[2].metric("峰值风险热度", f"{stat['panic_max']:.2f}")
     top_stats[3].metric("在线稳定率", f"{float(runtime_summary.get('online_success_rate', 0.0)):.0%}")
 
-    story_cols = st.columns(3)
+    story_cols = st.columns(4)
     story_cards = [
         (
-            "平台定位",
-            "把自然语言政策自动转成可推演、可解释、可归档的市场实验过程，服务政府经济治理与金融稳定场景。",
-            ["政策结构化解析", "多智能体联动决策", "市场撮合与风控反馈"],
+            "政策理解",
+            "把自然语言政策解析为可推演、可验证、可归档的结构化政策冲击。",
+            ["自然语言解析", "结构化编译", "传导渠道识别"],
         ),
         (
-            "核心能力链",
-            "平台既能完成政策实验，也能完成历史验证、行为诊断、因子研究与策略优化，体现 AI 在分析链路中的连续作用。",
-            ["可编译", "可推演", "可验证", "可建议"],
+            "市场推演",
+            "用多智能体行为、订单流和撮合机制生成市场路径与风险扩散过程。",
+            ["主体分歧", "订单流", "价格路径"],
         ),
         (
-            "工程特性",
-            "系统保留运行证据、历史对照和结果归档，不只展示结果，也强调过程可信、可复盘、可追溯。",
-            ["AI 证据链", "历史拟真验证", "监管优化与 A/B", "结果归档"],
+            "历史验证",
+            "对照真实指数窗口、重大新闻和方向命中，检验仿真逻辑的一致性。",
+            ["真实走势", "新闻回放", "拟真评估"],
+        ),
+        (
+            "监管优化",
+            "比较反事实路径、帕累托权衡和候选方案，为政策节奏提供证据。",
+            ["反事实对照", "帕累托权衡", "方案推荐"],
         ),
     ]
     for col, (title, summary, bullets) in zip(story_cols, story_cards):
@@ -963,25 +973,28 @@ def _render_overview_home() -> None:
         )
 
     st.markdown("### 系统工作流")
-    flow_cols = st.columns(6)
     flow_cards = [
         ("1. 政策输入", "输入自然语言政策或事件描述"),
-        ("2. 结构化编译", "识别类型、强度、传导渠道与影响对象"),
-        ("3. 多智能体推演", "形成多角色分歧、行为意图与市场反馈"),
+        ("2. 语义编译", "识别类型、强度、传导渠道与影响对象"),
+        ("3. 多智能体推演", "形成角色分歧、行为意图与市场反馈"),
         ("4. 市场撮合", "生成价格、成交量与微观结构结果"),
-        ("5. 历史对照验证", "校验走势一致性、响应时点与误差边界"),
-        ("6. 策略优化与归档", "输出建议方案、报告、图表与归档材料"),
+        ("5. 历史验证", "校验走势一致性、响应时点与误差边界"),
+        ("6. 监管优化", "比较干预成本、稳定性和流动性权衡"),
+        ("7. 证据归档", "沉淀报告、图表、证据链与可复现信息"),
     ]
-    for col, (title, summary) in zip(flow_cols, flow_cards):
-        col.markdown(
-            f"""
-            <div class="flow-card">
-              <div class="flow-step-index">{title}</div>
-              <div class="flow-step-label">{summary}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    for row_cards in (flow_cards[:4], flow_cards[4:]):
+        flow_cols = st.columns(len(row_cards))
+        for col, (title, summary) in zip(flow_cols, row_cards):
+            col.markdown(
+                f"""
+                <div class="flow-card">
+                  <div class="flow-step-index">{title}</div>
+                  <div class="flow-step-label">{summary}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
     st.markdown("### 当前可运行模块")
     route_cols = st.columns(4)
@@ -1022,8 +1035,8 @@ def _render_overview_home() -> None:
                 """
                 <div class="summary-card">
                   <div class="summary-label">代表性结果摘要</div>
-                  <div class="summary-value">适合汇报截图与结果留痕</div>
-                  <div class="summary-note">建议优先展示主图、KPI、政策传导链与历史验证对照。</div>
+                  <div class="summary-value">适合政策研判、结果复盘与证据留痕</div>
+                  <div class="summary-note">建议优先查看主图、KPI、政策传导链与历史验证对照。</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1069,8 +1082,8 @@ def _render_overview_home() -> None:
         ),
         (
             "结果交付支持",
-            ["实验报告", "分析摘要", "结果归档", "10 分钟视频脚本"],
-            "总览页、历史验证报告和归档导出可直接复用到汇报、复盘与展示材料。",
+            ["实验报告", "分析摘要", "结果归档", "可复现信息"],
+            "支持实验报告、图表导出、证据链和可复现信息沉淀。",
         ),
     ]
     for col, (title, items, note) in zip(capability_cols, capability_cards):

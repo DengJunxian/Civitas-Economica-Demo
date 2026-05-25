@@ -1,4 +1,4 @@
-"""Dashboard widgets for competition-defense Streamlit UI."""
+"""Dashboard widgets for the Streamlit policy workbench."""
 
 from __future__ import annotations
 
@@ -16,18 +16,17 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 from core.exchange.trade_tape import TradeTapeRecord, aggregate_trade_tape_to_bars, stable_hash
-from core.ui_text import display_risk_alert, translate_display_text, translate_ui_payload
-from ui.components.event_marker_layer import add_event_marker_layer
-from ui.narrative import narrate_payload, render_narrative_block
-
-
-PLOTLY_DARK_LAYOUT = dict(
-    template="plotly_dark",
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(color="#e2e8f0", family="Microsoft YaHei"),
-    margin=dict(l=20, r=20, t=48, b=20),
+from core.ui_text import (
+    display_risk_alert,
+    localize_dataframe_columns,
+    translate_display_text,
+    translate_ui_payload,
+    zh_metric_name,
+    zh_value,
 )
+from ui.components.event_marker_layer import add_event_marker_layer
+from ui.chart_theme import PLOTLY_DARK_LAYOUT, apply_dark_theme, chinese_range_selector_axis
+from ui.narrative import narrate_payload, render_narrative_block
 
 
 def build_synthetic_trade_tape_from_market_frame(
@@ -232,7 +231,7 @@ def build_trade_tape_kline_figure(
             high=chart["high"],
             low=chart["low"],
             close=chart["close"],
-            name="仿真指数 OHLC（trade tape 聚合）",
+            name="仿真指数 K 线（逐笔成交聚合）",
             increasing_line_color="#ef4444",
             decreasing_line_color="#22c55e",
             increasing_fillcolor="#ef4444",
@@ -242,6 +241,20 @@ def build_trade_tape_kline_figure(
         col=1,
         secondary_y=False,
     )
+    close_series = pd.to_numeric(chart["close"], errors="coerce").ffill().bfill()
+    for window, color in ((5, "#f59e0b"), (20, "#60a5fa")):
+        fig.add_trace(
+            go.Scatter(
+                x=chart["time"],
+                y=close_series.rolling(window, min_periods=1).mean(),
+                mode="lines",
+                name=f"{window}日均线",
+                line=dict(color=color, width=1.2),
+            ),
+            row=1,
+            col=1,
+            secondary_y=False,
+        )
     if real_index_frame is not None and not real_index_frame.empty:
         real = real_index_frame.copy().tail(len(chart)).reset_index(drop=True)
         real_time = real["time"] if "time" in real.columns else chart["time"].head(len(real))
@@ -250,7 +263,7 @@ def build_trade_tape_kline_figure(
                 x=real_time,
                 y=pd.to_numeric(real["close"], errors="coerce"),
                 mode="lines",
-                name=f"真实基准 {benchmark_symbol}",
+                name=f"真实基准指数 {benchmark_symbol}",
                 line=dict(color="#facc15", width=2.0),
             ),
             row=1,
@@ -282,19 +295,19 @@ def build_trade_tape_kline_figure(
     if has_indicator_row:
         if "MACD" in indicators:
             fig.add_trace(go.Scatter(x=chart["time"], y=chart["macd"], name="MACD", line=dict(color="#38bdf8", width=1.4)), row=3, col=1)
-            fig.add_trace(go.Scatter(x=chart["time"], y=chart["macd_signal"], name="MACD signal", line=dict(color="#f59e0b", width=1.1)), row=3, col=1)
+            fig.add_trace(go.Scatter(x=chart["time"], y=chart["macd_signal"], name="MACD 信号线", line=dict(color="#f59e0b", width=1.1)), row=3, col=1)
         if "RSI" in indicators:
             fig.add_trace(go.Scatter(x=chart["time"], y=chart["rsi"], name="RSI", line=dict(color="#a78bfa", width=1.3)), row=3, col=1)
         if "BOLL" in indicators:
-            fig.add_trace(go.Scatter(x=chart["time"], y=chart["boll_upper"], name="BOLL upper", line=dict(color="#94a3b8", width=0.9, dash="dot")), row=1, col=1)
-            fig.add_trace(go.Scatter(x=chart["time"], y=chart["boll_mid"], name="BOLL mid", line=dict(color="#60a5fa", width=0.9)), row=1, col=1)
-            fig.add_trace(go.Scatter(x=chart["time"], y=chart["boll_lower"], name="BOLL lower", line=dict(color="#94a3b8", width=0.9, dash="dot")), row=1, col=1)
+            fig.add_trace(go.Scatter(x=chart["time"], y=chart["boll_upper"], name="布林线上轨", line=dict(color="#94a3b8", width=0.9, dash="dot")), row=1, col=1)
+            fig.add_trace(go.Scatter(x=chart["time"], y=chart["boll_mid"], name="布林中轨", line=dict(color="#60a5fa", width=0.9)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=chart["time"], y=chart["boll_lower"], name="布林下轨", line=dict(color="#94a3b8", width=0.9, dash="dot")), row=1, col=1)
         metric_styles = {
             "panic_level": ("恐慌度", "#fb7185"),
             "csad": ("CSAD", "#facc15"),
-            "spread": ("spread", "#2dd4bf"),
-            "depth_imbalance": ("depth imbalance", "#818cf8"),
-            "sentiment_index": ("sentiment index", "#34d399"),
+            "spread": ("买卖价差", "#2dd4bf"),
+            "depth_imbalance": ("盘口深度失衡", "#818cf8"),
+            "sentiment_index": ("情绪指数", "#34d399"),
         }
         for col_name in metric_cols:
             label, color = metric_styles[col_name]
@@ -309,8 +322,9 @@ def build_trade_tape_kline_figure(
         height=720 if has_indicator_row else 580,
         hovermode="x unified",
         xaxis_rangeslider_visible=False,
-        legend=dict(orientation="h", y=1.02, x=0.0),
+        legend=dict(orientation="h", y=1.04, x=0.0),
     )
+    fig.update_layout(xaxis=chinese_range_selector_axis(rangeslider_visible=False))
     fig.update_yaxes(title_text="指数点位", row=1, col=1)
     fig.update_yaxes(title_text="成交量", row=2, col=1)
     if has_indicator_row:
@@ -352,8 +366,22 @@ def render_trade_tape_kline_workbench(
     )
     st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_fig")
     fallback = bool(chart.attrs.get("synthetic_tape_fallback", False)) if hasattr(chart, "attrs") else False
-    source_note = "synthetic tape fallback -> trade tape aggregation" if fallback else "trade tape aggregation"
+    source_note = "仿真逐笔成交回退后聚合" if fallback else "逐笔成交聚合"
     st.caption(f"K 线数据来源：{source_note}；前端 OHLCV 未直接从价格序列补造。")
+    if not chart.empty:
+        latest = chart.tail(1).iloc[0]
+        _render_chart_explanation(
+            "K 线研究主图解读",
+            {
+                "latest_close": float(latest.get("close", 0.0) or 0.0),
+                "latest_volume": float(latest.get("volume", 0.0) or 0.0),
+                "max_close": float(pd.to_numeric(chart["close"], errors="coerce").max()),
+                "min_close": float(pd.to_numeric(chart["close"], errors="coerce").min()),
+                "panic_level": float(latest.get("panic_level", 0.0) or 0.0),
+                "csad": float(latest.get("csad", 0.0) or 0.0),
+            },
+            "这张 K 线图回答政策冲击后指数路径、成交量和风险热度是否同步变化。",
+        )
     return fig, chart
 
 
@@ -428,9 +456,9 @@ def render_discovered_metrics_panel(payload: Optional[Mapping[str, Any]], key_pr
         st.info("暂无目标发现结果。")
         return
     c1, c2, c3 = st.columns(3)
-    c1.metric("Composite Policy Score", f"{float(data.get('composite_score', 0.0)):.3f}")
+    c1.metric("政策综合评分", f"{float(data.get('composite_score', 0.0)):.3f}")
     c2.metric("候选指标池", len(data.get("candidate_pool", []) or []))
-    c3.metric("Pareto 指标", len(data.get("pareto_frontier", []) or []))
+    c3.metric("帕累托指标", len(data.get("pareto_frontier", []) or []))
 
     frame = pd.DataFrame(top_metrics)
     cols = [
@@ -449,7 +477,39 @@ def render_discovered_metrics_panel(payload: Optional[Mapping[str, Any]], key_pr
         if col in frame.columns
     ]
     if cols:
-        st.dataframe(frame[cols], use_container_width=True, hide_index=True)
+        display_frame = frame[cols].copy()
+        if "name" in display_frame.columns:
+            display_frame["name"] = display_frame["name"].map(lambda value: zh_metric_name(str(value)))
+        st.dataframe(localize_dataframe_columns(display_frame), use_container_width=True, hide_index=True)
+
+    weights = dict(data.get("weight_decomposition", {}) or {})
+    if weights:
+        weight_frame = pd.DataFrame(
+            [
+                {"指标名称": zh_metric_name(str(key)), "综合权重": float(value)}
+                for key, value in sorted(weights.items(), key=lambda item: float(item[1]), reverse=True)
+            ]
+        )
+        fig_weight = go.Figure(
+            data=[
+                go.Bar(
+                    x=weight_frame["综合权重"],
+                    y=weight_frame["指标名称"],
+                    orientation="h",
+                    marker_color="#38bdf8",
+                    name="综合权重",
+                )
+            ]
+        )
+        fig_weight.update_layout(
+            **PLOTLY_DARK_LAYOUT,
+            title="指标重要性",
+            xaxis_title="综合权重",
+            yaxis_title="指标名称",
+            height=300,
+            showlegend=False,
+        )
+        st.plotly_chart(fig_weight, use_container_width=True, key=f"{key_prefix}_weights")
 
     pareto = pd.DataFrame(data.get("pareto_frontier", []) or [])
     if not pareto.empty and {"policy_sensitivity", "robustness", "name"}.issubset(pareto.columns):
@@ -458,7 +518,7 @@ def render_discovered_metrics_panel(payload: Optional[Mapping[str, Any]], key_pr
             go.Scatter(
                 x=pareto["policy_sensitivity"],
                 y=pareto["robustness"],
-                text=pareto["name"],
+                text=pareto["name"].map(lambda value: zh_metric_name(str(value))),
                 mode="markers+text",
                 textposition="top center",
                 marker=dict(color=pareto.get("rank_score", 0.0), colorscale="Viridis", showscale=True, size=12),
@@ -472,6 +532,16 @@ def render_discovered_metrics_panel(payload: Optional[Mapping[str, Any]], key_pr
             height=340,
         )
         st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_pareto")
+    _render_chart_explanation(
+        "目标发现与指标组合",
+        {
+            "composite_score": float(data.get("composite_score", 0.0)),
+            "top_metrics": top_metrics[:5],
+            "shanghai_index_metric": data.get("shanghai_index_metric", {}),
+            "candidate_pool_size": len(data.get("candidate_pool", []) or []),
+        },
+        "请解释为什么以上证指数为核心基准，以及其他补充指标如何增强政策敏感性、稳健性和预警价值。",
+    )
 
 
 def _render_chart_explanation(title: str, payload: Any, context: str, cache_namespace: str = "dashboard_narrative_cache") -> None:
@@ -559,28 +629,32 @@ def render_kpi_cards(snapshot: Dict[str, Any]) -> None:
         ("风险预警", snapshot.get("risk_alert", "GREEN"), None, "系统风险灯"),
         ("监管动作", snapshot.get("reg_action", "观察"), None, "当前干预状态"),
     ]
-    cols = st.columns(len(cards))
-    for idx, (label, value, percent, note) in enumerate(cards):
-        with cols[idx]:
-            if percent is True and isinstance(value, (int, float)):
-                v = metric_value_text(float(value), as_percent=True)
-            elif percent is False and isinstance(value, (int, float)):
-                v = metric_value_text(float(value))
-            else:
-                if label == "风险预警":
-                    v = display_risk_alert(str(value))
+    rows = [cards[:3], cards[3:]]
+    for row_idx, row_cards in enumerate(rows):
+        cols = st.columns(len(row_cards))
+        for idx, (label, value, percent, note) in enumerate(row_cards):
+            with cols[idx]:
+                if percent is True and isinstance(value, (int, float)):
+                    v = metric_value_text(float(value), as_percent=True)
+                elif percent is False and isinstance(value, (int, float)):
+                    v = metric_value_text(float(value))
                 else:
-                    v = translate_display_text(str(value))
-            st.markdown(
-                f"""
-                <div class='kpi-card'>
-                  <div class='kpi-title'>{label}</div>
-                  <div class='kpi-value'>{v}</div>
-                  <div class='kpi-note'>{note}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                    if label == "风险预警":
+                        v = display_risk_alert(str(value))
+                    else:
+                        v = translate_display_text(str(value))
+                st.markdown(
+                    f"""
+                    <div class='kpi-card'>
+                      <div class='kpi-title'>{label}</div>
+                      <div class='kpi-value'>{v}</div>
+                      <div class='kpi-note'>{note}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+        if row_idx == 0:
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     _render_chart_explanation(
         "核心指标总览",
         snapshot,
@@ -622,11 +696,11 @@ def render_market_overview(metrics: pd.DataFrame, upto_step: Optional[int], key_
         xaxis=dict(
             title=dict(text="", font=dict(color="#e2e8f0")),
             tickfont=dict(color="#e2e8f0"),
-            rangeslider=dict(visible=True),
+            rangeslider=dict(visible=False),
             rangeselector=dict(
                 buttons=list([
-                    dict(count=7, label="1w", step="day", stepmode="backward"),
-                    dict(count=1, label="1m", step="month", stepmode="backward"),
+                    dict(count=7, label="近 1 周", step="day", stepmode="backward"),
+                    dict(count=1, label="近 1 月", step="month", stepmode="backward"),
                     dict(step="all", label="全部")
                 ]),
                 bgcolor="#0a1931",
@@ -779,6 +853,16 @@ def render_lob_depth_animation(metrics: pd.DataFrame, key_prefix: str = "lob") -
     )
     st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_lob_plot")
     export_plot_bundle(fig, metrics.head(len(frames)), f"{key_prefix}_lob_depth", f"{key_prefix}_lob_depth")
+    if not metrics.empty:
+        _render_chart_explanation(
+            "LOB 深度动画",
+            {
+                "sample_steps": int(len(frames)),
+                "max_panic_level": float(pd.to_numeric(metrics.get("panic_level", pd.Series([0.0])), errors="coerce").fillna(0.0).max()),
+                "avg_close": float(pd.to_numeric(metrics.get("close", pd.Series([0.0])), errors="coerce").fillna(0.0).mean()),
+            },
+            "请解释买卖盘深度随风险热度变化时，流动性是否收缩以及价格冲击是否可能被放大。",
+        )
     return fig
 
 
@@ -1113,201 +1197,6 @@ def build_kpi_snapshot(metrics: pd.DataFrame, step: int, regulation_hint: str = 
         "reg_action": regulation_hint,
     }
 
-'''
-def render_orderflow_microstructure_panel(
-    role_order_flows: Optional[Mapping[str, float]] = None,
-    microstructure_metrics: Optional[Mapping[str, Any]] = None,
-    *,
-    key_prefix: str = "micro_panel",
-) -> None:
-    """Render role order-flow decomposition and microstructure summary."""
-    st.subheader("角色订单流与微结构")
-        st.caption("展示各类主体净买卖拆解，以及价差、深度、冲击与羊群程度等核心微结构指标。")
-
-    role_order_flows = dict(role_order_flows or {})
-    if role_order_flows:
-        orderflow_df = pd.DataFrame(
-            [{"role": str(role), "net_flow": float(value)} for role, value in role_order_flows.items()]
-        ).sort_values("net_flow", ascending=False)
-        fig = go.Figure(
-            data=[
-                go.Bar(
-                    x=orderflow_df["role"],
-                    y=orderflow_df["net_flow"],
-                    marker_color=["#16a34a" if value >= 0 else "#ef4444" for value in orderflow_df["net_flow"]],
-                    name="净买卖额",
-                )
-            ]
-        )
-        fig.update_layout(
-            **PLOTLY_DARK_LAYOUT,
-            title="角色净买卖拆解",
-            xaxis_title="角色",
-            yaxis_title="净买卖额",
-            height=320,
-            showlegend=False,
-        )
-        st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_role_flow_plot")
-        export_plot_bundle(fig, orderflow_df, f"{key_prefix}_role_orderflow", f"{key_prefix}_role_orderflow")
-    else:
-        st.info("当前场景暂无角色订单流明细。")
-
-    metrics = dict(microstructure_metrics or {})
-    spread = float(metrics.get("spread", 0.0) or 0.0)
-    spread_pct = float(metrics.get("spread_pct", 0.0) or 0.0)
-    depth_imbalance = float(metrics.get("depth_imbalance", 0.0) or 0.0)
-    impact = float(metrics.get("impact", metrics.get("impact_bps", 0.0)) or 0.0)
-    herding_proxy = float(metrics.get("herding_proxy", 0.0) or 0.0)
-
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("买卖价差", f"{spread:.4f}")
-    c2.metric("价差占比", f"{spread_pct:.2%}")
-    c3.metric("深度失衡", f"{depth_imbalance:+.3f}")
-    c4.metric("价格冲击", f"{impact:.4f}")
-    c5.metric("羊群程度", f"{herding_proxy:.3f}")
-
-'''
-
-def render_orderflow_microstructure_panel(
-    role_order_flows: Optional[Mapping[str, float]] = None,
-    microstructure_metrics: Optional[Mapping[str, Any]] = None,
-    *,
-    key_prefix: str = "micro_panel",
-) -> None:
-    """Render role order-flow decomposition and microstructure summary."""
-    st.subheader("角色订单流与微观结构")
-    st.caption("展示不同主体的净买卖拆解，以及价差、深度、冲击和羊群度等关键微观结构指标。")
-
-    role_order_flows = dict(role_order_flows or {})
-    if role_order_flows:
-        orderflow_df = pd.DataFrame(
-            [{"role": str(role), "net_flow": float(value)} for role, value in role_order_flows.items()]
-        ).sort_values("net_flow", ascending=False)
-        fig = go.Figure(
-            data=[
-                go.Bar(
-                    x=orderflow_df["role"],
-                    y=orderflow_df["net_flow"],
-                    marker_color=["#16a34a" if value >= 0 else "#ef4444" for value in orderflow_df["net_flow"]],
-                    name="净买卖额",
-                )
-            ]
-        )
-        fig.update_layout(
-            **PLOTLY_DARK_LAYOUT,
-            title="角色净买卖拆解",
-            xaxis_title="角色",
-            yaxis_title="净买卖额",
-            height=320,
-            showlegend=False,
-        )
-        st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_role_flow_plot")
-        export_plot_bundle(fig, orderflow_df, f"{key_prefix}_role_orderflow", f"{key_prefix}_role_orderflow")
-    else:
-        st.info("当前场景暂无角色订单流明细。")
-
-    metrics = dict(microstructure_metrics or {})
-    spread = float(metrics.get("spread", 0.0) or 0.0)
-    spread_pct = float(metrics.get("spread_pct", 0.0) or 0.0)
-    depth_imbalance = float(metrics.get("depth_imbalance", 0.0) or 0.0)
-    impact = float(metrics.get("impact", metrics.get("impact_bps", 0.0)) or 0.0)
-    herding_proxy = float(metrics.get("herding_proxy", 0.0) or 0.0)
-
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("买卖价差", f"{spread:.4f}")
-    c2.metric("价差占比", f"{spread_pct:.2%}")
-    c3.metric("深度失衡", f"{depth_imbalance:+.3f}")
-    c4.metric("价格冲击", f"{impact:.4f}")
-    c5.metric("羊群程度", f"{herding_proxy:.3f}")
-
-def render_financial_health_dashboard(metrics_dict: Dict[str, Any], key_prefix: str = "health") -> None:
-    st.markdown("### 实时异常指标监测", help="通过速度表盘直观反应市场在恐慌、羊群效应、流动性枯竭方面的风险情况。")
-    
-    panic = float(metrics_dict.get("panic_level", 0.0))
-    csad = float(metrics_dict.get("csad", 0.0))
-    imb = float(metrics_dict.get("depth_imbalance", 0.0))
-    
-    fig = go.Figure()
-    
-    fig.add_trace(go.Indicator(
-        mode="gauge+number",
-        value=panic,
-        title={'text': "恐慌指数", 'font': {'size': 14, 'color': '#8aa0c2'}},
-        gauge={'axis': {'range': [0, 1]},
-               'bar': {'color': "rgba(250, 140, 22, 0.8)", 'line': {'width': 0}},
-               'steps': [
-                   {'range': [0, 0.35], 'color': "rgba(34, 197, 94, 0.2)"},
-                   {'range': [0.35, 0.7], 'color': "rgba(250, 140, 22, 0.2)"},
-                   {'range': [0.7, 1.0], 'color': "rgba(245, 34, 45, 0.3)"}],
-               'threshold': {'line': {'color': "#f5222d", 'width': 3}, 'thickness': 0.75, 'value': 0.8}},
-        domain={'row': 0, 'column': 0}
-    ))
-    
-    fig.add_trace(go.Indicator(
-        mode="gauge+number",
-        value=csad,
-        number={'valueformat': '.3f'},
-        title={'text': "羊群效应（CSAD）", 'font': {'size': 14, 'color': '#8aa0c2'}},
-        gauge={'axis': {'range': [0, 0.15]},
-               'bar': {'color': "rgba(138, 43, 226, 0.8)", 'line': {'width': 0}},
-               'steps': [
-                   {'range': [0, 0.05], 'color': "rgba(34, 197, 94, 0.2)"},
-                   {'range': [0.05, 0.1], 'color': "rgba(250, 140, 22, 0.2)"},
-                   {'range': [0.1, 0.15], 'color': "rgba(245, 34, 45, 0.3)"}],
-               },
-        domain={'row': 0, 'column': 1}
-    ))
-    
-    fig.add_trace(go.Indicator(
-        mode="gauge+number",
-        value=imb,
-        number={'valueformat': '+.2f'},
-        title={'text': "深度失衡", 'font': {'size': 14, 'color': '#8aa0c2'}},
-        gauge={'axis': {'range': [-1, 1]},
-               'bar': {'color': "#1890ff", 'line': {'width': 0}},
-               'steps': [
-                   {'range': [-1, -0.4], 'color': "rgba(245, 34, 45, 0.2)"},
-                   {'range': [-0.4, 0.4], 'color': "rgba(34, 197, 94, 0.2)"},
-                   {'range': [0.4, 1.0], 'color': "rgba(24, 144, 255, 0.2)"}],
-               },
-        domain={'row': 0, 'column': 2}
-    ))
-    
-    fig.update_layout(
-        **{
-            **dict(PLOTLY_DARK_LAYOUT),
-            "grid": {'rows': 1, 'columns': 3, 'pattern': "independent"},
-            "height": 220,
-            "margin": dict(l=10, r=10, t=30, b=10),
-        }
-    )
-    
-    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_health_gauges")
-
-def render_ai_insight_card(text: str) -> None:
-    st.markdown(
-        f"""
-        <div style="background: linear-gradient(135deg, rgba(15, 30, 55, 0.6), rgba(10, 20, 40, 0.9)); 
-                    border-left: 5px solid #1890ff; 
-                    border-radius: 8px; 
-                    padding: 16px 20px; 
-                    margin: 12px 0 24px 0;
-                    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-                    backdrop-filter: blur(8px);
-                    animation: insight-pulse 3.5s infinite;">
-            <div style="color: #4da6ff; font-weight: 700; font-size: 14px; margin-bottom: 8px; letter-spacing: 1.5px; display: flex; align-items: center; justify-content: space-between;">
-                <span>智能前瞻与状态点评</span>
-                <span style="font-size: 11px; font-weight: normal; background: rgba(24, 144, 255, 0.2); padding: 2px 8px; border-radius: 4px;">由 ModelRouter 实时驱动</span>
-            </div>
-            <div style="color: #e2e8f0; font-size: 15px; line-height: 1.6;">
-                {text}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
 def render_orderflow_microstructure_panel(
     role_order_flows: Optional[Mapping[str, float]] = None,
     microstructure_metrics: Optional[Mapping[str, Any]] = None,
@@ -1322,7 +1211,7 @@ def render_orderflow_microstructure_panel(
     role_order_flows = dict(role_order_flows or {})
     if role_order_flows:
         orderflow_df = pd.DataFrame(
-            [{"role": str(role), "net_flow": float(value)} for role, value in role_order_flows.items()]
+            [{"role": translate_display_text(str(role)), "net_flow": float(value)} for role, value in role_order_flows.items()]
         ).sort_values("net_flow", ascending=False)
         fig = go.Figure(
             data=[

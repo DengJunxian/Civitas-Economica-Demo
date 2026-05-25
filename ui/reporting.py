@@ -567,40 +567,40 @@ def render_realism_report_markdown(payload: Mapping[str, Any]) -> str:
     lines = [
         f"# {meta['title']}",
         "",
-        f"- Report No: {meta['report_no']}",
-        f"- Generated At: {meta['generated_at']}",
-        f"- Seed: {repro.get('seed', payload.get('seed', 0))}",
-        f"- Config Hash: {repro.get('config_hash', payload.get('config_hash', ''))}",
-        f"- Feature Flag: {payload.get('feature_flag', False)}",
+        f"- 报告编号：{meta['report_no']}",
+        f"- 生成时间：{meta['generated_at']}",
+        f"- 随机种子：{repro.get('seed', payload.get('seed', 0))}",
+        f"- 配置哈希：{repro.get('config_hash', payload.get('config_hash', ''))}",
+        f"- 功能开关：{payload.get('feature_flag', False)}",
         "",
-        "## Snapshot",
+        "## 快照信息",
         "```json",
         json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True),
         "```",
         "",
-        "## Path Fit",
+        "## 路径拟合",
         _markdown_table(path_fit),
         "",
-        "## Microstructure Fit",
+        "## 微观结构拟合",
         _markdown_table(micro),
         "",
-        "## Behavioral Fit",
+        "## 行为拟合",
         _markdown_table(behavior),
         "",
-        "## Unified Replay Scorecard",
+        "## 统一回放评估卡",
         _markdown_table(scorecard.get("path_fit_metrics", {}) if isinstance(scorecard, Mapping) else {}),
         "",
-        "## Charts",
+        "## 图表",
     ]
     if charts:
         for chart in charts:
             lines.append(f"- {chart.get('name', 'chart')}: {chart.get('kind', 'unknown')}")
     else:
-        lines.append("- None")
+        lines.append("- 无")
     lines.extend(
         [
             "",
-            "## Reproducibility",
+            "## 可复现信息",
             "```json",
             json.dumps(repro, ensure_ascii=False, indent=2, sort_keys=True),
             "```",

@@ -148,12 +148,12 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
     if unified_behavior:
         summary_rows.extend(
             [
-                {"指标": "统一 Scorecard CSAD", "数值": float(unified_behavior.get("csad_mean", unified_behavior.get("csad", 0.0)))},
-                {"指标": "统一 Scorecard 羊群强度", "数值": float(unified_behavior.get("herd_intensity", 0.0))},
+                {"指标": "统一评估卡 CSAD", "数值": float(unified_behavior.get("csad_mean", unified_behavior.get("csad", 0.0)))},
+                {"指标": "统一评估卡羊群强度", "数值": float(unified_behavior.get("herd_intensity", 0.0))},
             ]
         )
     st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
-    st.markdown("### Replay Scorecard 行为分解")
+    st.markdown("### 回放评估卡行为分解")
     scorecard_payload = report.get("replay_scorecard", report.get("scorecard", mock_scorecard()))
     render_scorecard_panel(scorecard_payload if isinstance(scorecard_payload, dict) else mock_scorecard(), key_prefix="behavioral_scorecard")
     render_narrative_block(

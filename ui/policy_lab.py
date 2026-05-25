@@ -25,7 +25,14 @@ from core.objective_discovery import ObjectiveDiscoveryEngine
 from core.policy_session import PolicySession
 from core.runtime_paths import resolve_runtime_path
 from core.runtime_mode import RuntimeModeProfile, resolve_runtime_mode_profile
-from core.ui_text import translate_display_text
+from core.ui_text import (
+    localize_dataframe_columns,
+    translate_display_text,
+    zh_action_name,
+    zh_metric_name,
+    zh_value,
+    zh_world_name,
+)
 from policy.structured import PolicyPackage
 from ui.components.replay_scrubber import render_replay_scrubber
 from ui.components.repro_meta import (
@@ -38,6 +45,7 @@ from ui.components.repro_meta import (
 from ui.components.scenario_diff import render_scenario_diff
 from ui.components.scorecard_panel import mock_scorecard, render_scorecard_panel
 from ui import dashboard as dashboard_workbench
+from ui.chart_theme import PLOTLY_DARK_LAYOUT, apply_dark_theme
 from ui.narrative import render_narrative_block
 from ui.reporting import dataframe_export_bundle, official_report_meta, write_report_artifacts
 
@@ -1775,14 +1783,14 @@ def _research_workbench_report_appendix(payload: Dict[str, Any]) -> str:
         f"- sim_max_drawdown：{float(risk.get('sim_max_drawdown', risk.get('max_drawdown', 0.0)) or 0.0):.2%}",
         "",
         "### 多智能体行为解释",
-        f"- 当前 Scorecard behavioral metrics：{json.dumps(scorecard.get('behavioral_metrics', {}), ensure_ascii=False, sort_keys=True, default=str)}",
+        f"- 当前评估卡行为指标：{json.dumps(scorecard.get('behavioral_metrics', {}), ensure_ascii=False, sort_keys=True, default=str)}",
         "",
         "### 监管优化结果",
         f"- 场景差异表数量：{len(scenario_diff.get('deltas', []) or [])}",
         f"- 推荐/优化路径：{payload.get('deep_mode_meta', {}).get('counterfactual_regulation', {}).get('recommended_timing', '-') if isinstance(payload.get('deep_mode_meta'), dict) else '-'}",
         "",
         "### 结论与建议",
-        f"- {payload.get('impact_evaluation', {}).get('overall_verdict', '请结合主图、事件层和 Scorecard 进行复核。')}",
+        f"- {payload.get('impact_evaluation', {}).get('overall_verdict', '请结合主图、事件层和评估卡进行复核。')}",
         "",
         "### 可复现信息",
         f"- experiment_id：{registry.get('experiment_id', '')}",
@@ -2084,9 +2092,11 @@ def _render_policy_package_summary(package_dict: Dict[str, Any], summary: Dict[s
             "action_recommendations": payload["action_recommendations"],
             "monitoring_kpis": payload["monitoring_kpis"],
         },
-        context="请用工程汇报口径解释这项政策的主要传导路径、预期影响、风险和建议动作。",
+        context="请用政策研判口径解释这项政策的主要传导路径、预期影响、风险和建议动作。",
         cache_namespace="policy_lab_structured_narrative_cache",
     )
+    with st.expander("结构化数据载荷", expanded=False):
+        st.json(package_dict, expanded=False)
 
 
 def _policy_session_display_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -2123,9 +2133,9 @@ def _render_discovered_metrics_panel(discovered_metrics: Dict[str, Any]) -> None
     weights = dict(payload.get("weight_decomposition", {}) or {})
     shanghai = dict(payload.get("shanghai_index_metric", {}) or {})
     c1, c2, c3 = st.columns(3)
-    c1.metric("Composite Policy Score", f"{score:.3f}")
+    c1.metric("政策综合评分", f"{score:.3f}")
     c2.metric("候选指标池", int(len(payload.get("candidate_pool", []) or [])))
-    c3.metric("上证指数关系", str(shanghai.get("relation_to_shanghai_index", "self") or "self"))
+    c3.metric("上证指数关系", zh_value(str(shanghai.get("relation_to_shanghai_index", "self") or "self")))
 
     metric_frame = pd.DataFrame(top_metrics)
     display_cols = [
@@ -2143,7 +2153,10 @@ def _render_discovered_metrics_panel(discovered_metrics: Dict[str, Any]) -> None
         if col in metric_frame.columns
     ]
     if display_cols:
-        st.dataframe(metric_frame[display_cols], use_container_width=True, hide_index=True)
+        display_frame = metric_frame[display_cols].copy()
+        if "name" in display_frame.columns:
+            display_frame["name"] = display_frame["name"].map(lambda value: zh_metric_name(str(value)))
+        st.dataframe(localize_dataframe_columns(display_frame), use_container_width=True, hide_index=True)
 
     if pareto:
         pareto_frame = pd.DataFrame(pareto)
@@ -2154,21 +2167,21 @@ def _render_discovered_metrics_panel(discovered_metrics: Dict[str, Any]) -> None
                     x=pareto_frame["policy_sensitivity"],
                     y=pareto_frame["robustness"],
                     mode="markers+text",
-                    text=pareto_frame["name"],
+                    text=pareto_frame["name"].map(lambda value: zh_metric_name(str(value))),
                     textposition="top center",
                     marker=dict(
                         size=10 + 24 * pd.to_numeric(pareto_frame.get("early_warning_utility", 0.0), errors="coerce").fillna(0.0),
                         color=pd.to_numeric(pareto_frame.get("rank_score", 0.0), errors="coerce").fillna(0.0),
                         colorscale="Viridis",
                         showscale=True,
-                        colorbar=dict(title="rank"),
+                        colorbar=dict(title="综合排序"),
                     ),
                 )
             )
             fig.update_layout(
                 title="Pareto 前沿：敏感性 × 稳健性",
-                xaxis_title="policy sensitivity",
-                yaxis_title="robustness",
+                xaxis_title="政策敏感性",
+                yaxis_title="跨场景稳健性",
                 height=320,
                 template="plotly_dark",
                 paper_bgcolor="rgba(0,0,0,0)",
@@ -2179,9 +2192,39 @@ def _render_discovered_metrics_panel(discovered_metrics: Dict[str, Any]) -> None
 
     if weights:
         weight_frame = pd.DataFrame(
-            [{"metric": key, "weight": float(value)} for key, value in sorted(weights.items(), key=lambda item: float(item[1]), reverse=True)]
+            [{"指标名称": zh_metric_name(str(key)), "综合权重": float(value)} for key, value in sorted(weights.items(), key=lambda item: float(item[1]), reverse=True)]
         )
-        st.bar_chart(weight_frame.set_index("metric"))
+        fig = go.Figure(
+            data=[
+                go.Bar(
+                    x=weight_frame["综合权重"],
+                    y=weight_frame["指标名称"],
+                    orientation="h",
+                    marker_color="#38bdf8",
+                    name="综合权重",
+                )
+            ]
+        )
+        fig.update_layout(
+            **PLOTLY_DARK_LAYOUT,
+            title="指标重要性",
+            xaxis_title="综合权重",
+            yaxis_title="指标名称",
+            height=300,
+            showlegend=False,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    render_narrative_block(
+        "目标发现与指标组合",
+        {
+            "composite_score": score,
+            "top_metrics": top_metrics[:5],
+            "shanghai_index_metric": shanghai,
+            "candidate_pool": payload.get("candidate_pool", []),
+        },
+        context="请解释为什么以上证指数为重点指标，以及补充指标如何增强政策敏感性、稳健性和预警价值。",
+        cache_namespace="policy_lab_narrative_cache",
+    )
 
 
 def _compute_policy_summary(metrics: pd.DataFrame) -> Dict[str, float]:
@@ -2430,7 +2473,7 @@ def _llm_policy_narrative(
             "输出要求：",
             "1) 只用中文段落，不要 JSON、代码块、键值对、项目符号、标题标签。",
             "2) 先说明政策主线，再说明对交易行为和指数路径的影响，最后说明风险和建议关注指标。",
-            "3) 语言要清晰、专业、易懂，可直接用于项目汇报或视频配音。",
+            "3) 语言要清晰、专业、易懂，可直接用于政策研判、结果复盘或系统说明。",
             "4) 避免英文缩写和术语堆砌。",
             f"数据：{json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str)}",
         ]
@@ -2752,7 +2795,8 @@ def _render_sector_rotation_heatmap(package_dict: Dict[str, Any], policy_text: s
     if not sector_effects:
         return
     ordered = sorted(sector_effects.items(), key=lambda kv: abs(float(kv[1])), reverse=True)[:18]
-    labels = [_translate_sector_name(str(name)) for name, _ in ordered]
+    full_labels = [_translate_sector_name(str(name)) for name, _ in ordered]
+    labels = [label if len(label) <= 8 else f"{label[:8]}…" for label in full_labels]
     values = [float(value) for _, value in ordered]
     abs_values = [abs(v) + 0.1 for v in values]
     
@@ -2761,15 +2805,16 @@ def _render_sector_rotation_heatmap(package_dict: Dict[str, Any], policy_text: s
             labels=labels,
             parents=[""] * len(labels),
             values=abs_values,
+            customdata=full_labels,
             marker=dict(
                 colors=values,
                 colorscale="RdYlGn",
                 cmid=0,
                 showscale=True,
-                colorbar=dict(title="影响")
+                colorbar=dict(title="影响得分")
             ),
             textinfo="label",
-            hovertemplate="<b>%{label}</b><br>影响得分：%{color:.2f}<extra></extra>"
+            hovertemplate="<b>%{customdata}</b><br>影响得分：%{color:.2f}<extra></extra>"
         )
     )
     fig.update_layout(
@@ -2777,6 +2822,7 @@ def _render_sector_rotation_heatmap(package_dict: Dict[str, Any], policy_text: s
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#0b1220",
         title="板块热度轮动（政策冲击）",
+        uniformtext=dict(minsize=11, mode="hide"),
         margin=dict(l=10, r=10, t=40, b=10),
         height=320,
     )
@@ -2805,17 +2851,39 @@ def _render_regulation_counterfactual_panel(counterfactual: Dict[str, Any]) -> N
     if no_df.empty or early_df.empty or late_df.empty:
         return
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=no_df["time"], y=no_df["close"], mode="lines", name="不介入", line=dict(color="#6b7280", width=2)))
-    fig.add_trace(go.Scatter(x=early_df["time"], y=early_df["close"], mode="lines", name="提前介入", line=dict(color="#16a34a", width=2.6)))
-    fig.add_trace(go.Scatter(x=late_df["time"], y=late_df["close"], mode="lines", name="延后介入", line=dict(color="#f97316", width=2.6)))
+    merged = no_df[["step", "time", "close"]].rename(columns={"close": "no_close"}).merge(
+        early_df[["step", "close"]].rename(columns={"close": "early_close"}),
+        on="step",
+        how="inner",
+    ).merge(
+        late_df[["step", "close"]].rename(columns={"close": "late_close"}),
+        on="step",
+        how="inner",
+    )
+    merged["提前介入差值"] = merged["early_close"] - merged["no_close"]
+    merged["延后介入差值"] = merged["late_close"] - merged["no_close"]
+
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.09,
+        row_heights=[0.68, 0.32],
+        subplot_titles=("监管时点反事实世界线", "相对不介入的收益差分"),
+    )
+    fig.add_trace(go.Scatter(x=no_df["time"], y=no_df["close"], mode="lines", name="不介入", line=dict(color="#94a3b8", width=2)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=early_df["time"], y=early_df["close"], mode="lines", name="提前介入", line=dict(color="#16a34a", width=2.6)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=late_df["time"], y=late_df["close"], mode="lines", name="延后介入", line=dict(color="#f97316", width=2.6)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=merged["time"], y=merged["提前介入差值"], mode="lines", name="提前介入差值", fill="tozeroy", line=dict(color="#22c55e", width=1.8)), row=2, col=1)
+    fig.add_trace(go.Scatter(x=merged["time"], y=merged["延后介入差值"], mode="lines", name="延后介入差值", fill="tozeroy", line=dict(color="#f97316", width=1.8)), row=2, col=1)
     fig.update_layout(
-        template="plotly_white",
+        **PLOTLY_DARK_LAYOUT,
         title="监管时点反事实世界线（多智能体会话）",
-        xaxis_title="时间",
-        yaxis_title="价格",
+        yaxis_title="指数点位",
+        yaxis2_title="差值",
         margin=dict(l=20, r=20, t=40, b=20),
-        height=360,
+        height=460,
+        legend=dict(orientation="h", y=1.06, x=0.0),
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -2839,11 +2907,22 @@ def _render_regulation_counterfactual_panel(counterfactual: Dict[str, Any]) -> N
         )
     if rows:
         score_df = pd.DataFrame(rows)
-        st.dataframe(score_df, use_container_width=True, hide_index=True)
+        st.dataframe(localize_dataframe_columns(score_df), use_container_width=True, hide_index=True)
     recommended = str(counterfactual.get("recommended_timing", ""))
     steps = dict(counterfactual.get("intervention_steps", {}) or {})
     st.caption(
-        f"推荐时点：{recommended} | 提前介入步={steps.get('early', '-')}, 延后介入步={steps.get('late', '-')}"
+        f"推荐时点：{zh_world_name(recommended)} | 提前介入步={steps.get('early', '-')}, 延后介入步={steps.get('late', '-')}"
+    )
+    render_narrative_block(
+        "监管时点反事实世界线",
+        {
+            "recommended_timing": zh_world_name(recommended),
+            "scorecards": scorecards,
+            "early_gap_latest": float(merged["提前介入差值"].iloc[-1]) if not merged.empty else 0.0,
+            "late_gap_latest": float(merged["延后介入差值"].iloc[-1]) if not merged.empty else 0.0,
+        },
+        context="请解释不介入、提前介入、延后介入三条世界线的收益与风险差异，并说明推荐时点的政策含义。",
+        cache_namespace="policy_lab_narrative_cache",
     )
 
 
@@ -2926,6 +3005,20 @@ def _render_behavior_finance_panel(frame: pd.DataFrame, summary: Dict[str, Any])
     fig.update_xaxes(showgrid=False, linecolor="#243244", color="#cbd5e1")
     fig.update_yaxes(gridcolor="rgba(148,163,184,0.16)", linecolor="#243244", color="#cbd5e1")
     st.plotly_chart(fig, use_container_width=True)
+    render_narrative_block(
+        "行为金融指标解读",
+        {
+            "avg_csad": float(summary.get("avg_csad", 0.0)),
+            "max_panic": float(summary.get("max_panic", 0.0)),
+            "volatility": float(summary.get("volatility", 0.0)),
+            "max_drawdown": float(summary.get("max_drawdown", 0.0)),
+            "return_pct": float(summary.get("return_pct", 0.0)),
+        },
+        context="请结合 CSAD、恐慌度、最大回撤和波动率解释当前行为金融状态及政策含义。",
+        cache_namespace="policy_lab_narrative_cache",
+        threshold_rules={"max_panic": 0.7, "avg_csad": 0.15, "max_drawdown": 0.08},
+        policy_context="政策实验",
+    )
 
     insight_cols = st.columns(2)
     with insight_cols[0]:
@@ -2976,13 +3069,17 @@ def _build_agent_fmri_rows(session: Dict[str, Any], package_dict: Dict[str, Any]
         sorted(agent_effects.items(), key=lambda item: abs(float(item[1] or 0.0)), reverse=True)
     ):
         score = float(raw_score or 0.0)
-        action = "BUY" if score >= 0.12 else "SELL" if score <= -0.12 else "HOLD"
-        status = "Risk-On" if score >= 0.18 else "Risk-Off" if score <= -0.18 else "Observe"
+        action_key = "BUY" if score >= 0.12 else "SELL" if score <= -0.12 else "HOLD"
+        status_key = "Risk-On" if score >= 0.18 else "Risk-Off" if score <= -0.18 else "Observe"
+        action = zh_action_name(action_key)
+        status = zh_value(status_key)
         confidence = min(0.92, 0.45 + abs(score) * 0.35 + panic * 0.10)
         qty = int(max(0.0, abs(score) * 12000.0))
+        display_agent = _translate_role(str(agent_name))
         rows.append(
             {
-                "agent": str(agent_name),
+                "agent": display_agent,
+                "agent_key": str(agent_name),
                 "score": score,
                 "status": status,
                 "sentiment": max(-1.0, min(1.0, score - panic * 0.35)),
@@ -3002,8 +3099,8 @@ def _build_agent_fmri_rows(session: Dict[str, Any], package_dict: Dict[str, Any]
                 "meta_line": f"情绪 {max(-1.0, min(1.0, score - panic * 0.35)):+.2f}｜状态 {status}",
                 "history": [
                     f"记录 {idx + 1}: {action}",
-                    f"记录 {idx + 2}: {'HOLD' if action != 'HOLD' else 'BUY'}",
-                    f"记录 {idx + 3}: {'SELL' if action == 'BUY' else 'HOLD'}",
+                    f"记录 {idx + 2}: {zh_action_name('HOLD') if action_key != 'HOLD' else zh_action_name('BUY')}",
+                    f"记录 {idx + 3}: {zh_action_name('SELL') if action_key == 'BUY' else zh_action_name('HOLD')}",
                 ],
             }
         )
@@ -3082,13 +3179,13 @@ def _render_agent_fmri_panel(session: Dict[str, Any], package_dict: Dict[str, An
                 template="plotly_dark",
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="#0b1220",
-                xaxis_title="Agent",
+                xaxis_title="智能体角色",
                 yaxis_title="得分",
                 showlegend=False,
             )
             st.plotly_chart(fig, use_container_width=True)
         st.markdown("#### 当前决策")
-        action_cn = {"BUY": "买入", "SELL": "卖出", "HOLD": "观望"}.get(selected["decision"]["action"], selected["decision"]["action"])
+        action_cn = str(selected["decision"]["action"])
         st.info(f"**操作**: {action_cn} | **信心度**: {selected['decision']['confidence']*100:.0f}% | **预期交易量**: {selected['decision']['qty']} 份")
         st.markdown("#### 判断依据")
         st.markdown(f"> {selected['thought']}")
@@ -3102,6 +3199,21 @@ def _render_agent_fmri_panel(session: Dict[str, Any], package_dict: Dict[str, An
             for item in history[1:]:
                 with st.expander(str(item), expanded=False):
                     st.markdown("在当前市场环境下的惯性跟随或反转预期。")
+        render_narrative_block(
+            "智能体决策剖面解读",
+            {
+                "selected_agent": selected.get("agent"),
+                "selected_score": float(selected.get("score", 0.0)),
+                "selected_sentiment": float(selected.get("sentiment", 0.0)),
+                "selected_action": selected.get("decision", {}).get("action"),
+                "agents": [
+                    {"agent": item.get("agent"), "score": item.get("score"), "action": item.get("decision", {}).get("action")}
+                    for item in rows[:8]
+                ],
+            },
+            context="请解释智能体角色之间的买卖分歧、风险偏好变化，以及这种分歧如何影响订单流和政策效果。",
+            cache_namespace="policy_lab_narrative_cache",
+        )
 
 
 def _policy_session_status_text(status: str) -> str:
@@ -3985,7 +4097,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
 
     with market_tab:
         selected_benchmark_label = st.selectbox(
-            "benchmark selector",
+            "基准指数",
             options=list(INDEX_BENCHMARK_OPTIONS.keys()),
             index=list(INDEX_BENCHMARK_OPTIONS.values()).index(str(session.get("index_symbol", "sh000001")))
             if str(session.get("index_symbol", "sh000001")) in INDEX_BENCHMARK_OPTIONS.values()
@@ -4089,8 +4201,8 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
 
         _render_discovered_metrics_panel(dict(session.get("discovered_metrics", {}) or {}))
 
-        st.markdown("### Research workbench")
-        workbench_tabs = st.tabs(["场景对比", "回放", "Scorecard", "复现信息"])
+        st.markdown("### 研究工作台")
+        workbench_tabs = st.tabs(["场景对比", "回放", "评估卡", "可复现信息"])
         with workbench_tabs[0]:
             scenario_frames = {}
             if counterfactual.get("worlds"):
@@ -4131,7 +4243,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
             st.markdown("#### 政策时间轴")
             timeline_df = pd.DataFrame(session.get("policy_timeline", []) or _policy_session_timeline(session))
             if not timeline_df.empty:
-                st.dataframe(timeline_df, use_container_width=True, hide_index=True)
+                st.dataframe(localize_dataframe_columns(timeline_df), use_container_width=True, hide_index=True)
             else:
                 st.info("当前还没有追加政策。")
 
@@ -4153,7 +4265,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                     if col in runtime_timeline_df.columns
                 ]
                 st.dataframe(
-                    runtime_timeline_df[preferred_cols] if preferred_cols else runtime_timeline_df,
+                    localize_dataframe_columns(runtime_timeline_df[preferred_cols] if preferred_cols else runtime_timeline_df),
                     use_container_width=True,
                     hide_index=True,
                 )
@@ -4312,7 +4424,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
             st.markdown("#### 日度明细")
             display_frame = _policy_session_display_frame(session_frame)
             if not display_frame.empty:
-                st.dataframe(display_frame.tail(60), use_container_width=True, hide_index=True)
+                st.dataframe(localize_dataframe_columns(display_frame.tail(60)), use_container_width=True, hide_index=True)
             else:
                 st.info("继续仿真后，这里将展示逐日市场路径与交易明细。")
 

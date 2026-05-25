@@ -9,12 +9,15 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from core.ui_text import localize_dataframe_columns, zh_metric_name
+from ui.chart_theme import PLOTLY_DARK_LAYOUT
+
 
 SCENARIO_LABELS = {
-    "baseline": "baseline",
-    "policy_a": "policy A",
-    "policy_b": "policy B",
-    "optimized_policy": "optimized policy",
+    "baseline": "不介入基线",
+    "policy_a": "提前介入",
+    "policy_b": "延后介入",
+    "optimized_policy": "推荐方案",
 }
 
 
@@ -155,22 +158,23 @@ def render_scenario_diff(
             )
         )
     fig.update_layout(
-        template="plotly_dark",
+        **PLOTLY_DARK_LAYOUT,
         height=380,
         margin=dict(l=18, r=18, t=42, b=20),
-        title="baseline vs policy A vs policy B vs optimized policy",
+        title="场景对比：不介入、提前介入、延后介入与推荐方案",
         yaxis_title="同刻度指数点位",
         legend=dict(orientation="h"),
     )
     st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_line")
-    st.dataframe(data["deltas"], use_container_width=True, hide_index=True)
+    with st.expander("原始指标表（可展开）", expanded=False):
+        st.dataframe(localize_dataframe_columns(data["deltas"]), use_container_width=True, hide_index=True)
     if not data["risk_contribution"].empty:
         risk_long = data["risk_contribution"].melt(id_vars=["scenario_label"], var_name="risk_factor", value_name="value")
         risk_fig = go.Figure()
         for label, subset in risk_long.groupby("scenario_label"):
-            risk_fig.add_trace(go.Bar(x=subset["risk_factor"], y=subset["value"], name=str(label)))
+            risk_fig.add_trace(go.Bar(x=subset["risk_factor"].map(lambda value: zh_metric_name(str(value))), y=subset["value"], name=str(label)))
         risk_fig.update_layout(
-            template="plotly_dark",
+            **PLOTLY_DARK_LAYOUT,
             barmode="group",
             height=320,
             margin=dict(l=18, r=18, t=36, b=20),

@@ -1,4 +1,4 @@
-"""Defense-mode wind tunnel page for competition demo."""
+"""Scenario wind-tunnel page for integrated policy analysis."""
 
 from __future__ import annotations
 
@@ -194,7 +194,7 @@ def _handle_autoplay(scenario: Any) -> None:
 
 
 def render_demo_tab(ctrl: Optional[Any] = None) -> None:
-    st.markdown("## 答辩演示")
+    st.markdown("## 系统场景对照")
     st.caption("一键加载场景、自动播放时间线，5 分钟内完成全链路演示。")
 
     scenarios = list_competition_scenarios()
@@ -270,7 +270,7 @@ def render_demo_tab(ctrl: Optional[Any] = None) -> None:
 
     scenario = st.session_state.get("demo_scenario")
     if scenario is None:
-        st.info("点击“一键载入场景”开始答辩演示。")
+        st.info("点击“一键载入场景”开始场景推演。")
         return
 
     _handle_autoplay(scenario)

@@ -7,6 +7,8 @@ from typing import Any, Dict, Mapping, Tuple
 import pandas as pd
 import streamlit as st
 
+from core.ui_text import localize_dataframe_columns
+
 
 def mock_scorecard() -> Dict[str, Any]:
     return {
@@ -75,17 +77,18 @@ def scorecard_summary_frames(scorecard: Mapping[str, Any]) -> Tuple[pd.DataFrame
 def render_scorecard_panel(scorecard: Mapping[str, Any] | None = None, *, key_prefix: str = "scorecard") -> Dict[str, Any]:
     card = dict(scorecard or mock_scorecard())
     metrics_frame, flags_frame = scorecard_summary_frames(card)
-    st.markdown("### Scorecard")
+    st.markdown("### 评估卡")
     path = dict(card.get("path_fit_metrics", {}) or {})
     risk = dict(card.get("risk_metrics", {}) or {})
     cols = st.columns(4)
     cols[0].metric("方向命中率", f"{float(path.get('direction_hit_rate', 0.0)):.2%}")
-    cols[1].metric("Tracking RMSE", f"{float(path.get('tracking_rmse', path.get('normalized_rmse', 0.0))):.4f}")
+    cols[1].metric("路径跟踪误差", f"{float(path.get('tracking_rmse', path.get('normalized_rmse', 0.0))):.4f}")
     cols[2].metric("波动差", f"{float(risk.get('volatility_gap', 0.0)):.4f}")
     cols[3].metric("回撤差", f"{float(risk.get('max_drawdown_gap', 0.0)):.2%}")
-    st.dataframe(metrics_frame, use_container_width=True, hide_index=True)
+    with st.expander("原始指标表（可展开）", expanded=False):
+        st.dataframe(localize_dataframe_columns(metrics_frame), use_container_width=True, hide_index=True)
     if not flags_frame.empty:
-        st.dataframe(flags_frame, use_container_width=True, hide_index=True)
+        st.dataframe(localize_dataframe_columns(flags_frame), use_container_width=True, hide_index=True)
     return card
 
 

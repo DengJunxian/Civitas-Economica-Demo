@@ -13,6 +13,8 @@ from typing import Any, Dict, Mapping, Optional
 import pandas as pd
 import streamlit as st
 
+from core.ui_text import localize_dataframe_columns, zh_provider_name
+
 
 def stable_payload_hash(payload: Mapping[str, Any]) -> str:
     raw = json.dumps(dict(payload or {}), ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
@@ -126,7 +128,7 @@ def render_experiment_registry(
     else:
         rows = []
     frame = pd.DataFrame(rows)
-    st.markdown("### Experiment registry")
+    st.markdown("### 实验登记信息")
     if frame.empty:
         st.info("暂无实验登记信息。")
         return frame
@@ -142,7 +144,7 @@ def render_experiment_registry(
         "selected_benchmark",
         "status",
     ]
-    st.dataframe(frame[[col for col in cols if col in frame.columns]], use_container_width=True, hide_index=True)
+    st.dataframe(localize_dataframe_columns(frame[[col for col in cols if col in frame.columns]]), use_container_width=True, hide_index=True)
     return frame
 
 
@@ -152,30 +154,34 @@ def render_reproducibility_panel(
     key_prefix: str = "repro",
 ) -> Dict[str, Any]:
     meta = dict(metadata or {})
-    st.markdown("### Reproducibility")
+    st.markdown("### 可复现信息")
     cols = st.columns(4)
-    cols[0].metric("data snapshot", str(meta.get("data_snapshot_hash", ""))[:12] or "-")
-    cols[1].metric("config hash", str(meta.get("config_hash", ""))[:12] or "-")
-    cols[2].metric("seed", str(meta.get("random_seed", "")))
-    cols[3].metric("git", str(meta.get("git_commit_hash", ""))[:12] or "unknown")
+    cols[0].metric("数据快照", str(meta.get("data_snapshot_hash", ""))[:12] or "-")
+    cols[1].metric("配置哈希", str(meta.get("config_hash", ""))[:12] or "-")
+    cols[2].metric("随机种子", str(meta.get("random_seed", "")))
+    cols[3].metric("代码版本", str(meta.get("git_commit_hash", ""))[:12] or "unknown")
 
     provider_frame = pd.DataFrame(
-        [{"provider": key, "version": value} for key, value in dict(meta.get("provider_versions", {}) or {}).items()]
+        [{"provider": zh_provider_name(str(key)), "version": value} for key, value in dict(meta.get("provider_versions", {}) or {}).items()]
     )
     left, right = st.columns([1.0, 1.0])
     with left:
-        st.markdown("#### Provider versions")
-        st.dataframe(provider_frame, use_container_width=True, hide_index=True)
+        st.markdown("#### 依赖版本")
+        st.dataframe(localize_dataframe_columns(provider_frame), use_container_width=True, hide_index=True)
     with right:
-        st.markdown("#### Runtime chain")
-        st.json(
-            {
-                "llm_provider_chain": list(meta.get("llm_provider_chain", []) or []),
-                "calibration_parameter_set_id": meta.get("calibration_parameter_set_id", ""),
-                "cpp_extension": meta.get("cpp_extension", {}),
-            },
-            expanded=False,
-        )
+        st.markdown("#### 运行链路")
+        chain = " -> ".join(zh_provider_name(str(item)) for item in list(meta.get("llm_provider_chain", []) or [])) or "-"
+        st.markdown(f"- 大模型与优化链路：{chain}")
+        st.markdown(f"- 校准参数集：`{meta.get('calibration_parameter_set_id', '')}`")
+        with st.expander("技术细节（可展开）", expanded=False):
+            st.json(
+                {
+                    "llm_provider_chain": list(meta.get("llm_provider_chain", []) or []),
+                    "calibration_parameter_set_id": meta.get("calibration_parameter_set_id", ""),
+                    "cpp_extension": meta.get("cpp_extension", {}),
+                },
+                expanded=False,
+            )
     return meta
 
 

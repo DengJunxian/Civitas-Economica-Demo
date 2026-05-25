@@ -295,7 +295,7 @@ def build_competition_metrics_figure(metrics: pd.DataFrame, upto_step: Optional[
         )
     )
     fig.update_layout(
-        title=translate_display_text("比赛答辩指标总览"),
+        title=translate_display_text("综合展示指标总览"),
         template="plotly_dark",
         yaxis=dict(title="指数点位"),
         yaxis2=dict(title="CSAD", overlaying="y", side="right"),

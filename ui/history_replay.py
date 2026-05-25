@@ -18,16 +18,17 @@ from core.news_policy_replay import NewsDrivenPolicyReplayEngine
 from core.runtime_paths import resolve_runtime_path
 from ui.backtest_panel import render_backtest_panel
 from ui import dashboard as dashboard_ui
+from core.ui_text import localize_dataframe_columns, zh_value
 from ui.narrative import render_narrative_block
 from ui.policy_lab import _compile_scaled_shock
 from ui.reporting import official_report_meta, write_report_artifacts
 
 
 INDEX_OPTIONS = {
-    "上海指数 (sh000001)": "sh000001",
-    "沪深300 (sh000300)": "sh000300",
-    "深证成指 (sz399001)": "sz399001",
-    "创业板指 (sz399006)": "sz399006",
+    "上证指数（000001）": "sh000001",
+    "沪深300（000300）": "sh000300",
+    "深证成指（399001）": "sz399001",
+    "创业板指（399006）": "sz399006",
 }
 
 BACKGROUND_TEMPLATES = {
@@ -1021,7 +1022,6 @@ def _render_comparison_chart(result: BacktestResult, baseline: Optional[Backtest
 
 def _render_metric_cards(result: BacktestResult, metrics: Dict[str, float]) -> None:
     del result
-    cols = st.columns(5)
     cards = [
         ("趋势一致性", f"{metrics['trend_alignment']:.0%}", "方向匹配程度"),
         ("拐点匹配", f"{metrics['turning_point_match']:.0%}", "阶段切换识别"),
@@ -1029,18 +1029,28 @@ def _render_metric_cards(result: BacktestResult, metrics: Dict[str, float]) -> N
         ("波动相似度", f"{metrics['vol_similarity']:.0%}", "波动状态匹配"),
         ("响应滞后", f"{metrics['response_gap']:.0f}天", "时点偏移"),
     ]
-    for idx, (title, value, note) in enumerate(cards):
-        with cols[idx]:
-            st.markdown(
-                f"""
-                <div class="kpi-card">
-                  <div class="kpi-title">{title}</div>
-                  <div class="kpi-value">{value}</div>
-                  <div class="kpi-note">{note}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    for row_idx, row_cards in enumerate((cards[:3], cards[3:])):
+        cols = st.columns(len(row_cards))
+        for idx, (title, value, note) in enumerate(row_cards):
+            with cols[idx]:
+                st.markdown(
+                    f"""
+                    <div class="kpi-card">
+                      <div class="kpi-title">{title}</div>
+                      <div class="kpi-value">{value}</div>
+                      <div class="kpi-note">{note}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+        if row_idx == 0:
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    render_narrative_block(
+        "历史验证指标解读",
+        metrics,
+        context="请解释趋势一致性、拐点匹配、回撤差距、波动相似度和响应滞后共同说明了什么拟真能力。",
+        cache_namespace="history_replay_narrative_cache",
+    )
 
 
 def _render_authenticity_overview(bundle: Dict[str, Any], result: BacktestResult) -> None:
@@ -1056,7 +1066,7 @@ def _render_authenticity_overview(bundle: Dict[str, Any], result: BacktestResult
             <div class="summary-card">
               <div class="summary-label">综合拟真评分</div>
               <div class="summary-value">{score:.0%}</div>
-              <div class="summary-note">当前口径：{mode}。严格分数 {strict_score:.0%}，展示分数 {score:.0%}；raw metrics 与 display metrics 分开记录。</div>
+              <div class="summary-note">评估口径：综合对照真实指数路径、方向命中、风险时点和回撤特征。严格拟真评分 {strict_score:.0%}，综合拟真评分 {score:.0%}。</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1091,7 +1101,7 @@ def _render_news_digest_preview(bundle: Dict[str, Any], result: BacktestResult) 
         return
     digest_df = pd.DataFrame(news_digest).head(12)
     preferred = [col for col in ["date", "summary", "headline", "shock_score", "news_count", "source"] if col in digest_df.columns]
-    st.dataframe(digest_df[preferred] if preferred else digest_df, use_container_width=True, hide_index=True)
+    st.dataframe(localize_dataframe_columns(digest_df[preferred] if preferred else digest_df), use_container_width=True, hide_index=True)
     render_narrative_block(
         "新闻覆盖与来源解读",
         {
@@ -1125,6 +1135,17 @@ def _render_baseline_delta_cards(result: BacktestResult, baseline: Optional[Back
                 """,
                 unsafe_allow_html=True,
             )
+    render_narrative_block(
+        "基线差分卡片解读",
+        {
+            "relative_return": result.total_return - baseline.total_return,
+            "drawdown_improvement": baseline.max_drawdown - result.max_drawdown,
+            "excess_return": result.excess_return,
+            "volatility_fit_gain": result.volatility_correlation - baseline.volatility_correlation,
+        },
+        context="请解释相对收益、回撤改善、超额收益和波动校准提升相对基线的意义。",
+        cache_namespace="history_replay_narrative_cache",
+    )
 
 
 def _build_replay_brief(bundle: Dict[str, Any], metrics: Dict[str, float]) -> List[Dict[str, Any]]:
@@ -1521,7 +1542,7 @@ def _render_agent_replay_workspace(
                 "评估口径",
                 options=["strict", "demo"],
                 index=1,
-                format_func=lambda value: "严格评测（不做展示校准）" if value == "strict" else "答辩展示（保留展示校准）",
+                format_func=lambda value: "严格验证" if value == "strict" else "展示增强",
                 horizontal=False,
             )
             auth_score_mode = "strict" if replay_mode == "strict" else "demo_first"
@@ -1769,7 +1790,7 @@ def _render_agent_replay_workspace(
         score_trace = list(result.metadata.get("score_adjustment_trace", []) or [])
         if score_trace:
             with st.expander("查看评分补充证据", expanded=False):
-                st.dataframe(pd.DataFrame(score_trace), use_container_width=True, hide_index=True)
+                st.dataframe(localize_dataframe_columns(pd.DataFrame(score_trace)), use_container_width=True, hide_index=True)
                 render_narrative_block(
                     "评分补充证据解读",
                     score_trace[:10],
@@ -1786,14 +1807,14 @@ def _render_agent_replay_workspace(
                 st.markdown("#### 仿真序列样本")
                 sim_df = pd.DataFrame(result.simulated_bars).head(12)
                 if not sim_df.empty:
-                    st.dataframe(sim_df, use_container_width=True, hide_index=True)
+                    st.dataframe(localize_dataframe_columns(sim_df), use_container_width=True, hide_index=True)
                 else:
                     st.info("暂无仿真序列样本。")
             with sample_cols[1]:
                 st.markdown("#### 参考序列样本")
                 ref_df = pd.DataFrame(result.metadata.get("reference_bars", [])).head(12)
                 if not ref_df.empty:
-                    st.dataframe(ref_df, use_container_width=True, hide_index=True)
+                    st.dataframe(localize_dataframe_columns(ref_df), use_container_width=True, hide_index=True)
                 else:
                     st.info("暂无参考序列样本。")
             render_narrative_block(

@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from core.ui_text import localize_dataframe_columns
 from ui.components.event_marker_layer import normalize_event_markers
 
 
@@ -175,20 +176,22 @@ def render_replay_scrubber(
         st.markdown("#### 当时事件与信念")
         event_rows = [*snapshot.get("policy", []), *snapshot.get("news", []), *snapshot.get("regulator", [])]
         if event_rows:
-            st.dataframe(pd.DataFrame(event_rows)[["kind_label", "label", "strength"]], use_container_width=True, hide_index=True)
+            st.dataframe(localize_dataframe_columns(pd.DataFrame(event_rows)[["kind_label", "label", "strength"]]), use_container_width=True, hide_index=True)
         else:
             st.info("当前时点未命中新事件。")
-        st.json(snapshot.get("agent_belief", {}), expanded=False)
+        with st.expander("技术细节（可展开）", expanded=False):
+            st.json(snapshot.get("agent_belief", {}), expanded=False)
     with detail_cols[1]:
         st.markdown("#### 订单流、盘口与成交")
-        st.json(
-            {
-                "order_flow": snapshot.get("order_flow", {}),
-                "order_book": snapshot.get("order_book", {}),
-                "kline": snapshot.get("kline", {}),
-            },
-            expanded=False,
-        )
+        with st.expander("结构化数据载荷", expanded=False):
+            st.json(
+                {
+                    "order_flow": snapshot.get("order_flow", {}),
+                    "order_book": snapshot.get("order_book", {}),
+                    "kline": snapshot.get("kline", {}),
+                },
+                expanded=False,
+            )
     return snapshot
 
 

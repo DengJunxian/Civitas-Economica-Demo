@@ -8,6 +8,9 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from core.ui_text import localize_dataframe_columns, zh_metric_name
+from ui.chart_theme import PLOTLY_DARK_LAYOUT
+
 
 def normalize_optimization_report(result: Mapping[str, Any] | None) -> Dict[str, pd.DataFrame]:
     payload = dict(result or {})
@@ -46,14 +49,14 @@ def render_optimization_report_panel(
         return frames
     if not frames["best_solution"].empty:
         st.markdown("#### 最优方案")
-        st.dataframe(frames["best_solution"], use_container_width=True, hide_index=True)
+        st.dataframe(localize_dataframe_columns(frames["best_solution"]), use_container_width=True, hide_index=True)
     pareto = frames["pareto"]
     if not pareto.empty:
         metric_cols = st.columns(3)
-        metric_cols[0].metric("Pareto 点数", len(pareto))
+        metric_cols[0].metric("帕累托点数", len(pareto))
         score_series = pd.to_numeric(pareto["score"], errors="coerce") if "score" in pareto.columns else pd.Series(dtype=float)
         metric_cols[1].metric("最高得分", f"{float(score_series.max() if not score_series.empty else 0.0):.4f}")
-        metric_cols[2].metric("候选字段", len(pareto.columns))
+        metric_cols[2].metric("候选指标数", len(pareto.columns))
         x_col = "intervention_cost" if "intervention_cost" in pareto.columns else pareto.columns[0]
         y_col = "macro_stability" if "macro_stability" in pareto.columns else pareto.columns[min(1, len(pareto.columns) - 1)]
         fig = px.scatter(
@@ -62,17 +65,24 @@ def render_optimization_report_panel(
             y=y_col,
             color="score" if "score" in pareto.columns else None,
             hover_data=[col for col in ("action_description", "action_signature", "avg_reward") if col in pareto.columns],
-            title="优化 Pareto / 候选解分布",
+            title="优化帕累托 / 候选解分布",
         )
-        fig.update_layout(height=360, margin=dict(l=18, r=18, t=42, b=20))
+        fig.update_layout(
+            **PLOTLY_DARK_LAYOUT,
+            height=360,
+            margin=dict(l=18, r=18, t=42, b=20),
+            xaxis_title=zh_metric_name(x_col),
+            yaxis_title=zh_metric_name(y_col),
+        )
         st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_pareto")
-        st.dataframe(pareto, use_container_width=True, hide_index=True)
+        with st.expander("原始指标表（可展开）", expanded=False):
+            st.dataframe(localize_dataframe_columns(pareto), use_container_width=True, hide_index=True)
     if not frames["validation_windows"].empty:
         st.markdown("#### 固定窗口验证")
-        st.dataframe(frames["validation_windows"], use_container_width=True, hide_index=True)
+        st.dataframe(localize_dataframe_columns(frames["validation_windows"]), use_container_width=True, hide_index=True)
     if not frames["evidence"].empty:
         st.markdown("#### 推荐证据链")
-        st.dataframe(frames["evidence"], use_container_width=True, hide_index=True)
+        st.dataframe(localize_dataframe_columns(frames["evidence"]), use_container_width=True, hide_index=True)
     return frames
 
 

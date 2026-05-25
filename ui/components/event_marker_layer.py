@@ -8,6 +8,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from core.ui_text import localize_dataframe_columns
+
 
 EVENT_KIND_ALIASES = {
     "policy": "policy",
@@ -178,7 +180,7 @@ def render_event_marker_legend(
         st.info("暂无可标记事件。")
         return marker_frame
     display_cols = ["kind_label", "x", "label", "strength", "source", "confidence"]
-    st.dataframe(marker_frame[display_cols], use_container_width=True, hide_index=True)
+    st.dataframe(localize_dataframe_columns(marker_frame[display_cols]), use_container_width=True, hide_index=True)
     return marker_frame
 
 

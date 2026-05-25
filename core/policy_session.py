@@ -660,7 +660,7 @@ class PolicySession:
             "恐慌度": float(max(0.0, 1.0 - float(report.get("macro_state", {}).get("sentiment_index", 0.0) or 0.0))),
             "羊群度": float(report.get("behavioral_diagnostics", {}).get("csad", 0.0) or 0.0),
             "阶段": "运行中" if self.is_running else self.status,
-            "展示校准": {
+            "显示平滑参数": {
                 "visualization_only": bool(active_timeline),
                 "evaluation_allowed": False if active_timeline else bool(report.get("evaluation_allowed", True)),
                 "raw_old_price": float(raw_old_price),

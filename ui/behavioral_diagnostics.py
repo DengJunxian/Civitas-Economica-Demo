@@ -28,6 +28,14 @@ def _load_social_propagation_report(report_path: Optional[Path] = None) -> Optio
     path = report_path or Path("outputs") / "social_propagation_report.json"
     if not path.exists():
         return None
+
+
+def _scorecard_behavioral_metrics(report: Dict[str, Any]) -> Dict[str, Any]:
+    scorecard = report.get("replay_scorecard", report.get("scorecard", {}))
+    if not isinstance(scorecard, dict):
+        return {}
+    metrics = scorecard.get("behavioral_metrics", {})
+    return dict(metrics) if isinstance(metrics, dict) else {}
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
@@ -135,6 +143,14 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
         {"指标": "最大回撤", "数值": _safe_get(report, ["drawdown_distribution", "max_drawdown"])},
         {"指标": "损失厌恶强度均值", "数值": _safe_get(report, ["loss_aversion_intensity", "mean"])},
     ]
+    unified_behavior = _scorecard_behavioral_metrics(report)
+    if unified_behavior:
+        summary_rows.extend(
+            [
+                {"指标": "统一 Scorecard CSAD", "数值": float(unified_behavior.get("csad_mean", unified_behavior.get("csad", 0.0)))},
+                {"指标": "统一 Scorecard 羊群强度", "数值": float(unified_behavior.get("herd_intensity", 0.0))},
+            ]
+        )
     st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
     render_narrative_block(
         "行为金融关键指标解读",

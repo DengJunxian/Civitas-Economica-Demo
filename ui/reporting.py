@@ -523,6 +523,7 @@ def render_realism_report_markdown(payload: Mapping[str, Any]) -> str:
     path_fit = payload.get("path_fit", {})
     micro = payload.get("microstructure_fit", {})
     behavior = payload.get("behavioral_fit", {})
+    scorecard = payload.get("replay_scorecard", payload.get("scorecard", {}))
     repro = payload.get("reproducibility", {})
     snapshot = payload.get("snapshot_info", {})
     charts = payload.get("charts", [])
@@ -549,6 +550,9 @@ def render_realism_report_markdown(payload: Mapping[str, Any]) -> str:
         "",
         "## Behavioral Fit",
         _markdown_table(behavior),
+        "",
+        "## Unified Replay Scorecard",
+        _markdown_table(scorecard.get("path_fit_metrics", {}) if isinstance(scorecard, Mapping) else {}),
         "",
         "## Charts",
     ]

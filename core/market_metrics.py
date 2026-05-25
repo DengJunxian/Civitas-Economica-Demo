@@ -105,6 +105,25 @@ class MarketMetrics:
         }
 
     @staticmethod
+    def evaluation_microstructure_metrics(metrics: Mapping[str, Any]) -> Dict[str, float]:
+        """Map local market metrics to the unified evaluation scorecard schema."""
+
+        depth = _safe_float(metrics.get("depth_bid_total")) + _safe_float(metrics.get("depth_ask_total"))
+        vwap = _safe_float(metrics.get("vwap"))
+        mid = _safe_float(metrics.get("mid_price", metrics.get("last_price", vwap)))
+        return {
+            "spread": _safe_float(metrics.get("spread")),
+            "spread_pct": _safe_float(metrics.get("spread_pct")),
+            "depth": float(depth),
+            "impact_cost": _safe_float(metrics.get("slippage_bps")),
+            "cancel_trade_ratio": _safe_float(metrics.get("cancel_to_trade_ratio")),
+            "cancel_to_trade_ratio": _safe_float(metrics.get("cancel_to_trade_ratio")),
+            "vwap": float(vwap),
+            "vwap_deviation": abs(vwap - mid) / mid if mid > 0 else 0.0,
+            "depth_imbalance": _safe_float(metrics.get("depth_imbalance")),
+        }
+
+    @staticmethod
     def scorecard(
         *,
         snapshot: Mapping[str, Any],

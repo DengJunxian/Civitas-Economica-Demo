@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Tuple
 import numpy as np
 
 from config import GLOBAL_CONFIG
+from core.optimization import bayesian_search, generate_optimization_report, nsga_search, sensitivity_analysis
 from core.objective_discovery import ObjectiveDiscoveryEngine
 
 
@@ -1173,6 +1174,224 @@ def _evaluate_action_bundle(
     }
 
 
+def _blackbox_parameter_space() -> Dict[str, Tuple[float, float]]:
+    return {
+        "stamp_tax_rate": (0.0003, 0.0010),
+        "reserve_cut_bps": (0.0, 50.0),
+        "policy_rate_cut_bps": (0.0, 25.0),
+        "rumor_refute_strength": (0.0, 1.0),
+        "stabilization_capital": (0.0, 0.8),
+        "stabilization_timing": (0.0, 6.0),
+    }
+
+
+def _params_to_action(params: Mapping[str, Any]) -> RegulatoryAction:
+    return RegulatoryAction(
+        stamp_tax_rate=float(params.get("stamp_tax_rate", 0.0005)),
+        reserve_cut_bps=int(round(float(params.get("reserve_cut_bps", 0.0)))),
+        policy_rate_cut_bps=int(round(float(params.get("policy_rate_cut_bps", 0.0)))),
+        rumor_refute_strength=float(np.clip(float(params.get("rumor_refute_strength", 0.0)), 0.0, 1.0)),
+        stabilization_capital=float(np.clip(float(params.get("stabilization_capital", 0.0)), 0.0, 1.0)),
+        stabilization_timing=int(round(float(params.get("stabilization_timing", 0.0)))),
+        halt_enabled=bool(params.get("halt_enabled", False)),
+    )
+
+
+def _action_to_params(action: RegulatoryAction) -> Dict[str, float]:
+    return {
+        "stamp_tax_rate": float(action.stamp_tax_rate),
+        "reserve_cut_bps": float(action.reserve_cut_bps),
+        "policy_rate_cut_bps": float(action.policy_rate_cut_bps),
+        "rumor_refute_strength": float(action.rumor_refute_strength),
+        "stabilization_capital": float(action.stabilization_capital),
+        "stabilization_timing": float(action.stabilization_timing),
+    }
+
+
+def _rule_baseline_action() -> RegulatoryAction:
+    return RegulatoryAction(
+        stamp_tax_rate=0.0005,
+        reserve_cut_bps=25,
+        policy_rate_cut_bps=10,
+        rumor_refute_strength=0.65,
+        stabilization_capital=0.25,
+        stabilization_timing=1,
+        halt_enabled=False,
+    )
+
+
+def _static_policy_simulator(
+    *,
+    env_factory: Callable[[], RegulatoryEnvironment],
+    max_steps_per_episode: int,
+    seed: int,
+) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
+    def _simulate(params: Dict[str, Any]) -> Dict[str, Any]:
+        row = _evaluate_action_bundle(
+            env_factory=env_factory,
+            action=_params_to_action(params),
+            max_steps_per_episode=int(max_steps_per_episode),
+            seed=int(seed),
+        )
+        row["max_drawdown"] = float(row.get("crash_risk", 0.0))
+        row["panic"] = float(np.clip(1.0 - float(row.get("welfare_confidence", 0.0)), 0.0, 1.0))
+        row["market_function_score"] = float(row.get("financing_function", row.get("liquidity", 0.0)))
+        row["growth_proxy_score"] = float(np.clip(0.45 + 0.20 * row.get("avg_reward", 0.0) + 0.20 * row.get("liquidity", 0.0), 0.0, 1.0))
+        row["financial_stability_score"] = float(
+            np.clip(
+                0.55 * row.get("macro_stability", 0.0)
+                + 0.25 * (1.0 - row.get("crash_risk", 0.0))
+                + 0.20 * (1.0 - row.get("volatility", 0.0)),
+                0.0,
+                1.0,
+            )
+        )
+        row["confidence_score"] = float(row.get("welfare_confidence", 0.0))
+        row["fairness_compliance_score"] = float(row.get("fairness_compliance", 0.0))
+        row["financing_function_score"] = float(row.get("financing_function", 0.0))
+        row["tracking_rmse"] = float(max(0.0, row.get("volatility", 0.0) * 0.10 + row.get("crash_risk", 0.0) * 0.05))
+        return row
+
+    return _simulate
+
+
+def _validate_blackbox_against_rule(
+    *,
+    env_factory: Callable[[], RegulatoryEnvironment],
+    best_params: Mapping[str, Any],
+    rule_action: RegulatoryAction,
+    max_steps_per_episode: int,
+    seed: int,
+) -> Dict[str, Any]:
+    windows: List[Dict[str, Any]] = []
+    stable_wins = 0
+    for idx, window_seed in enumerate((int(seed), int(seed) + 101), start=1):
+        bo_row = _evaluate_action_bundle(
+            env_factory=env_factory,
+            action=_params_to_action(best_params),
+            max_steps_per_episode=int(max_steps_per_episode),
+            seed=window_seed,
+        )
+        rule_row = _evaluate_action_bundle(
+            env_factory=env_factory,
+            action=rule_action,
+            max_steps_per_episode=int(max_steps_per_episode),
+            seed=window_seed,
+        )
+        reward_win = float(bo_row.get("avg_reward", 0.0)) >= float(rule_row.get("avg_reward", 0.0))
+        stability_win = float(bo_row.get("macro_stability", 0.0)) >= float(rule_row.get("macro_stability", 0.0))
+        if reward_win and stability_win:
+            stable_wins += 1
+        windows.append(
+            {
+                "window_id": f"fixed_replay_window_{idx}",
+                "seed": int(window_seed),
+                "bo_avg_reward": float(bo_row.get("avg_reward", 0.0)),
+                "rule_avg_reward": float(rule_row.get("avg_reward", 0.0)),
+                "bo_macro_stability": float(bo_row.get("macro_stability", 0.0)),
+                "rule_macro_stability": float(rule_row.get("macro_stability", 0.0)),
+                "reward_win": bool(reward_win),
+                "stability_win": bool(stability_win),
+            }
+        )
+    return {
+        "windows": windows,
+        "stable_win_count": int(stable_wins),
+        "required_windows": 2,
+        "promote_blackbox_default": bool(stable_wins >= 2),
+    }
+
+
+def _run_blackbox_policy_optimization(
+    *,
+    env_factory: Callable[[], RegulatoryEnvironment],
+    q_summary: Mapping[str, Any],
+    max_steps_per_episode: int,
+    seed: int,
+    episodes: int,
+) -> Dict[str, Any]:
+    parameter_space = _blackbox_parameter_space()
+    simulator = _static_policy_simulator(
+        env_factory=env_factory,
+        max_steps_per_episode=int(max_steps_per_episode),
+        seed=int(seed),
+    )
+    initial_params = [_action_to_params(_rule_baseline_action())]
+    for item in list(q_summary.get("top_actions", []) or [])[:3]:
+        action_payload = item.get("action") if isinstance(item, Mapping) else None
+        if isinstance(action_payload, Mapping):
+            initial_params.append(dict(action_payload))
+    n_iter = max(8, min(24, int(episodes) // 3 if int(episodes) > 0 else 8))
+    bo = bayesian_search(
+        simulator=simulator,
+        parameter_space=parameter_space,
+        n_iter=n_iter,
+        seed=int(seed),
+        initial_params=initial_params,
+    )
+    nsga = nsga_search(
+        simulator=simulator,
+        parameter_space=parameter_space,
+        population_size=max(8, min(14, n_iter)),
+        generations=2,
+        seed=int(seed) + 17,
+    )
+    rule_action = _rule_baseline_action()
+    rule_row = _evaluate_action_bundle(
+        env_factory=env_factory,
+        action=rule_action,
+        max_steps_per_episode=int(max_steps_per_episode),
+        seed=int(seed),
+    )
+    best_params = dict(bo.best.get("params", {})) if bo.best else {}
+    validation = _validate_blackbox_against_rule(
+        env_factory=env_factory,
+        best_params=best_params,
+        rule_action=rule_action,
+        max_steps_per_episode=int(max_steps_per_episode),
+        seed=int(seed),
+    )
+    sensitivity_rows = sensitivity_analysis(
+        simulator=simulator,
+        best_params=best_params,
+        parameter_space=parameter_space,
+        step_fraction=0.08,
+    )[:12]
+    report = generate_optimization_report(
+        input_scenario={
+            "kind": "static_policy_package",
+            "replay_window": "fixed_seed_windows",
+            "method_preference": "BO default, NSGA-II Pareto, Q-learning baseline retained",
+        },
+        data_snapshot={
+            "seed": int(seed),
+            "max_steps_per_episode": int(max_steps_per_episode),
+            "env_factory": getattr(env_factory, "__name__", "callable_env_factory"),
+        },
+        parameter_space=parameter_space,
+        q_learning_result=q_summary,
+        bayesian_result=bo.to_dict(),
+        nsga_result=nsga.to_dict(),
+        rule_baseline=rule_row,
+        counterfactual={
+            "rule_baseline": rule_row,
+            "bo_best": bo.best,
+            "q_learning_best": q_summary.get("best_action", {}),
+        },
+        validation=validation,
+        sensitivity=sensitivity_rows,
+    )
+    return {
+        "bayesian_optimization": bo.to_dict(),
+        "nsga_ii": nsga.to_dict(),
+        "rule_baseline": rule_row,
+        "validation": validation,
+        "sensitivity_analysis": sensitivity_rows,
+        "optimization_report": report,
+        "production_path": "bayesian_blackbox" if validation["promote_blackbox_default"] else "q_learning_baseline",
+    }
+
+
 def _pareto_frontier(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     frontier: List[Dict[str, Any]] = []
     for row in rows:
@@ -1498,6 +1717,13 @@ def run_regulatory_closed_loop(
             ).encode("utf-8")
         ).hexdigest(),
     }
+    blackbox_result = _run_blackbox_policy_optimization(
+        env_factory=active_env_factory,
+        q_summary=summary_dict,
+        max_steps_per_episode=int(max_steps_per_episode),
+        seed=int(seed),
+        episodes=int(episodes),
+    )
     return {
         "training_summary": summary_dict,
         "counterfactual_ab": {
@@ -1506,6 +1732,10 @@ def run_regulatory_closed_loop(
             "deltas": ab_rows,
         },
         "pareto_frontier": pareto,
+        "multi_objective_pareto_frontier": blackbox_result["nsga_ii"].get("pareto_frontier", []),
+        "blackbox_optimization": blackbox_result,
+        "optimization_report": blackbox_result["optimization_report"],
+        "default_production_path": blackbox_result["production_path"],
         "recommendation": recommendation,
         "discovered_objectives": discovered_objectives,
         "reproducibility": reproducibility,

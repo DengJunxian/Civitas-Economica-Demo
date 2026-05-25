@@ -19,7 +19,7 @@ from core.backtester import (
     BacktestResult,
     HistoricalBacktester,
 )
-from core.calibration.scorecard import build_replay_scorecard
+from core.eval import build_replay_scorecard
 from core.tear_sheet import (
     build_standard_tear_sheet,
     compare_scenarios,
@@ -152,6 +152,7 @@ def _result_payload(result: BacktestResult) -> Dict[str, Any]:
         "top_factors": result.factor_snapshot[:10],
         "total_trades": result.total_trades,
         "total_days": result.total_days,
+        "replay_scorecard": _build_result_replay_scorecard(result),
     }
 
 
@@ -301,6 +302,7 @@ def _build_result_replay_scorecard(result: BacktestResult) -> Dict[str, Any]:
         regulatory_metrics={
             "cost_ratio": float(result.cost_ratio),
         },
+        dates=list(result.dates or []),
     )
     return scorecard.to_dict()
 

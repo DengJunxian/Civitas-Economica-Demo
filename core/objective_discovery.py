@@ -86,6 +86,10 @@ class ObjectiveDiscoveryEngine:
 
     CANDIDATE_CATEGORIES: Dict[str, str] = {
         "shanghai_index_return": "market_price_risk",
+        "shanghai_tracking_rmse": "market_price_risk",
+        "shanghai_alignment_score": "market_price_risk",
+        "event_direction_hit_rate": "market_price_risk",
+        "abnormal_return_error": "market_price_risk",
         "index_return": "market_price_risk",
         "max_drawdown": "market_price_risk",
         "realized_volatility": "market_price_risk",
@@ -123,6 +127,8 @@ class ObjectiveDiscoveryEngine:
 
     POSITIVE_GOOD = {
         "shanghai_index_return",
+        "shanghai_alignment_score",
+        "event_direction_hit_rate",
         "index_return",
         "turnaround_speed",
         "depth",
@@ -196,6 +202,12 @@ class ObjectiveDiscoveryEngine:
             "wage_growth": [],
             "inflation": [],
         }
+        path_values: Dict[str, List[float]] = {
+            "shanghai_tracking_rmse": [],
+            "shanghai_alignment_score": [],
+            "event_direction_hit_rate": [],
+            "abnormal_return_error": [],
+        }
         for report in report_payloads:
             micro = dict(report.get("microstructure_metrics", {}) or {})
             realism = dict(report.get("realism_diagnostics", {}) or {})
@@ -203,6 +215,16 @@ class ObjectiveDiscoveryEngine:
             ecology = dict(report.get("ecology_metrics", {}) or {})
             abuse = dict(report.get("abuse_detection", {}) or {})
             chain = dict(report.get("policy_transmission_chain", {}) or {})
+            scorecard = dict(report.get("replay_scorecard", report.get("scorecard", {})) or {})
+            path_fit = dict(scorecard.get("path_fit_metrics", report.get("path_fit_metrics", {})) or {})
+            if "tracking_rmse" in path_fit:
+                tracking_rmse = _safe_float(path_fit.get("tracking_rmse"))
+                path_values["shanghai_tracking_rmse"].append(tracking_rmse)
+                path_values["shanghai_alignment_score"].append(_clip(1.0 - tracking_rmse * 8.0, 0.0, 1.0))
+            if "event_window_direction_hit_rate" in path_fit:
+                path_values["event_direction_hit_rate"].append(_safe_float(path_fit.get("event_window_direction_hit_rate")))
+            if "abnormal_return_error" in path_fit:
+                path_values["abnormal_return_error"].append(_safe_float(path_fit.get("abnormal_return_error")))
             beliefs = dict(chain.get("agent_beliefs", {}) or {})
             for key, source_key in (
                 ("spread", "spread_pct"),
@@ -233,6 +255,10 @@ class ObjectiveDiscoveryEngine:
 
         candidates = {
             "shanghai_index_return": float(close.iloc[-1] / max(close.iloc[0], 1e-12) - 1.0) if len(close) else 0.0,
+            "shanghai_tracking_rmse": _avg(path_values["shanghai_tracking_rmse"]),
+            "shanghai_alignment_score": _avg(path_values["shanghai_alignment_score"]) if path_values["shanghai_alignment_score"] else 1.0,
+            "event_direction_hit_rate": _avg(path_values["event_direction_hit_rate"]),
+            "abnormal_return_error": _avg(path_values["abnormal_return_error"]),
             "index_return": float(close.iloc[-1] / max(close.iloc[0], 1e-12) - 1.0) if len(close) else 0.0,
             "max_drawdown": float(abs(drawdown.min())) if len(drawdown) else 0.0,
             "realized_volatility": float(returns.std()) if len(returns) else 0.0,
@@ -297,10 +323,10 @@ class ObjectiveDiscoveryEngine:
             + 0.17 * historical_alignment
             + 0.17 * early_warning
         )
-        relation = "self" if name == "shanghai_index_return" else (
+        relation = "self" if name in {"shanghai_index_return", "shanghai_tracking_rmse", "shanghai_alignment_score"} else (
             "leading" if name in {"panic_level", "belief_dispersion", "credit_spread", "liquidity_thinness"} else
             "complement" if name in {"microstructure_score", "financing_function", "fairness_compliance"} else
-            "lagging" if name in {"max_drawdown", "realized_volatility"} else
+            "lagging" if name in {"max_drawdown", "realized_volatility", "abnormal_return_error"} else
             "alternative"
         )
         explanation = (

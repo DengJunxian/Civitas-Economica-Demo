@@ -103,13 +103,16 @@ def render_regulator_optimization() -> None:
     summary = result.get("training_summary", {}) if isinstance(result, dict) else {}
     reproducibility = result.get("reproducibility", {}) if isinstance(result, dict) else {}
     recommendation = result.get("recommendation", {}) if isinstance(result, dict) else {}
+    blackbox = result.get("blackbox_optimization", {}) if isinstance(result, dict) else {}
+    opt_report = result.get("optimization_report", {}) if isinstance(result, dict) else {}
     frames = _build_regulator_result_frames(result)
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("平均回合收益", f"{float(summary.get('avg_episode_reward', 0.0)):.4f}")
     c2.metric("最优动作得分", f"{float(summary.get('best_action_score', 0.0)):.4f}")
     c3.metric("帕累托点数", str(len(frames["pareto"])))
     c4.metric("Q 状态数", str(int(summary.get("q_states", 0))))
+    c5.metric("默认路径", str(result.get("default_production_path", "q_learning_baseline")))
 
     st.markdown("### 发现目标约束")
     render_discovered_metrics_panel(result.get("discovered_objectives", {}), key_prefix="regulator_objectives")
@@ -128,6 +131,48 @@ def render_regulator_optimization() -> None:
             f"path={env_selection.get('selected_path', '')} | "
             f"fallback={env_selection.get('fallback_used', False)}"
         )
+
+    st.markdown("### 黑箱多目标优化")
+    if isinstance(blackbox, dict) and blackbox:
+        bo_best = dict(blackbox.get("bayesian_optimization", {}).get("best", {}) or {})
+        validation = dict(blackbox.get("validation", {}) or {})
+        report_best = dict(opt_report.get("best_solution", {}) or {})
+        st.caption(
+            "BO 用于静态政策包搜索；NSGA-II 输出多目标 Pareto；晋升默认路径需在两个固定 replay window 同时优于规则 baseline。"
+        )
+        cols = st.columns(4)
+        cols[0].metric("BO 最优分", f"{float(bo_best.get('score', 0.0)):.4f}")
+        cols[1].metric("稳定胜场", f"{int(validation.get('stable_win_count', 0))}/{int(validation.get('required_windows', 2))}")
+        cols[2].metric("晋升默认", str(bool(validation.get("promote_blackbox_default", False))))
+        cols[3].metric("NSGA 点数", str(len(blackbox.get("nsga_ii", {}).get("pareto_frontier", []) or [])))
+        if report_best:
+            st.dataframe(pd.DataFrame([report_best.get("metrics", {})]), use_container_width=True, hide_index=True)
+        if validation.get("windows"):
+            st.dataframe(pd.DataFrame(validation.get("windows", [])), use_container_width=True, hide_index=True)
+        nsga_pareto = blackbox.get("nsga_ii", {}).get("pareto_frontier", [])
+        if nsga_pareto:
+            pareto_rows = []
+            for row in nsga_pareto:
+                if not isinstance(row, dict):
+                    continue
+                metrics = dict(row.get("metrics", {}) or {})
+                objectives = dict(row.get("objectives", {}) or {})
+                pareto_rows.append({"score": row.get("score", 0.0), **metrics, **objectives})
+            if pareto_rows:
+                st.dataframe(pd.DataFrame(pareto_rows).head(20), use_container_width=True, hide_index=True)
+        render_narrative_block(
+            "黑箱优化报告解读",
+            {
+                "best_solution": opt_report.get("best_solution", {}),
+                "constraint_violations": opt_report.get("constraint_violations", {}),
+                "validation": opt_report.get("validation", {}),
+                "final_recommendation_text": opt_report.get("final_recommendation_text", ""),
+            },
+            context="请解释 BO、NSGA-II、规则 baseline 与 Q-learning 的关系，并说明为什么当前默认生产路径可以或不可以晋升。",
+            cache_namespace="regulator_opt_narrative_cache",
+        )
+    else:
+        st.info("暂无黑箱优化输出。")
 
     st.markdown("### 反事实对照（A/B）")
     left, right = st.columns(2)

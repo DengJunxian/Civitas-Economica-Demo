@@ -2,6 +2,21 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)) or default)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)) or default)
+    except (TypeError, ValueError):
+        return int(default)
+
+
 @dataclass(frozen=True)
 class SimConfig:
     """
@@ -50,7 +65,16 @@ class SimConfig:
     # 智谱 GLM API (快速模式专用)
     ZHIPU_API_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
     ZHIPU_API_KEY: Optional[str] = field(
-        default_factory=lambda: os.environ.get("ZHIPU_API_KEY")
+        default_factory=lambda: os.environ.get("ZHIPUAI_API_KEY") or os.environ.get("ZHIPU_API_KEY")
+    )
+    LLM_DEFAULT_PROVIDER: str = field(
+        default_factory=lambda: os.environ.get("LLM_DEFAULT_PROVIDER", "auto")
+    )
+    LLM_TIMEOUT_SECONDS: float = field(
+        default_factory=lambda: _env_float("LLM_TIMEOUT_SECONDS", 20.0)
+    )
+    LLM_MAX_RETRIES: int = field(
+        default_factory=lambda: _env_int("LLM_MAX_RETRIES", 2)
     )
     
     # --- 模型配置 ---
@@ -58,6 +82,8 @@ class SimConfig:
     # DeepSeek 模型
     MODEL_DEEPSEEK_REASONER: str = "deepseek-reasoner"
     MODEL_DEEPSEEK_CHAT: str = "deepseek-chat"
+    MODEL_DEEPSEEK_V4_PRO: str = "deepseek-v4-pro"
+    MODEL_DEEPSEEK_V4_FLASH: str = "deepseek-v4-flash"
     
 
     # 智谱GLM模型 (快速模式)

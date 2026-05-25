@@ -9,8 +9,7 @@ import os
 from types import ModuleType
 from typing import Optional, List, Any, cast
 
-from config import GLOBAL_CONFIG
-from core.model_router import ModelRouter
+from core.llm.router import sync_llm_complete
 
 _openai_module: Optional[ModuleType]
 try:
@@ -43,14 +42,12 @@ class APIBackend:
         self.temperature = temperature
         
         self._client: Optional[Any] = None
-        self._router: Optional[ModelRouter] = None
-        try:
-            self._router = ModelRouter(
-                deepseek_key=self.api_key or "",
-                zhipu_key=GLOBAL_CONFIG.ZHIPU_API_KEY or None,
-            )
-        except Exception:
-            self._router = None
+
+    def _mode_for_model(self) -> str:
+        name = str(self.model or "").lower()
+        if "v4-pro" in name or "reasoner" in name:
+            return "slow"
+        return "fast"
         
     def _get_client(self) -> Any:
         if self._client is None:
@@ -86,23 +83,22 @@ class APIBackend:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        if self._router is not None:
-            priority = [self.model, "deepseek-chat", "glm-4-flashx"]
-            ordered_priority = []
-            for item in priority:
-                if item and item not in ordered_priority:
-                    ordered_priority.append(item)
-            try:
-                content, _, _ = self._router.sync_call_with_fallback(
-                    messages=messages,
-                    priority_models=ordered_priority,
-                    timeout_budget=kwargs.get("timeout_budget", 30.0),
-                    fallback_response=kwargs.get("fallback_response"),
-                )
-                return content
-            except Exception:
-                # Fallback to legacy direct client path if router initialization/call fails.
-                pass
+        try:
+            routed = sync_llm_complete(
+                messages,
+                mode=kwargs.get("mode", self._mode_for_model()),
+                task_type=kwargs.get("task_type"),
+                model=self.model,
+                temperature=kwargs.get("temperature", self.temperature),
+                max_tokens=kwargs.get("max_tokens", self.max_tokens),
+                timeout=kwargs.get("timeout_budget", kwargs.get("timeout")),
+                fallback_response=kwargs.get("fallback_response"),
+            )
+            if routed.ok or kwargs.get("fallback_response") is not None:
+                return routed.text
+        except Exception:
+            # Fallback to legacy direct client path if router initialization/call fails.
+            pass
         
         try:
             client = self._get_client()

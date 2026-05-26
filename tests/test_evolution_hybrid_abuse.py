@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from core.exchange.evolution import EvolutionOperators, StrategyGenome
+from core.exchange.evolution import EvolutionOperators, StrategyEcologyConfig, StrategyEcologyEngine, StrategyGenome
 from core.regulatory_sandbox import MarketAbuseSandbox
 from engine.simulation_loop import MarketEnvironment
 from simulation_runner import BufferedIntent, SimulationRunner
@@ -49,6 +49,34 @@ def test_strategy_genome_operators_cover_selection_crossover_mutation_diffusion(
     assert 0.0 <= mutated.order_aggressiveness <= 1.0
     assert -0.5 <= mutated.stop_loss_threshold <= -0.005
     assert set(diffused.keys()) == {"a", "b"}
+
+
+def test_strategy_ecology_engine_selection_innovation_and_seeded_perturbation() -> None:
+    records = [
+        {"agent_id": "a1", "cohort_id": "alpha", "capital": 120.0, "wealth_return": 0.08},
+        {"agent_id": "a2", "cohort_id": "alpha", "capital": 120.0, "wealth_return": 0.06},
+        {"agent_id": "b1", "cohort_id": "beta", "capital": 80.0, "wealth_return": -0.03},
+        {"agent_id": "c1", "cohort_id": "rumor_trader", "capital": 60.0, "wealth_return": 0.01},
+    ]
+    cfg = StrategyEcologyConfig(seed=123, diversity_floor=0.04, noise_scale=0.02)
+    engine_a = StrategyEcologyEngine(cfg)
+    engine_b = StrategyEcologyEngine(cfg)
+
+    snap_a = engine_a.update(
+        tick=1,
+        cohort_records=records,
+        policy_context={"policy_regime": "restrictive", "rumor_pressure": 0.6, "policy_intensity": 1.0},
+    )
+    snap_b = engine_b.update(
+        tick=1,
+        cohort_records=records,
+        policy_context={"policy_regime": "restrictive", "rumor_pressure": 0.6, "policy_intensity": 1.0},
+    )
+
+    assert abs(sum(item.target_share for item in snap_a.cohorts.values()) - 1.0) < 1e-9
+    assert snap_a.cohorts["alpha"].selection_force > snap_a.cohorts["beta"].selection_force
+    assert snap_a.cohorts["beta"].target_share > 0.0
+    assert snap_a.to_dict() == snap_b.to_dict()
 
 
 def test_abuse_sandbox_detects_spoofing_sentiment_and_cancellation() -> None:
@@ -110,6 +138,9 @@ async def test_hybrid_replay_abuse_exports_and_ecology_metrics(tmp_path: Path) -
     )
     env.stylized_facts_report_path = tmp_path / "stylized_facts_report.json"
     env.ecology_metrics_path = tmp_path / "ecology_metrics.csv"
+    env.strategy_ecology_metrics_path = tmp_path / "strategy_ecology_metrics.csv"
+    env.strategy_ecology_report_path = tmp_path / "strategy_ecology_report.json"
+    env.social_propagation_report_path = tmp_path / "social_propagation_report.json"
     env.market_abuse_report_path = tmp_path / "market_abuse_report.json"
     env.intervention_effect_report_path = tmp_path / "intervention_effect_report.json"
 
@@ -121,12 +152,18 @@ async def test_hybrid_replay_abuse_exports_and_ecology_metrics(tmp_path: Path) -
 
     assert report["hybrid_replay"]["enabled"] is True
     assert report["hybrid_replay"]["point"] is not None
+    assert report["strategy_ecology"]["cohorts"]
     assert Path(report["ecology_metrics_path"]).exists()
+    assert Path(report["strategy_ecology_metrics_path"]).exists()
+    assert Path(report["strategy_ecology_report_path"]).exists()
+    assert Path(report["social_propagation_report_path"]).exists()
     assert Path(report["market_abuse_report_path"]).exists()
     assert Path(report["intervention_effect_report_path"]).exists()
 
     ecology = pd.read_csv(tmp_path / "ecology_metrics.csv")
     assert {"entropy", "hhi", "modularity", "phase_changes", "coalition_persistence"} <= set(ecology.columns)
+    strategy_ecology = pd.read_csv(tmp_path / "strategy_ecology_metrics.csv")
+    assert {"cohort_id", "target_share", "selection_force", "innovation_force", "perturbation_force"} <= set(strategy_ecology.columns)
 
     abuse = json.loads((tmp_path / "market_abuse_report.json").read_text(encoding="utf-8"))
     assert "events" in abuse

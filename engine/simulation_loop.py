@@ -32,6 +32,8 @@ from core.exchange.evolution import (
     EcologyMetricsRow,
     EcologyMetricsTracker,
     EvolutionOperators,
+    StrategyEcologyConfig,
+    StrategyEcologyEngine,
     StrategyGenome,
     approx_modularity,
     build_sentiment_coalitions,
@@ -49,8 +51,8 @@ from core.macro.state import MacroContextDTO, MacroState
 from core.market_engine import blend_price_with_backdrop
 from core.regulatory_sandbox import MarketAbuseSandbox
 from core.runtime_mode import RuntimeModeProfile, resolve_runtime_mode_profile
-from core.social.contagion import ContagionSnapshot, SocialContagionEngine
-from core.social.graph_state import SocialGraphState
+from core.social.contagion import ContagionSnapshot, SocialContagionEngine, SocialMessage
+from core.social.graph_state import SocialGraphState, SocialNodeType
 from core.world.event_bus import EventBus
 from engine.agent_scheduler import AgentScheduler
 from engine.market_match import calculate_new_price
@@ -228,6 +230,8 @@ class MarketEnvironment:
         government: Optional[GovernmentAgent] = None,
         bank: Optional[BankAgent] = None,
         contagion_engine: Optional[SocialContagionEngine] = None,
+        enable_strategy_ecology: Optional[bool] = None,
+        strategy_ecology_config: Optional[Mapping[str, Any]] = None,
     ):
         self.agents = agents
         self.simulation_time = 0
@@ -304,6 +308,26 @@ class MarketEnvironment:
             Path("outputs") / "ecology_metrics.csv",
             env_var="CIVITAS_ECOLOGY_METRICS_PATH",
         )
+        self.enable_strategy_ecology = (
+            _env_flag("CIVITAS_STRATEGY_ECOLOGY_V1", True)
+            if enable_strategy_ecology is None
+            else bool(enable_strategy_ecology)
+        )
+        ecology_cfg = dict(strategy_ecology_config or {})
+        ecology_cfg.setdefault("seed", 42)
+        self.strategy_ecology_engine = StrategyEcologyEngine(StrategyEcologyConfig.from_mapping(ecology_cfg))
+        self.strategy_ecology_metrics_path = resolve_runtime_path(
+            Path("outputs") / "strategy_ecology_metrics.csv",
+            env_var="CIVITAS_STRATEGY_ECOLOGY_METRICS_PATH",
+        )
+        self.strategy_ecology_report_path = resolve_runtime_path(
+            Path("outputs") / "strategy_ecology_report.json",
+            env_var="CIVITAS_STRATEGY_ECOLOGY_REPORT_PATH",
+        )
+        self.social_propagation_report_path = resolve_runtime_path(
+            Path("outputs") / "social_propagation_report.json",
+            env_var="CIVITAS_SOCIAL_PROPAGATION_REPORT_PATH",
+        )
         self.market_abuse_report_path = resolve_runtime_path(
             Path("outputs") / "market_abuse_report.json",
             env_var="CIVITAS_MARKET_ABUSE_REPORT_PATH",
@@ -343,7 +367,11 @@ class MarketEnvironment:
         self.runtime_event_queue.event_bus = self.event_bus
         self.government = government or GovernmentAgent()
         self.bank = bank or BankAgent()
-        self.contagion_engine = contagion_engine or SocialContagionEngine()
+        self.contagion_engine = contagion_engine or SocialContagionEngine(
+            feature_flag=_env_flag("CIVITAS_SOCIAL_PROPAGATION_V2", True),
+            seed=42,
+            config={"scenario": "market_environment"},
+        )
         self.households = list(households) if households is not None else self._build_default_households(24)
         self.firms = list(firms) if firms is not None else self._build_default_firms()
         self.social_graph = social_graph or self._build_default_social_graph()
@@ -514,6 +542,127 @@ class MarketEnvironment:
         out["debate_participation"] = float(genome.debate_participation)
         return out
 
+    def _cohort_id_for_agent(self, agent: Any, genome: Optional[StrategyGenome] = None) -> str:
+        persona = getattr(agent, "persona", None)
+        archetype = str(getattr(persona, "archetype_key", "") or "").strip()
+        if archetype:
+            return archetype
+        if genome is not None:
+            return f"genome:{genome.signature_key()}"
+        return str(getattr(agent, "agent_id", "unknown")).split("_")[0] or "unknown"
+
+    def _wealth_return_for_agent(self, agent_id: str) -> float:
+        history = self._wealth_history.get(agent_id, [])
+        if len(history) >= 2 and history[0] > 0:
+            start = float(history[0])
+            end = float(history[-1])
+            return float(end / start - 1.0)
+        initial = float(self._initial_cash.get(agent_id, 0.0) or 0.0)
+        if initial <= 0:
+            return 0.0
+        current = history[-1] if history else initial
+        return float(current / initial - 1.0)
+
+    def _strategy_ecology_records(self) -> List[Dict[str, Any]]:
+        records: List[Dict[str, Any]] = []
+        for agent in self.agents:
+            agent_id = str(getattr(agent, "agent_id", getattr(agent, "id", "")) or "")
+            if not agent_id:
+                continue
+            genome = self._agent_genomes.get(agent_id)
+            cohort_id = self._cohort_id_for_agent(agent, genome)
+            cash = float(getattr(agent, "cash", 0.0) or 0.0)
+            portfolio = getattr(agent, "portfolio", {}) or {}
+            holding = float(sum(float(qty) for qty in portfolio.values())) if isinstance(portfolio, Mapping) else 0.0
+            capital = max(0.0, cash + holding * float(self.current_price))
+            records.append(
+                {
+                    "agent_id": agent_id,
+                    "cohort_id": cohort_id,
+                    "label": cohort_id.replace("genome:", "genome "),
+                    "capital": capital,
+                    "wealth_return": self._wealth_return_for_agent(agent_id),
+                    "genome_signature": genome.signature_key() if genome is not None else "",
+                }
+            )
+        return records
+
+    def _strategy_policy_context(
+        self,
+        *,
+        policy_text: Optional[str],
+        policy_intensity: float,
+        contagion: Optional[ContagionSnapshot],
+        market_return: float,
+    ) -> Dict[str, Any]:
+        impact = getattr(self._last_event_digest, "aggregate_impact", None)
+        affected = list(getattr(impact, "affected_cohorts", []) or []) if impact is not None else []
+        rumor_pressure = 0.0
+        if contagion is not None:
+            rumor_pressure = float((contagion.rumor_suppression or {}).get("rumor_heat_before", 0.0))
+            rumor_pressure += float((contagion.cascade_metrics or {}).get("polarization", 0.0)) * 0.2
+        social_delta = dict(getattr(impact, "social_delta", {}) or {}) if impact is not None else {}
+        rumor_pressure += max(0.0, float(social_delta.get("rumor_pressure", 0.0) or 0.0))
+        returns = list(self.stylized_facts_tracker.market_returns[-10:])
+        volatility = float(np.std(np.asarray(returns, dtype=float))) if returns else abs(float(market_return))
+        direction = str(getattr(impact, "direction", "neutral") or "neutral") if impact is not None else "neutral"
+        if policy_text and direction == "neutral":
+            direction = "policy"
+        return {
+            "policy_text": policy_text or "",
+            "policy_intensity": float(policy_intensity),
+            "aggregate_strength": float(getattr(self._last_event_digest, "aggregate_strength", 0.0) or 0.0),
+            "policy_regime": direction,
+            "affected_cohorts": affected,
+            "rumor_pressure": float(rumor_pressure),
+            "sentiment_shift": float(self.macro_state.sentiment_index - 0.5),
+            "sentiment_volatility": float(volatility),
+            "market_return": float(market_return),
+        }
+
+    def _update_strategy_ecology(
+        self,
+        *,
+        policy_text: Optional[str],
+        policy_intensity: float,
+        contagion: Optional[ContagionSnapshot],
+        market_return: float,
+    ) -> Dict[str, Any]:
+        if not self.enable_strategy_ecology:
+            return {}
+        snapshot = self.strategy_ecology_engine.update(
+            tick=int(self.simulation_time),
+            cohort_records=self._strategy_ecology_records(),
+            policy_context=self._strategy_policy_context(
+                policy_text=policy_text,
+                policy_intensity=policy_intensity,
+                contagion=contagion,
+                market_return=market_return,
+            ),
+        )
+        return snapshot.to_dict()
+
+    def _bdi_context_for_agent(
+        self,
+        agent: Any,
+        behavioral_state: Mapping[str, Any],
+        contagion: ContagionSnapshot,
+    ) -> Dict[str, Any]:
+        agent_id = str(getattr(agent, "agent_id", "unknown"))
+        packet = dict((contagion.bdi_observation_packets or {}).get(agent_id, {}) or {})
+        belief = dict(packet.get("belief", {}) or {})
+        desire = dict(packet.get("desire", {}) or {})
+        intention = dict(packet.get("intention", {}) or {})
+        belief.setdefault("macro_sentiment_index", float(self.macro_state.sentiment_index))
+        belief.setdefault("social_mean_sentiment", float(contagion.mean_sentiment))
+        belief.setdefault("policy_id", str(getattr(getattr(self._last_policy_package, "event", None), "policy_id", "")))
+        desire.setdefault("risk_appetite", float(behavioral_state.get("risk_appetite", 0.5) or 0.5))
+        desire.setdefault("information_need", float(abs(behavioral_state.get("trading_intent", 0.0) or 0.0)))
+        trade_bias = float(behavioral_state.get("trading_intent", 0.0) or 0.0)
+        intention.setdefault("trading_bias", trade_bias)
+        intention.setdefault("candidate_action", "BUY" if trade_bias > 0.08 else ("SELL" if trade_bias < -0.08 else "HOLD"))
+        return {"belief": belief, "desire": desire, "intention": intention}
+
     def close(self) -> None:
         """Release subprocess resources if this environment owns the runner."""
         if self.stylized_facts_tracker.market_returns:
@@ -527,6 +676,16 @@ class MarketEnvironment:
             self.last_step_report["ecology_metrics_path"] = str(eco)
         except Exception as exc:
             logger.warning("Failed to save ecology metrics: %s", exc)
+        if self.enable_strategy_ecology:
+            try:
+                self.last_step_report["strategy_ecology_metrics_path"] = str(
+                    self.strategy_ecology_engine.save_csv(self.strategy_ecology_metrics_path)
+                )
+                self.last_step_report["strategy_ecology_report_path"] = str(
+                    self.strategy_ecology_engine.save_report(self.strategy_ecology_report_path)
+                )
+            except Exception as exc:
+                logger.warning("Failed to save strategy ecology report: %s", exc)
         try:
             abuse = self.abuse_sandbox.save_report(self.market_abuse_report_path)
             self.last_step_report["market_abuse_report_path"] = str(abuse)
@@ -1221,6 +1380,7 @@ class MarketEnvironment:
                     retrieved_context = ""
             payload = dict(market_data)
             payload["behavioral_context"] = behavioral_state
+            payload["bdi_context"] = self._bdi_context_for_agent(agent, behavioral_state, contagion)
             payload["risk_appetite"] = behavioral_state.get("risk_appetite", 0.5)
             payload["trading_intent"] = behavioral_state.get("trading_intent", 0.0)
             payload["loss_aversion_intensity"] = behavioral_state.get("loss_aversion_intensity", 2.25)
@@ -1521,6 +1681,13 @@ class MarketEnvironment:
             loss_aversion_intensity=loss_intensity,
         )
         ecology_metrics = self._record_ecology_metrics(actions_by_agent=actions_by_agent, market_return=float(market_return))
+        self._update_wealth_history()
+        strategy_ecology = self._update_strategy_ecology(
+            policy_text=policy_text,
+            policy_intensity=float(policy_intensity),
+            contagion=contagion,
+            market_return=float(market_return),
+        )
         intervention_report_path = self._save_intervention_effect_report()
 
         self.price_history.append(self.current_price)
@@ -1657,6 +1824,8 @@ class MarketEnvironment:
             },
             "transmission_chain": transmission_chain,
             "ecology_metrics": ecology_metrics,
+            "strategy_ecology": strategy_ecology,
+            "social_propagation_report_path": str(self.social_propagation_report_path),
             "abuse_detection": abuse_detection,
             "hybrid_replay": {
                 "enabled": bool(self.hybrid_replay),
@@ -1693,6 +1862,16 @@ class MarketEnvironment:
             self.last_step_report["ecology_metrics_path"] = str(self.ecology_tracker.save_csv(self.ecology_metrics_path))
         except Exception as exc:
             logger.warning("Failed to persist ecology metrics at tick %s: %s", self.simulation_time, exc)
+        if self.enable_strategy_ecology:
+            try:
+                self.last_step_report["strategy_ecology_metrics_path"] = str(
+                    self.strategy_ecology_engine.save_csv(self.strategy_ecology_metrics_path)
+                )
+                self.last_step_report["strategy_ecology_report_path"] = str(
+                    self.strategy_ecology_engine.save_report(self.strategy_ecology_report_path)
+                )
+            except Exception as exc:
+                logger.warning("Failed to persist strategy ecology at tick %s: %s", self.simulation_time, exc)
         try:
             self.last_step_report["market_abuse_report_path"] = str(
                 self.abuse_sandbox.save_report(self.market_abuse_report_path)
@@ -1700,7 +1879,6 @@ class MarketEnvironment:
         except Exception as exc:
             logger.warning("Failed to persist abuse report at tick %s: %s", self.simulation_time, exc)
         self.last_step_report["intervention_effect_report_path"] = str(intervention_report_path)
-        self._update_wealth_history()
 
         if self.simulation_time % self.steps_per_day == 0:
             self._day_count += 1
@@ -1880,13 +2058,53 @@ class MarketEnvironment:
         if event_digest is not None:
             social_delta = dict(getattr(event_digest.aggregate_impact, "social_delta", {}) or {})
             rumor += float(social_delta.get("rumor_pressure", 0.0) or 0.0)
-        contagion = self.contagion_engine.step(self.social_graph, self.macro_state, rumor_shock=rumor)
+        messages: List[SocialMessage] = []
+        if event_digest is not None and hasattr(self.contagion_engine, "messages_from_event_digest"):
+            messages.extend(self.contagion_engine.messages_from_event_digest(event_digest, tick=self.simulation_time))
+        if policy_shock is not None and abs(float(policy_shock.sentiment_delta)) > 1e-12:
+            messages.append(
+                SocialMessage(
+                    message_id=f"policy_sentiment_{self.simulation_time}",
+                    topic="policy_sentiment",
+                    source_id="runtime_official_media",
+                    source_type=SocialNodeType.OFFICIAL_MEDIA.value,
+                    kind="policy",
+                    polarity=float(_clip(policy_shock.sentiment_delta, -1.0, 1.0)),
+                    strength=max(0.1, abs(float(policy_shock.sentiment_delta))),
+                    credibility=0.82,
+                    created_tick=self.simulation_time,
+                    scheduled_tick=self.simulation_time,
+                    source_reliability_band="high",
+                    coverage_ratio=0.80,
+                    metadata={"policy_id": policy_shock.policy_id},
+                )
+            )
+        contagion = self.contagion_engine.step(
+            self.social_graph,
+            self.macro_state,
+            rumor_shock=rumor,
+            messages=messages,
+            tick=self.simulation_time,
+        )
         self._last_social_mean = contagion.mean_sentiment
         self.macro_state.sentiment_index = _clip(
             0.75 * self.macro_state.sentiment_index + 0.25 * ((contagion.mean_sentiment + 1.0) * 0.5),
             0.0,
             1.0,
         )
+        try:
+            self.contagion_engine.write_report(
+                contagion,
+                self.social_graph,
+                self.social_propagation_report_path,
+                metadata={
+                    "tick": self.simulation_time,
+                    "policy_id": getattr(policy_shock, "policy_id", "") if policy_shock is not None else "",
+                    "runtime_event_hash": getattr(event_digest, "event_hash", "") if event_digest is not None else "",
+                },
+            )
+        except Exception as exc:
+            logger.warning("Failed to write social propagation report: %s", exc)
         self.event_bus.publish(
             event_type="social_contagion",
             stage="social_contagion",
@@ -2097,6 +2315,23 @@ class MarketEnvironment:
         selected_ids = self._evolution_ops.selection({aid: returns.get(aid, 0.0) for aid in survivor_ids}, survival_rate=0.5)
         if not selected_ids and survivor_ids:
             selected_ids = survivor_ids[:1]
+        ecology_snapshot = self.strategy_ecology_engine.latest() if self.enable_strategy_ecology else None
+        target_shares = {
+            cid: float(state.target_share)
+            for cid, state in (ecology_snapshot.cohorts.items() if ecology_snapshot is not None else [])
+        }
+        current_counts: Dict[str, int] = defaultdict(int)
+        for agent in self.agents:
+            aid = str(agent.agent_id)
+            current_counts[self._cohort_id_for_agent(agent, self._agent_genomes.get(aid))] += 1
+        total_survivors = max(1, len(self.agents))
+        cohort_deficits = {
+            cid: float(target_shares.get(cid, 0.0) - current_counts.get(cid, 0) / total_survivors)
+            for cid in target_shares
+        }
+        target_parent_cohorts = [
+            cid for cid, deficit in sorted(cohort_deficits.items(), key=lambda item: item[1], reverse=True) if deficit > 0
+        ]
 
         # Local diffusion over existing topology
         adjacency = {node_id: list(nei) for node_id, nei in self.social_graph.adjacency.items()}
@@ -2119,8 +2354,18 @@ class MarketEnvironment:
             per_capital = budget / n_offspring if n_offspring > 0 else 0.0
             id_to_agent = {str(a.agent_id): a for a in self.agents}
             for _ in range(n_offspring):
-                pa_id = random.choice(selected_ids)
-                pb_id = random.choice(selected_ids)
+                preferred_ids = selected_ids
+                if target_parent_cohorts:
+                    target_cohort = target_parent_cohorts[0]
+                    cohort_ids = [
+                        aid
+                        for aid in selected_ids
+                        if self._cohort_id_for_agent(id_to_agent.get(aid), self._agent_genomes.get(aid)) == target_cohort
+                    ]
+                    if cohort_ids:
+                        preferred_ids = cohort_ids
+                pa_id = random.choice(preferred_ids)
+                pb_id = random.choice(preferred_ids if len(preferred_ids) > 1 else selected_ids)
                 pa = self._agent_genomes.get(pa_id, StrategyGenome.random())
                 pb = self._agent_genomes.get(pb_id, StrategyGenome.random())
                 child_genome = self._evolution_ops.mutation(self._evolution_ops.crossover(pa, pb))
@@ -2168,6 +2413,8 @@ class MarketEnvironment:
             "selection": selected_ids,
             "mutation": mutated_ids,
             "local_diffusion": list(diffused.keys()),
+            "cohort_targets": target_shares,
+            "cohort_deficits": cohort_deficits,
             "freed_capital": float(freed_capital),
             "survivors": len(self.agents),
         }

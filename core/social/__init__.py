@@ -2,9 +2,11 @@
 
 from core.social.contagion import (
     ContagionSnapshot,
+    MediaRecommendationEngine,
     PropagationTrace,
     SocialContagionEngine,
     SocialMessage,
+    SocialPost,
     build_social_propagation_report,
     write_social_propagation_report,
 )
@@ -21,10 +23,12 @@ __all__ = [
     "DEFAULT_NODE_PROFILES",
     "EdgeProfile",
     "GraphNodeState",
+    "MediaRecommendationEngine",
     "PropagationTrace",
     "SocialContagionEngine",
     "SocialGraphState",
     "SocialMessage",
+    "SocialPost",
     "SocialNodeType",
     "build_social_propagation_report",
     "write_social_propagation_report",

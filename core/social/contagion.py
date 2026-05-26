@@ -44,6 +44,7 @@ class SocialMessage:
     topic: str
     source_id: str
     source_type: str
+    message_id: str = ""
     kind: str = "rumor"
     polarity: float = 0.0
     strength: float = 1.0
@@ -57,10 +58,208 @@ class SocialMessage:
     source_reliability_band: str = "medium"
     diffusion_velocity: float = 1.0
     rebuttal_of: str = ""
+    parent_message_id: str = ""
+    root_message_id: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class SocialPost:
+    """Social-media post used by the recommendation and cascade layer."""
+
+    post_id: str
+    author_id: str
+    topic: str
+    source_type: str = SocialNodeType.SOCIAL_MEDIA.value
+    kind: str = "opinion"
+    polarity: float = 0.0
+    strength: float = 1.0
+    credibility: float = 0.5
+    created_tick: int = 0
+    upvotes: int = 0
+    downvotes: int = 0
+    repost_of: str = ""
+    content: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "SocialPost":
+        return cls(
+            post_id=str(payload.get("post_id", payload.get("id", f"post_{uuid.uuid4().hex[:8]}"))),
+            author_id=str(payload.get("author_id", payload.get("source_id", "synthetic_source"))),
+            topic=str(payload.get("topic", "market")),
+            source_type=str(payload.get("source_type", SocialNodeType.SOCIAL_MEDIA.value)),
+            kind=str(payload.get("kind", "opinion")),
+            polarity=float(payload.get("polarity", 0.0)),
+            strength=float(payload.get("strength", 1.0)),
+            credibility=float(payload.get("credibility", 0.5)),
+            created_tick=int(payload.get("created_tick", 0)),
+            upvotes=int(payload.get("upvotes", payload.get("likes", 0)) or 0),
+            downvotes=int(payload.get("downvotes", payload.get("unlikes", 0)) or 0),
+            repost_of=str(payload.get("repost_of", "")),
+            content=str(payload.get("content", payload.get("raw_text", ""))),
+            metadata=dict(payload.get("metadata", {})),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    def to_message(self, *, target_id: str, current_tick: int, hot_score: float, rank: int) -> SocialMessage:
+        chain_depth = int(self.metadata.get("cascade_depth", 1) or 1)
+        if self.repost_of:
+            chain_depth = max(chain_depth, 2)
+        return SocialMessage(
+            message_id=f"rec_{self.post_id}_{target_id}_{current_tick}",
+            topic=self.topic,
+            source_id=self.author_id,
+            source_type=self.source_type,
+            kind=self.kind,
+            polarity=float(self.polarity),
+            strength=float(max(0.05, self.strength) * (0.55 + min(1.0, hot_score))),
+            credibility=float(_clip(self.credibility, 0.0, 1.0)),
+            created_tick=int(self.created_tick),
+            scheduled_tick=int(current_tick),
+            decay=0.16,
+            amplification=1.0 + min(1.0, hot_score),
+            coverage_ratio=0.5,
+            source_reliability_band=_reliability_band(float(self.credibility)),
+            diffusion_velocity=1.0,
+            parent_message_id=str(self.repost_of),
+            root_message_id=str(self.repost_of or self.post_id),
+            metadata={
+                **dict(self.metadata),
+                "recommendation": True,
+                "recommendation_target": str(target_id),
+                "source_post_id": self.post_id,
+                "hot_score": float(hot_score),
+                "recommendation_rank": int(rank),
+                "cascade_depth": int(chain_depth),
+            },
+        )
+
+
+@dataclass(slots=True)
+class MediaRecommendationEngine:
+    """TwinMarket-inspired hot-score recommender for social exposure."""
+
+    top_k: int = 3
+    similarity_threshold: float = 0.18
+    half_life_ticks: float = 14.0
+    time_decay_power: float = 1.8
+    centrality_weight: float = 0.35
+    engagement_weight: float = 1.0
+    seed: int = 0
+
+    @classmethod
+    def from_mapping(cls, payload: Optional[Mapping[str, Any]] = None) -> "MediaRecommendationEngine":
+        if not payload:
+            return cls()
+        allowed = {
+            "top_k",
+            "similarity_threshold",
+            "half_life_ticks",
+            "time_decay_power",
+            "centrality_weight",
+            "engagement_weight",
+            "seed",
+        }
+        return cls(**{key: value for key, value in dict(payload).items() if key in allowed})
+
+    def _centrality(self, graph: SocialGraphState) -> Dict[str, float]:
+        if not graph.nodes:
+            return {}
+        denom = max(1.0, float(len(graph.nodes) - 1))
+        incoming: Dict[str, int] = {node_id: 0 for node_id in graph.nodes}
+        for _, neighbors in graph.adjacency.items():
+            for dst in neighbors:
+                if dst in incoming:
+                    incoming[dst] += 1
+        return {
+            node_id: float((len(graph.adjacency.get(node_id, [])) + incoming.get(node_id, 0)) / (2.0 * denom))
+            for node_id in graph.nodes
+        }
+
+    def hot_score(self, post: SocialPost | Mapping[str, Any], *, current_tick: int) -> float:
+        item = post if isinstance(post, SocialPost) else SocialPost.from_mapping(post)
+        engagement = max(0.0, float(item.upvotes - item.downvotes))
+        age = max(0.0, float(current_tick - item.created_tick))
+        time_term = (age / max(float(self.half_life_ticks), 1e-6) + 1.0) ** float(self.time_decay_power)
+        return float((math.log10(engagement + 1.0) + 0.15 * abs(item.polarity) + 0.05) / time_term)
+
+    def recommendation_trace(
+        self,
+        graph: SocialGraphState,
+        posts: Sequence[SocialPost | Mapping[str, Any]],
+        *,
+        current_tick: int,
+    ) -> List[Dict[str, Any]]:
+        normalized = [post if isinstance(post, SocialPost) else SocialPost.from_mapping(post) for post in posts]
+        centrality = self._centrality(graph)
+        rows: List[Dict[str, Any]] = []
+        for target_id in graph.nodes:
+            candidates: List[Tuple[float, SocialPost, float]] = []
+            for post in normalized:
+                if post.author_id == target_id:
+                    continue
+                edge_info = graph.get_edge_profile(target_id, post.author_id)
+                author_neighbors = graph.adjacency.get(target_id, [])
+                connected = post.author_id in author_neighbors or target_id in graph.adjacency.get(post.author_id, [])
+                similarity = max(
+                    float(edge_info.position_similarity_edge),
+                    float(edge_info.news_exposure_edge) * 0.75,
+                    0.35 if connected else 0.0,
+                )
+                if similarity < float(self.similarity_threshold) and centrality.get(post.author_id, 0.0) < 0.35:
+                    continue
+                hot = self.hot_score(post, current_tick=current_tick)
+                score = hot * (0.35 + similarity) * (1.0 + self.centrality_weight * centrality.get(post.author_id, 0.0))
+                score *= 1.0 + self.engagement_weight * min(1.0, max(0.0, post.upvotes - post.downvotes) / 50.0)
+                candidates.append((float(score), post, float(hot)))
+            candidates.sort(key=lambda item: item[0], reverse=True)
+            for rank, (score, post, hot) in enumerate(candidates[: max(1, int(self.top_k))], start=1):
+                rows.append(
+                    {
+                        "target_id": target_id,
+                        "post_id": post.post_id,
+                        "author_id": post.author_id,
+                        "topic": post.topic,
+                        "score": float(score),
+                        "hot_score": float(hot),
+                        "rank": int(rank),
+                        "author_centrality": float(centrality.get(post.author_id, 0.0)),
+                        "repost_of": post.repost_of,
+                    }
+                )
+        return rows
+
+    def build_messages(
+        self,
+        graph: SocialGraphState,
+        posts: Sequence[SocialPost | Mapping[str, Any]],
+        *,
+        current_tick: int,
+    ) -> Tuple[List[SocialMessage], List[Dict[str, Any]]]:
+        normalized = [post if isinstance(post, SocialPost) else SocialPost.from_mapping(post) for post in posts]
+        by_id = {post.post_id: post for post in normalized}
+        trace = self.recommendation_trace(graph, normalized, current_tick=current_tick)
+        messages: List[SocialMessage] = []
+        for row in trace:
+            post = by_id.get(str(row.get("post_id", "")))
+            if post is None:
+                continue
+            message = post.to_message(
+                target_id=str(row["target_id"]),
+                current_tick=current_tick,
+                hot_score=float(row.get("hot_score", 0.0)),
+                rank=int(row.get("rank", 1)),
+            )
+            if post.author_id in graph.nodes:
+                message.source_type = graph.nodes[post.author_id].node_type
+            messages.append(message)
+        return messages, trace
 
 
 @dataclass(slots=True)
@@ -108,6 +307,11 @@ class ContagionSnapshot:
     observation_packets: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     source_rankings: List[Dict[str, Any]] = field(default_factory=list)
     rumor_suppression: Dict[str, float] = field(default_factory=dict)
+    opinion_leaders: List[Dict[str, Any]] = field(default_factory=list)
+    cascade_metrics: Dict[str, float] = field(default_factory=dict)
+    recommendation_trace: List[Dict[str, Any]] = field(default_factory=list)
+    clarification_metrics: Dict[str, float] = field(default_factory=dict)
+    bdi_observation_packets: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, object]:
@@ -130,6 +334,13 @@ class SocialContagionEngine:
     config: Dict[str, Any] = field(default_factory=dict)
     current_tick: int = 0
     event_queue: List[SocialMessage] = field(default_factory=list)
+    recommendation_engine: Optional[MediaRecommendationEngine] = None
+
+    def __post_init__(self) -> None:
+        if self.recommendation_engine is None:
+            rec_cfg = dict(self.config.get("recommendation", {}) or {}) if isinstance(self.config, Mapping) else {}
+            rec_cfg.setdefault("seed", int(self.seed))
+            self.recommendation_engine = MediaRecommendationEngine.from_mapping(rec_cfg)
 
     def _edge_weight(self, graph: SocialGraphState, src: str, dst: str) -> Dict[str, float]:
         profile = graph.get_edge_profile(src, dst) if hasattr(graph, "get_edge_profile") else None
@@ -165,6 +376,7 @@ class SocialContagionEngine:
         else:
             credibility = float(message.get("credibility", 0.5))
             payload = SocialMessage(
+                message_id=str(message.get("message_id", "")),
                 topic=str(message.get("topic", "market")),
                 source_id=str(message.get("source_id", "synthetic_source")),
                 source_type=str(message.get("source_type", SocialNodeType.RUMOR_SOURCE.value)),
@@ -181,6 +393,8 @@ class SocialContagionEngine:
                 source_reliability_band=str(message.get("source_reliability_band", _reliability_band(credibility))),
                 diffusion_velocity=float(message.get("diffusion_velocity", 1.0)),
                 rebuttal_of=str(message.get("rebuttal_of", "")),
+                parent_message_id=str(message.get("parent_message_id", "")),
+                root_message_id=str(message.get("root_message_id", "")),
                 metadata=dict(message.get("metadata", {})),
             )
         self.event_queue.append(payload)
@@ -312,6 +526,7 @@ class SocialContagionEngine:
             else:
                 normalized.append(
                     SocialMessage(
+                        message_id=str(message.get("message_id", "")),
                         topic=str(message.get("topic", "market")),
                         source_id=str(message.get("source_id", "synthetic_source")),
                         source_type=str(message.get("source_type", SocialNodeType.RUMOR_SOURCE.value)),
@@ -328,10 +543,141 @@ class SocialContagionEngine:
                         source_reliability_band=str(message.get("source_reliability_band", _reliability_band(float(message.get("credibility", 0.5))))),
                         diffusion_velocity=float(message.get("diffusion_velocity", 1.0)),
                         rebuttal_of=str(message.get("rebuttal_of", "")),
+                        parent_message_id=str(message.get("parent_message_id", "")),
+                        root_message_id=str(message.get("root_message_id", "")),
                         metadata=dict(message.get("metadata", {})),
                     )
                 )
         return normalized
+
+    def _normalize_posts(
+        self,
+        posts: Optional[Iterable[SocialPost | Mapping[str, Any]]],
+    ) -> List[SocialPost]:
+        if not posts:
+            return []
+        normalized: List[SocialPost] = []
+        for post in posts:
+            normalized.append(post if isinstance(post, SocialPost) else SocialPost.from_mapping(post))
+        return normalized
+
+    def messages_from_event_digest(self, digest: Any, *, tick: Optional[int] = None) -> List[SocialMessage]:
+        """Map runtime event digests to social messages without importing event modules."""
+        if digest is None:
+            return []
+        if hasattr(digest, "to_dict"):
+            payload = digest.to_dict()
+        elif isinstance(digest, Mapping):
+            payload = dict(digest)
+        else:
+            return []
+        events = list(payload.get("active_events", []) or [])
+        by_type = payload.get("by_type", {}) if isinstance(payload.get("by_type", {}), Mapping) else {}
+        if not events:
+            for items in by_type.values():
+                if isinstance(items, list):
+                    events.extend(items)
+        current_tick = int(self.current_tick if tick is None else tick)
+        messages: List[SocialMessage] = []
+        for idx, event in enumerate(events):
+            if not isinstance(event, Mapping):
+                continue
+            event_type = str(event.get("event_type", event.get("type", "major_news")) or "major_news").lower()
+            strength = float(event.get("current_strength", event.get("strength", 1.0)) or 1.0)
+            confidence = float(_clip(event.get("confidence", 0.75), 0.0, 1.0))
+            title = str(event.get("title", event.get("raw_text", event_type)) or event_type)
+            topic = str(event.get("topic", title[:32]) or title[:32])
+            impact = event.get("impact", {}) if isinstance(event.get("impact", {}), Mapping) else {}
+            social_delta = impact.get("social_delta", {}) if isinstance(impact.get("social_delta", {}), Mapping) else {}
+            sentiment_hint = float(impact.get("sentiment_impact", social_delta.get("news_attention", 0.0)) or 0.0)
+            metadata = {
+                "runtime_event_id": str(event.get("event_id", "")),
+                "runtime_event_type": event_type,
+                "event_title": title,
+                "target_mode": "top_centrality" if event_type in {"major_news", "rumor"} else "",
+                "target_top_k": 5 if event_type == "rumor" else 3,
+            }
+            if event_type == "rumor":
+                messages.append(
+                    SocialMessage(
+                        message_id=f"runtime_rumor_{current_tick}_{idx}",
+                        topic=topic,
+                        source_id="runtime_rumor_source",
+                        source_type=SocialNodeType.RUMOR_SOURCE.value,
+                        kind="rumor",
+                        polarity=-abs(0.35 + 0.35 * strength),
+                        strength=max(0.1, strength),
+                        credibility=min(0.35, confidence * 0.45),
+                        created_tick=current_tick,
+                        scheduled_tick=current_tick,
+                        amplification=1.35,
+                        audience_tags=[SocialNodeType.KOL_SOCIAL.value, SocialNodeType.SOCIAL_MEDIA.value, SocialNodeType.RETAIL_DAY_TRADER.value],
+                        coverage_ratio=0.9,
+                        source_reliability_band="low",
+                        diffusion_velocity=1.4,
+                        metadata=metadata,
+                    )
+                )
+            elif event_type == "refute":
+                messages.append(
+                    SocialMessage(
+                        message_id=f"runtime_refute_{current_tick}_{idx}",
+                        topic=topic,
+                        source_id="runtime_regulator_voice",
+                        source_type=SocialNodeType.REGULATOR_VOICE.value,
+                        kind="refutation",
+                        polarity=abs(0.45 + 0.25 * strength),
+                        strength=max(0.1, strength),
+                        credibility=max(0.85, confidence),
+                        created_tick=current_tick,
+                        scheduled_tick=current_tick,
+                        amplification=1.25,
+                        coverage_ratio=0.95,
+                        source_reliability_band="high",
+                        diffusion_velocity=0.8,
+                        rebuttal_of=str(event.get("rebuttal_of", topic)),
+                        metadata={**metadata, "target_mode": ""},
+                    )
+                )
+            elif event_type in {"policy", "regulatory_action"}:
+                messages.append(
+                    SocialMessage(
+                        message_id=f"runtime_policy_{current_tick}_{idx}",
+                        topic=topic,
+                        source_id="runtime_official_media",
+                        source_type=SocialNodeType.OFFICIAL_MEDIA.value,
+                        kind="policy",
+                        polarity=float(_clip(sentiment_hint or 0.20 * strength, -1.0, 1.0)),
+                        strength=max(0.1, strength),
+                        credibility=max(0.75, confidence),
+                        created_tick=current_tick,
+                        scheduled_tick=current_tick,
+                        coverage_ratio=0.85,
+                        source_reliability_band="high",
+                        metadata={**metadata, "target_mode": ""},
+                    )
+                )
+            else:
+                polarity = float(_clip(sentiment_hint if abs(sentiment_hint) > 1e-9 else 0.10 * strength, -1.0, 1.0))
+                messages.append(
+                    SocialMessage(
+                        message_id=f"runtime_news_{current_tick}_{idx}",
+                        topic=topic,
+                        source_id="runtime_financial_media",
+                        source_type=SocialNodeType.FINANCIAL_MEDIA.value,
+                        kind="news",
+                        polarity=polarity,
+                        strength=max(0.1, strength),
+                        credibility=max(0.55, confidence),
+                        created_tick=current_tick,
+                        scheduled_tick=current_tick,
+                        amplification=1.10,
+                        coverage_ratio=0.70,
+                        source_reliability_band=_reliability_band(max(0.55, confidence)),
+                        metadata=metadata,
+                    )
+                )
+        return messages
 
     def _propagate_message(
         self,
@@ -344,7 +690,27 @@ class SocialContagionEngine:
         source_profile = source_node if source_node is not None else GraphNodeState(node_id=message.source_id)
         source_profile.apply_profile(message.source_type)
 
-        if message.source_id in graph.nodes:
+        metadata_targets = [str(item) for item in message.metadata.get("recommended_targets", []) or []]
+        if message.metadata.get("recommendation_target"):
+            metadata_targets.append(str(message.metadata.get("recommendation_target")))
+        if metadata_targets:
+            target_ids = [target_id for target_id in dict.fromkeys(metadata_targets) if target_id in graph.nodes]
+        elif str(message.metadata.get("target_mode", "")) == "top_centrality":
+            top_k = max(1, int(message.metadata.get("target_top_k", 3) or 3))
+            degree_rows = sorted(
+                (
+                    (
+                        node_id,
+                        len(graph.adjacency.get(node_id, []))
+                        + sum(1 for neighbors in graph.adjacency.values() if node_id in neighbors),
+                    )
+                    for node_id in graph.nodes
+                ),
+                key=lambda item: item[1],
+                reverse=True,
+            )
+            target_ids = [node_id for node_id, _ in degree_rows[:top_k]]
+        elif message.source_id in graph.nodes:
             target_ids = [message.source_id] + graph.adjacency.get(message.source_id, [])
         else:
             target_ids = list(graph.nodes.keys())
@@ -417,6 +783,7 @@ class SocialContagionEngine:
             target.last_seen_tick = received_tick
             target.record_event(
                 {
+                    "message_id": message.message_id,
                     "topic": message.topic,
                     "kind": message.kind,
                     "source_id": message.source_id,
@@ -429,9 +796,13 @@ class SocialContagionEngine:
                     "coverage_ratio": float(message.coverage_ratio),
                     "source_reliability_band": message.source_reliability_band,
                     "rebuttal_of": message.rebuttal_of,
+                    "parent_message_id": message.parent_message_id,
+                    "root_message_id": message.root_message_id,
+                    "recommendation": bool(message.metadata.get("recommendation", False)),
                 }
             )
             target.observation_state = {
+                "message_id": message.message_id,
                 "topic": message.topic,
                 "kind": message.kind,
                 "dominant_signal": signal,
@@ -442,7 +813,14 @@ class SocialContagionEngine:
                 "audience_tags": list(message.audience_tags),
                 "coverage_ratio": float(message.coverage_ratio),
                 "rebuttal_of": message.rebuttal_of,
+                "parent_message_id": message.parent_message_id,
+                "root_message_id": message.root_message_id,
+                "recommendation": bool(message.metadata.get("recommendation", False)),
             }
+            trace_metadata = dict(message.metadata)
+            trace_metadata.setdefault("message_id", message.message_id)
+            trace_metadata.setdefault("parent_message_id", message.parent_message_id)
+            trace_metadata.setdefault("root_message_id", message.root_message_id or message.message_id)
             traces.append(
                 PropagationTrace(
                     topic=message.topic,
@@ -466,7 +844,7 @@ class SocialContagionEngine:
                     source_reliability_band=message.source_reliability_band,
                     diffusion_velocity=float(message.diffusion_velocity),
                     rebuttal_of=message.rebuttal_of,
-                    metadata=dict(message.metadata),
+                    metadata=trace_metadata,
                 )
             )
             graph.record_observation(target_id, traces[-1].to_dict())
@@ -543,6 +921,30 @@ class SocialContagionEngine:
             node_id: graph.build_observation_payload(node_id, current_tick=self.current_tick)
             for node_id in graph.nodes.keys()
         }
+        bdi_packets: Dict[str, Dict[str, Any]] = {}
+        for node_id, packet in observation_packets.items():
+            memory_seed = dict(packet.get("memory_seed", {}) or {})
+            signal = float(memory_seed.get("dominant_signal", packet.get("sentiment", 0.0)) or 0.0)
+            rumor_pressure = float(memory_seed.get("rumor_pressure", 0.0) or 0.0)
+            refutation_pressure = float(memory_seed.get("refutation_pressure", 0.0) or 0.0)
+            bdi_packets[node_id] = {
+                "belief": {
+                    "topic": packet.get("topic", ""),
+                    "sentiment": float(packet.get("sentiment", 0.0)),
+                    "source_credibility": float(memory_seed.get("source_credibility", packet.get("source_credibility", 0.0)) or 0.0),
+                    "rumor_pressure": rumor_pressure,
+                    "refutation_pressure": refutation_pressure,
+                },
+                "desire": {
+                    "risk_repair": float(_clip(refutation_pressure - rumor_pressure, -1.0, 1.0)),
+                    "information_need": float(_clip(abs(signal) + rumor_pressure, 0.0, 1.0)),
+                    "social_confirmation": float(_clip(packet.get("belief_strength", 0.0), 0.0, 1.0)),
+                },
+                "intention": {
+                    "trading_bias": float(_clip(signal, -1.0, 1.0)),
+                    "communication_action": "clarify" if refutation_pressure > rumor_pressure else ("repost" if rumor_pressure > 0 else "observe"),
+                },
+            }
 
         rumor_heat_after = max(0.0, rumor_heat_before - refutation_heat)
         rumor_suppression = {
@@ -552,6 +954,65 @@ class SocialContagionEngine:
             "delta": float(rumor_heat_after - rumor_heat_before),
             "suppression_ratio": float(1.0 - rumor_heat_after / max(rumor_heat_before, 1e-12)) if rumor_heat_before > 0 else 0.0,
         }
+        unique_targets = {trace.target_id for trace in traces}
+        unique_sources = {trace.source_id for trace in traces}
+        cascade_depths = [int(trace.metadata.get("cascade_depth", 1) or 1) for trace in traces]
+        recommendation_trace = [
+            {
+                "target_id": trace.target_id,
+                "source_id": trace.source_id,
+                "topic": trace.topic,
+                "post_id": trace.metadata.get("source_post_id", ""),
+                "hot_score": float(trace.metadata.get("hot_score", 0.0) or 0.0),
+                "rank": int(trace.metadata.get("recommendation_rank", 0) or 0),
+                "signal": float(trace.signal),
+                "received_tick": int(trace.received_tick),
+            }
+            for trace in traces
+            if bool(trace.metadata.get("recommendation", False))
+        ]
+        pos = [value for value in node_sentiment.values() if value >= 0.0]
+        neg = [value for value in node_sentiment.values() if value < 0.0]
+        pos_mean = sum(pos) / len(pos) if pos else 0.0
+        neg_mean = sum(neg) / len(neg) if neg else 0.0
+        clarification_latency = 0.0
+        rumor_ticks = [trace.created_tick for trace in traces if trace.kind == "rumor"]
+        refute_ticks = [trace.received_tick for trace in traces if trace.kind == "refutation"]
+        if rumor_ticks and refute_ticks:
+            clarification_latency = float(max(0, min(refute_ticks) - min(rumor_ticks)))
+        cascade_metrics = {
+            "max_depth": float(max(cascade_depths) if cascade_depths else 0),
+            "coverage": float(len(unique_targets) / max(1, len(graph.nodes))),
+            "reproduction_rate": float(len(traces) / max(1, len(unique_sources))),
+            "polarization": float(abs(pos_mean - neg_mean)),
+            "recommendation_count": float(len(recommendation_trace)),
+        }
+        clarification_metrics = {
+            "has_refutation": float(1.0 if refute_ticks else 0.0),
+            "clarification_latency": float(clarification_latency),
+            "suppression_ratio": float(rumor_suppression["suppression_ratio"]),
+            "refutation_heat": float(refutation_heat),
+        }
+        incoming: Dict[str, int] = {node_id: 0 for node_id in graph.nodes}
+        for _, neighbors in graph.adjacency.items():
+            for dst in neighbors:
+                if dst in incoming:
+                    incoming[dst] += 1
+        opinion_leaders = []
+        for node_id, node in graph.nodes.items():
+            degree = len(graph.adjacency.get(node_id, [])) + incoming.get(node_id, 0)
+            influence_score = 0.45 * float(degree) + 0.35 * float(node.reach_score) + 0.20 * float(node.narrative_heat)
+            opinion_leaders.append(
+                {
+                    "node_id": node_id,
+                    "node_type": node.node_type,
+                    "degree": int(degree),
+                    "reach_score": float(node.reach_score),
+                    "narrative_heat": float(node.narrative_heat),
+                    "influence_score": float(influence_score),
+                }
+            )
+        opinion_leaders.sort(key=lambda item: item["influence_score"], reverse=True)
         snapshot = ContagionSnapshot(
             mean_sentiment=mean_sentiment,
             stressed_nodes=stressed,
@@ -563,6 +1024,11 @@ class SocialContagionEngine:
             observation_packets=observation_packets,
             source_rankings=source_rankings,
             rumor_suppression=rumor_suppression,
+            opinion_leaders=opinion_leaders[:10],
+            cascade_metrics=cascade_metrics,
+            recommendation_trace=recommendation_trace,
+            clarification_metrics=clarification_metrics,
+            bdi_observation_packets=bdi_packets,
             metadata={
                 "feature_flag": bool(self.feature_flag),
                 "seed": int(self.seed),
@@ -595,6 +1061,7 @@ class SocialContagionEngine:
         rumor_shock: float = 0.0,
         *,
         messages: Optional[Iterable[SocialMessage | Mapping[str, Any]]] = None,
+        posts: Optional[Iterable[SocialPost | Mapping[str, Any]]] = None,
         tick: Optional[int] = None,
     ) -> ContagionSnapshot:
         """Run one diffusion step and update graph sentiments in place."""
@@ -608,6 +1075,14 @@ class SocialContagionEngine:
 
         active_messages = list(self.event_queue)
         active_messages.extend(self._normalize_messages(messages))
+        active_posts = self._normalize_posts(posts)
+        if active_posts and self.recommendation_engine is not None:
+            recommended_messages, _ = self.recommendation_engine.build_messages(
+                graph,
+                active_posts,
+                current_tick=self.current_tick,
+            )
+            active_messages.extend(recommended_messages)
 
         if abs(rumor_shock) > 1e-12:
             active_messages.append(self._default_message_from_rumor_shock(rumor_shock, macro_state))
@@ -665,6 +1140,11 @@ def build_social_propagation_report(
         "node_influence": dict(snapshot.node_influence),
         "narrative_heat": dict(snapshot.narrative_heat),
         "rumor_suppression": dict(snapshot.rumor_suppression),
+        "opinion_leaders": list(snapshot.opinion_leaders),
+        "cascade_metrics": dict(snapshot.cascade_metrics),
+        "recommendation_trace": list(snapshot.recommendation_trace),
+        "clarification_metrics": dict(snapshot.clarification_metrics),
+        "bdi_observation_packets": dict(snapshot.bdi_observation_packets),
         "observation_packets": dict(snapshot.observation_packets),
         "source_rankings": list(snapshot.source_rankings),
         "heatmap_rows": [

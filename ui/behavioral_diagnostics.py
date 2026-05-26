@@ -35,6 +35,16 @@ def _load_social_propagation_report(report_path: Optional[Path] = None) -> Optio
         return None
 
 
+def _load_strategy_ecology_report(report_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    path = report_path or Path("outputs") / "strategy_ecology_report.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 def _scorecard_behavioral_metrics(report: Dict[str, Any]) -> Dict[str, Any]:
     scorecard = report.get("replay_scorecard", report.get("scorecard", {}))
     if not isinstance(scorecard, dict):
@@ -49,6 +59,8 @@ def _render_social_propagation_report(report: Dict[str, Any]) -> None:
     node_types = report.get("node_type_distribution", {})
     source_rankings = report.get("source_rankings", [])
     rumor = report.get("rumor_suppression", {})
+    cascade = report.get("cascade_metrics", {})
+    clarification = report.get("clarification_metrics", {})
     with cols[0]:
         st.metric("节点数", f"{int(report.get('snapshot_info', {}).get('node_count', 0))}")
     with cols[1]:
@@ -57,6 +69,16 @@ def _render_social_propagation_report(report: Dict[str, Any]) -> None:
         st.metric("均值情绪", f"{float(report.get('mean_sentiment', 0.0)):.3f}")
     with cols[3]:
         st.metric("谣言压制差值", f"{float(rumor.get('delta', 0.0)):.3f}")
+
+    ext_cols = st.columns(4)
+    with ext_cols[0]:
+        st.metric("瀑布覆盖率", f"{float(cascade.get('coverage', 0.0)):.2%}")
+    with ext_cols[1]:
+        st.metric("最大传播深度", f"{float(cascade.get('max_depth', 0.0)):.0f}")
+    with ext_cols[2]:
+        st.metric("推荐触达数", f"{int(float(cascade.get('recommendation_count', 0.0)))}")
+    with ext_cols[3]:
+        st.metric("澄清延迟", f"{float(clarification.get('clarification_latency', 0.0)):.1f}")
 
     st.dataframe(
         pd.DataFrame(
@@ -73,6 +95,14 @@ def _render_social_propagation_report(report: Dict[str, Any]) -> None:
             use_container_width=True,
             hide_index=True,
         )
+    leaders = report.get("opinion_leaders", [])
+    if leaders:
+        st.markdown("#### 意见领袖")
+        st.dataframe(pd.DataFrame(leaders[:10]), use_container_width=True, hide_index=True)
+    recommendations = report.get("recommendation_trace", [])
+    if recommendations:
+        st.markdown("#### 媒体推荐触达")
+        st.dataframe(pd.DataFrame(recommendations[:20]), use_container_width=True, hide_index=True)
 
     chain = report.get("propagation_chain", [])
     if chain:
@@ -102,12 +132,94 @@ def _render_social_propagation_report(report: Dict[str, Any]) -> None:
             )
         st.dataframe(pd.DataFrame(packet_rows), use_container_width=True, hide_index=True)
 
+    bdi_packets = report.get("bdi_observation_packets", {})
+    if bdi_packets:
+        st.markdown("#### BDI 观察卡")
+        bdi_rows: List[Dict[str, Any]] = []
+        for node_id, packet in list(bdi_packets.items())[:10]:
+            belief = packet.get("belief", {})
+            desire = packet.get("desire", {})
+            intention = packet.get("intention", {})
+            bdi_rows.append(
+                {
+                    "node_id": node_id,
+                    "belief_sentiment": belief.get("sentiment", 0.0),
+                    "rumor_pressure": belief.get("rumor_pressure", 0.0),
+                    "information_need": desire.get("information_need", 0.0),
+                    "trading_bias": intention.get("trading_bias", 0.0),
+                    "communication_action": intention.get("communication_action", ""),
+                }
+            )
+        st.dataframe(pd.DataFrame(bdi_rows), use_container_width=True, hide_index=True)
+
     st.markdown("#### 智能解读")
     st.markdown(
         narrate_payload(
             "社会传播报告解读",
             report,
             context="聚焦节点结构、传播链路与谣言压制效果。",
+        )
+    )
+
+
+def _render_strategy_ecology_report(report: Dict[str, Any]) -> None:
+    st.markdown("### 策略群体演化")
+    latest = report.get("latest", {}) if isinstance(report.get("latest", {}), dict) else {}
+    cohorts = latest.get("cohorts", {}) if isinstance(latest.get("cohorts", {}), dict) else {}
+    dominant = latest.get("dominant_cohort", {}) if isinstance(latest.get("dominant_cohort", {}), dict) else {}
+    force = latest.get("force_breakdown", {}) if isinstance(latest.get("force_breakdown", {}), dict) else {}
+    cols = st.columns(4)
+    with cols[0]:
+        st.metric("群体数", f"{len(cohorts)}")
+    with cols[1]:
+        st.metric("主导群体", str(dominant.get("label", dominant.get("cohort_id", "-")))[:18])
+    with cols[2]:
+        st.metric("主导目标份额", f"{float(dominant.get('target_share', 0.0)):.2%}")
+    with cols[3]:
+        st.metric("政策环境", str(latest.get("policy_regime", "neutral")))
+
+    rows = []
+    for cohort in cohorts.values():
+        if not isinstance(cohort, dict):
+            continue
+        rows.append(
+            {
+                "cohort_id": cohort.get("cohort_id", ""),
+                "label": cohort.get("label", ""),
+                "agent_count": cohort.get("agent_count", 0),
+                "population_share": cohort.get("population_share", 0.0),
+                "target_share": cohort.get("target_share", 0.0),
+                "capital_share": cohort.get("capital_share", 0.0),
+                "fitness": cohort.get("fitness", 0.0),
+                "selection_force": cohort.get("selection_force", 0.0),
+                "innovation_force": cohort.get("innovation_force", 0.0),
+                "perturbation_force": cohort.get("perturbation_force", 0.0),
+            }
+        )
+    if rows:
+        df = pd.DataFrame(rows)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        chart_df = df.set_index("label")[["population_share", "target_share"]]
+        st.bar_chart(chart_df)
+
+    force_rows = [
+        {"演化力": "选择", "强度": float(force.get("selection", 0.0))},
+        {"演化力": "创新", "强度": float(force.get("innovation", 0.0))},
+        {"演化力": "扰动", "强度": float(force.get("perturbation", 0.0))},
+    ]
+    st.dataframe(pd.DataFrame(force_rows), use_container_width=True, hide_index=True)
+
+    transitions = latest.get("transition_events", [])
+    if transitions:
+        st.markdown("#### 群体迁移事件")
+        st.dataframe(pd.DataFrame(transitions), use_container_width=True, hide_index=True)
+
+    st.markdown("#### 智能解读")
+    st.markdown(
+        narrate_payload(
+            "策略群体演化报告解读",
+            latest,
+            context="请解释长期政策环境下策略群体份额、选择力、创新力与扰动力的变化。",
         )
     )
 
@@ -257,6 +369,12 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
                 mime="application/json",
                 use_container_width=True,
             )
+
+    strategy_report = _load_strategy_ecology_report()
+    if strategy_report:
+        _render_strategy_ecology_report(strategy_report)
+    else:
+        st.info("未发现 outputs/strategy_ecology_report.json。可在仿真运行后查看策略群体演化。")
 
     social_report = _load_social_propagation_report()
     st.markdown("### 社会传播报告")

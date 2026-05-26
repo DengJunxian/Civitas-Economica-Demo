@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 import math
 import random
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, List, Mapping, MutableMapping, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 
 def _clip(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, float(value)))
+
+
+def _stable_hash(payload: Mapping[str, Any]) -> str:
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 @dataclass(slots=True)
@@ -168,6 +175,391 @@ class EvolutionOperators:
             updated[node_id] = genome.diffuse_from(genome_map[peer_id], strength=strength)
         genome_map.update(updated)
         return updated
+
+
+@dataclass(slots=True)
+class StrategyEcologyConfig:
+    """Discrete FinEvo-style population dynamics knobs."""
+
+    selection_beta: float = 0.35
+    innovation_mu: float = 0.08
+    perturbation_gamma: float = 0.12
+    diversity_floor: float = 0.03
+    min_share: float = 0.002
+    noise_scale: float = 0.05
+    transition_threshold: float = 0.025
+    top_cohort_bias: float = 0.20
+    seed: int = 0
+    version: str = "strategy_ecology_v1"
+
+    @classmethod
+    def from_mapping(cls, payload: Optional[Mapping[str, Any]] = None) -> "StrategyEcologyConfig":
+        if payload is None:
+            return cls()
+        allowed = {
+            "selection_beta",
+            "innovation_mu",
+            "perturbation_gamma",
+            "diversity_floor",
+            "min_share",
+            "noise_scale",
+            "transition_threshold",
+            "top_cohort_bias",
+            "seed",
+            "version",
+        }
+        kwargs: Dict[str, Any] = {key: value for key, value in dict(payload).items() if key in allowed}
+        return cls(**kwargs)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class StrategyCohortState:
+    """One strategy cohort in the population simplex."""
+
+    cohort_id: str
+    label: str
+    agent_count: int
+    population_share: float
+    capital_share: float
+    fitness: float
+    mean_wealth_return: float
+    target_share: float
+    selection_force: float = 0.0
+    innovation_force: float = 0.0
+    perturbation_force: float = 0.0
+    representative_genome: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class StrategyEcologySnapshot:
+    """One strategy ecology observation and force decomposition."""
+
+    tick: int
+    cohorts: Dict[str, StrategyCohortState]
+    dominant_cohort: Dict[str, Any]
+    force_breakdown: Dict[str, Any]
+    transition_events: List[Dict[str, Any]]
+    policy_regime: str
+    config_hash: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "tick": int(self.tick),
+            "cohorts": {key: value.to_dict() for key, value in self.cohorts.items()},
+            "dominant_cohort": dict(self.dominant_cohort),
+            "force_breakdown": dict(self.force_breakdown),
+            "transition_events": list(self.transition_events),
+            "policy_regime": str(self.policy_regime),
+            "config_hash": str(self.config_hash),
+            "metadata": dict(self.metadata),
+        }
+
+
+class StrategyEcologyEngine:
+    """Track strategy-cohort shares with selection, innovation, and perturbation."""
+
+    def __init__(self, config: Optional[StrategyEcologyConfig | Mapping[str, Any]] = None) -> None:
+        if isinstance(config, StrategyEcologyConfig):
+            self.config = config
+        else:
+            self.config = StrategyEcologyConfig.from_mapping(config)
+        self.rng = random.Random(int(self.config.seed))
+        self.previous_shares: Dict[str, float] = {}
+        self.snapshots: List[StrategyEcologySnapshot] = []
+        self.config_hash = _stable_hash(self.config.to_dict())
+
+    @staticmethod
+    def _normalize(values: Mapping[str, float], *, floor: float = 0.0) -> Dict[str, float]:
+        if not values:
+            return {}
+        floored = {str(k): max(float(floor), max(0.0, float(v))) for k, v in values.items()}
+        total = sum(floored.values())
+        if total <= 1e-12:
+            n = float(max(1, len(floored)))
+            return {key: 1.0 / n for key in floored}
+        return {key: float(value / total) for key, value in floored.items()}
+
+    @staticmethod
+    def _softmax(values: Mapping[str, float], *, temperature: float = 0.10) -> Dict[str, float]:
+        if not values:
+            return {}
+        scale = max(float(temperature), 1e-6)
+        max_val = max(float(v) for v in values.values())
+        exps = {key: math.exp((float(value) - max_val) / scale) for key, value in values.items()}
+        total = sum(exps.values()) or 1.0
+        return {key: float(value / total) for key, value in exps.items()}
+
+    @staticmethod
+    def _cohort_policy_bias(cohort_id: str, context: Mapping[str, Any]) -> float:
+        key = str(cohort_id).lower()
+        regime = str(context.get("policy_regime", context.get("direction", "neutral")) or "neutral").lower()
+        rumor_pressure = float(context.get("rumor_pressure", 0.0) or 0.0)
+        sentiment_shift = float(context.get("sentiment_shift", 0.0) or 0.0)
+        affected = {str(item).lower() for item in context.get("affected_cohorts", []) or []}
+        bias = 0.0
+        if "rumor" in key:
+            bias += 0.30 * rumor_pressure
+        if "retail" in key or "day" in key or "swing" in key:
+            bias += 0.16 * rumor_pressure + 0.10 * sentiment_shift
+        if "state" in key or "stabilization" in key or "pension" in key or "insurer" in key:
+            bias -= 0.08 * rumor_pressure
+            if regime in {"stabilizing", "supportive"}:
+                bias += 0.14
+        if "market_maker" in key or "etf" in key:
+            bias -= 0.05 * abs(rumor_pressure)
+            if regime in {"mixed", "neutral"}:
+                bias += 0.03
+        if key in affected or any(token and token in key for token in affected):
+            bias += 0.12 if regime != "restrictive" else -0.08
+        if regime == "restrictive" and not ("rumor" in key or "state" in key):
+            bias -= 0.05
+        if regime == "supportive" and ("retail" in key or "prop" in key):
+            bias += 0.06
+        return float(_clip(bias, -0.35, 0.35))
+
+    def update(
+        self,
+        *,
+        tick: int,
+        cohort_records: Sequence[Mapping[str, Any]],
+        policy_context: Optional[Mapping[str, Any]] = None,
+    ) -> StrategyEcologySnapshot:
+        context = dict(policy_context or {})
+        policy_regime = str(context.get("policy_regime", context.get("direction", "neutral")) or "neutral")
+        records = [dict(item) for item in cohort_records if str(item.get("cohort_id", "")).strip()]
+        if not records:
+            snapshot = StrategyEcologySnapshot(
+                tick=int(tick),
+                cohorts={},
+                dominant_cohort={},
+                force_breakdown={"selection": 0.0, "innovation": 0.0, "perturbation": 0.0},
+                transition_events=[],
+                policy_regime=policy_regime,
+                config_hash=self.config_hash,
+                metadata={"status": "empty"},
+            )
+            self.snapshots.append(snapshot)
+            return snapshot
+
+        counts: Dict[str, int] = {}
+        capital: Dict[str, float] = {}
+        returns: Dict[str, List[float]] = {}
+        labels: Dict[str, str] = {}
+        genomes: Dict[str, Dict[str, int]] = {}
+        for item in records:
+            cid = str(item.get("cohort_id", "") or "").strip()
+            labels[cid] = str(item.get("label", cid) or cid)
+            counts[cid] = counts.get(cid, 0) + 1
+            capital[cid] = capital.get(cid, 0.0) + max(0.0, float(item.get("capital", 0.0) or 0.0))
+            returns.setdefault(cid, []).append(float(item.get("wealth_return", 0.0) or 0.0))
+            genome = str(item.get("genome_signature", "") or "")
+            if genome:
+                genomes.setdefault(cid, {})[genome] = genomes.setdefault(cid, {}).get(genome, 0) + 1
+
+        total_count = float(sum(counts.values()) or 1.0)
+        observed_shares = {cid: count / total_count for cid, count in counts.items()}
+        current_shares = dict(self.previous_shares) if self.previous_shares else dict(observed_shares)
+        for cid, share in observed_shares.items():
+            current_shares[cid] = 0.55 * float(current_shares.get(cid, share)) + 0.45 * float(share)
+        current_shares = self._normalize(current_shares, floor=0.0)
+
+        capital_share = self._normalize(capital, floor=0.0)
+        fitness = {
+            cid: float(sum(samples) / max(1, len(samples)))
+            for cid, samples in returns.items()
+        }
+        for cid in current_shares:
+            fitness.setdefault(cid, 0.0)
+
+        mean_fit = sum(current_shares.get(cid, 0.0) * fitness.get(cid, 0.0) for cid in current_shares)
+        selection_force = {
+            cid: float(self.config.selection_beta * current_shares[cid] * (fitness.get(cid, 0.0) - mean_fit))
+            for cid in current_shares
+        }
+
+        soft = self._softmax(fitness)
+        n = max(1, len(current_shares))
+        floor_total = min(0.85, float(self.config.diversity_floor) * n)
+        innovation_target = {
+            cid: float(self.config.diversity_floor + (1.0 - floor_total) * soft.get(cid, 1.0 / n))
+            for cid in current_shares
+        }
+        innovation_target = self._normalize(innovation_target)
+        innovation_force = {
+            cid: float(self.config.innovation_mu * (innovation_target.get(cid, 0.0) - current_shares[cid]))
+            for cid in current_shares
+        }
+
+        volatility = abs(float(context.get("sentiment_volatility", 0.0) or 0.0))
+        policy_strength = abs(float(context.get("policy_intensity", context.get("aggregate_strength", 0.0)) or 0.0))
+        perturb_raw: Dict[str, float] = {}
+        for cid in current_shares:
+            noise = self.rng.normalvariate(0.0, float(self.config.noise_scale))
+            bias = self._cohort_policy_bias(cid, context)
+            scale = 1.0 + 0.35 * policy_strength + 0.50 * volatility
+            perturb_raw[cid] = current_shares[cid] * (bias + noise) * scale
+        raw_total = sum(perturb_raw.values())
+        perturbation_force = {
+            cid: float(self.config.perturbation_gamma * (perturb_raw[cid] - current_shares[cid] * raw_total))
+            for cid in current_shares
+        }
+
+        target = {
+            cid: current_shares[cid]
+            + selection_force.get(cid, 0.0)
+            + innovation_force.get(cid, 0.0)
+            + perturbation_force.get(cid, 0.0)
+            for cid in current_shares
+        }
+        target = self._normalize(target, floor=float(self.config.min_share))
+
+        transition_events: List[Dict[str, Any]] = []
+        for cid, share in target.items():
+            old_share = current_shares.get(cid, 0.0)
+            delta = float(share - old_share)
+            if abs(delta) >= float(self.config.transition_threshold):
+                transition_events.append(
+                    {
+                        "cohort_id": cid,
+                        "label": labels.get(cid, cid),
+                        "from_share": float(old_share),
+                        "to_share": float(share),
+                        "delta": delta,
+                        "direction": "expand" if delta > 0 else "contract",
+                    }
+                )
+
+        cohorts: Dict[str, StrategyCohortState] = {}
+        for cid, share in sorted(target.items(), key=lambda item: item[1], reverse=True):
+            rep_genome = ""
+            if cid in genomes and genomes[cid]:
+                rep_genome = max(genomes[cid].items(), key=lambda item: item[1])[0]
+            cohorts[cid] = StrategyCohortState(
+                cohort_id=cid,
+                label=labels.get(cid, cid),
+                agent_count=int(counts.get(cid, 0)),
+                population_share=float(current_shares.get(cid, 0.0)),
+                capital_share=float(capital_share.get(cid, 0.0)),
+                fitness=float(fitness.get(cid, 0.0)),
+                mean_wealth_return=float(fitness.get(cid, 0.0)),
+                target_share=float(share),
+                selection_force=float(selection_force.get(cid, 0.0)),
+                innovation_force=float(innovation_force.get(cid, 0.0)),
+                perturbation_force=float(perturbation_force.get(cid, 0.0)),
+                representative_genome=rep_genome,
+            )
+
+        dominant_id = max(cohorts, key=lambda cid: cohorts[cid].target_share) if cohorts else ""
+        dominant = cohorts[dominant_id].to_dict() if dominant_id else {}
+        force_breakdown = {
+            "selection": float(sum(abs(v) for v in selection_force.values())),
+            "innovation": float(sum(abs(v) for v in innovation_force.values())),
+            "perturbation": float(sum(abs(v) for v in perturbation_force.values())),
+            "by_cohort": {
+                cid: {
+                    "selection": float(selection_force.get(cid, 0.0)),
+                    "innovation": float(innovation_force.get(cid, 0.0)),
+                    "perturbation": float(perturbation_force.get(cid, 0.0)),
+                    "current_share": float(current_shares.get(cid, 0.0)),
+                    "target_share": float(target.get(cid, 0.0)),
+                }
+                for cid in cohorts
+            },
+        }
+        snapshot = StrategyEcologySnapshot(
+            tick=int(tick),
+            cohorts=cohorts,
+            dominant_cohort=dominant,
+            force_breakdown=force_breakdown,
+            transition_events=transition_events,
+            policy_regime=policy_regime,
+            config_hash=self.config_hash,
+            metadata={
+                "version": self.config.version,
+                "cohort_count": len(cohorts),
+                "agent_count": int(sum(counts.values())),
+                "policy_context": context,
+            },
+        )
+        self.previous_shares = {cid: state.target_share for cid, state in cohorts.items()}
+        self.snapshots.append(snapshot)
+        return snapshot
+
+    def latest(self) -> Optional[StrategyEcologySnapshot]:
+        return self.snapshots[-1] if self.snapshots else None
+
+    def save_csv(self, path: str | Path) -> Path:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                [
+                    "tick",
+                    "cohort_id",
+                    "label",
+                    "agent_count",
+                    "population_share",
+                    "capital_share",
+                    "fitness",
+                    "target_share",
+                    "selection_force",
+                    "innovation_force",
+                    "perturbation_force",
+                    "policy_regime",
+                    "dominant",
+                    "config_hash",
+                ]
+            )
+            for snapshot in self.snapshots:
+                dominant = str(snapshot.dominant_cohort.get("cohort_id", ""))
+                for cohort in snapshot.cohorts.values():
+                    writer.writerow(
+                        [
+                            int(snapshot.tick),
+                            cohort.cohort_id,
+                            cohort.label,
+                            int(cohort.agent_count),
+                            float(cohort.population_share),
+                            float(cohort.capital_share),
+                            float(cohort.fitness),
+                            float(cohort.target_share),
+                            float(cohort.selection_force),
+                            float(cohort.innovation_force),
+                            float(cohort.perturbation_force),
+                            snapshot.policy_regime,
+                            cohort.cohort_id == dominant,
+                            snapshot.config_hash,
+                        ]
+                    )
+        return target
+
+    def save_report(self, path: str | Path) -> Path:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "report_type": "strategy_ecology",
+            "config": self.config.to_dict(),
+            "config_hash": self.config_hash,
+            "latest": self.latest().to_dict() if self.latest() is not None else {},
+            "snapshots": [snapshot.to_dict() for snapshot in self.snapshots],
+        }
+        payload["report_hash"] = _stable_hash(
+            {
+                "config_hash": self.config_hash,
+                "snapshot_count": len(self.snapshots),
+                "latest_tick": payload["latest"].get("tick", 0) if isinstance(payload["latest"], dict) else 0,
+            }
+        )
+        target.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        return target
 
 
 def entropy_from_labels(labels: Sequence[str]) -> float:

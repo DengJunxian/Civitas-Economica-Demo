@@ -79,6 +79,9 @@ python -m streamlit run app.py --server.port 8501
 
 - `outputs/stylized_facts_report.json`
 - `outputs/ecology_metrics.csv`
+- `outputs/strategy_ecology_metrics.csv`
+- `outputs/strategy_ecology_report.json`
+- `outputs/social_propagation_report.json`
 - `outputs/market_abuse_report.json`
 - `outputs/intervention_effect_report.json`
 - `outputs/history_reports/*`

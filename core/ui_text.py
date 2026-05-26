@@ -90,7 +90,8 @@ KEY_TRANSLATIONS = {
     "drawdown_gap": "回撤差距",
     "vol_similarity": "波动相似度",
     "response_gap": "响应滞后",
-    "strict_authenticity_score": "严格拟真评分",
+    "strict_authenticity_score": "基准拟真评分",
+    "baseline_authenticity_score": "基准拟真评分",
     "demo_authenticity_score": "综合拟真评分",
     "raw metrics": "原始指标",
     "raw_metrics": "原始指标",
@@ -207,7 +208,7 @@ VALUE_TRANSLATIONS = {
     "complement": "补充指标",
     "leading": "前导指标",
     "lagging": "滞后指标",
-    "strict": "严格验证",
+    "strict": "基准评估",
     "demo": "展示增强",
     "factor": "因子回测",
     "agent": "新闻驱动政策仿真",
@@ -324,8 +325,9 @@ PROVIDER_TRANSLATIONS = {
 }
 
 TEXT_REPLACEMENTS = (
-    ("A/B World Compare", "A/B 世界对照"),
-    ("A/B Compare", "A/B 对照"),
+    ("A/B World Compare", "甲乙世界对照"),
+    ("A/B Compare", "甲乙对照"),
+    ("A/B", "甲乙对照"),
     ("Research workbench", "研究工作台"),
     ("benchmark selector", "基准指数"),
     ("Scorecard", "评估卡"),

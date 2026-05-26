@@ -1752,7 +1752,7 @@ def _research_workbench_report_appendix(payload: Dict[str, Any]) -> str:
     risk = dict(scorecard.get("risk_metrics", {}) or {})
     lines = [
         "",
-        "## Research Workbench 附录",
+        "## 研究工作台附录",
         "",
         "### 项目标题",
         f"- {payload.get('title', '政策试验台研究报告')}",
@@ -1769,7 +1769,7 @@ def _research_workbench_report_appendix(payload: Dict[str, Any]) -> str:
         f"- 历史窗口：{session_meta.get('calendar_start', '')} 至 当前第 {session_meta.get('current_day', 0)} 个交易日",
         f"- 上证指数对照：{kline.get('benchmark', session_meta.get('index_symbol', 'sh000001'))}",
         f"- K 线来源：{kline.get('source', 'trade_tape_aggregation')}",
-        f"- K 线图：报告 JSON 中 `kline.ohlcv` 保留主图 OHLCV，前端以 trade tape 聚合渲染。",
+        f"- K 线图：报告 JSON 中 `kline.ohlcv` 保留主图 OHLCV，前端以逐笔成交聚合渲染。",
         "",
         "### 关键指标",
         f"- 累计收益率：{float(summary.get('return_pct', 0.0) or 0.0):+.2%}",
@@ -1778,9 +1778,9 @@ def _research_workbench_report_appendix(payload: Dict[str, Any]) -> str:
         f"- 平均恐慌度：{float(summary.get('avg_panic', 0.0) or 0.0):.4f}",
         "",
         "### 风险传播链",
-        f"- tracking_rmse：{float(path_fit.get('tracking_rmse', path_fit.get('normalized_rmse', 0.0)) or 0.0):.4f}",
-        f"- direction_hit_rate：{float(path_fit.get('direction_hit_rate', 0.0) or 0.0):.2%}",
-        f"- sim_max_drawdown：{float(risk.get('sim_max_drawdown', risk.get('max_drawdown', 0.0)) or 0.0):.2%}",
+        f"- 路径跟踪误差：{float(path_fit.get('tracking_rmse', path_fit.get('normalized_rmse', 0.0)) or 0.0):.4f}",
+        f"- 方向命中率：{float(path_fit.get('direction_hit_rate', 0.0) or 0.0):.2%}",
+        f"- 仿真最大回撤：{float(risk.get('sim_max_drawdown', risk.get('max_drawdown', 0.0)) or 0.0):.2%}",
         "",
         "### 多智能体行为解释",
         f"- 当前评估卡行为指标：{json.dumps(scorecard.get('behavioral_metrics', {}), ensure_ascii=False, sort_keys=True, default=str)}",
@@ -1793,13 +1793,13 @@ def _research_workbench_report_appendix(payload: Dict[str, Any]) -> str:
         f"- {payload.get('impact_evaluation', {}).get('overall_verdict', '请结合主图、事件层和评估卡进行复核。')}",
         "",
         "### 可复现信息",
-        f"- experiment_id：{registry.get('experiment_id', '')}",
-        f"- config_hash：{repro.get('config_hash', registry.get('config_hash', ''))}",
-        f"- data_snapshot_hash：{repro.get('data_snapshot_hash', registry.get('data_snapshot_id', ''))}",
-        f"- git_commit_hash：{repro.get('git_commit_hash', '')}",
-        f"- random_seed：{repro.get('random_seed', registry.get('seed', 42))}",
-        f"- LLM provider chain：{', '.join(map(str, repro.get('llm_provider_chain', []) or []))}",
-        f"- calibration parameter set：{repro.get('calibration_parameter_set_id', '')}",
+        f"- 实验编号：{registry.get('experiment_id', '')}",
+        f"- 配置哈希：{repro.get('config_hash', registry.get('config_hash', ''))}",
+        f"- 数据快照哈希：{repro.get('data_snapshot_hash', registry.get('data_snapshot_id', ''))}",
+        f"- 代码提交哈希：{repro.get('git_commit_hash', '')}",
+        f"- 随机种子：{repro.get('random_seed', registry.get('seed', 42))}",
+        f"- 大模型调用链：{', '.join(map(str, repro.get('llm_provider_chain', []) or []))}",
+        f"- 校准参数集：{repro.get('calibration_parameter_set_id', '')}",
     ]
     return "\n".join(lines)
 
@@ -2006,7 +2006,7 @@ def _render_policy_package_summary(package_dict: Dict[str, Any], summary: Dict[s
     if not primary_path:
         primary_path = "政策输入 -> 传导渠道 -> 智能体行为 -> 市场结果"
 
-    st.markdown("### AI 结构化解读")
+    st.markdown("### 大模型结构化解读")
     lead_left, lead_right = st.columns([1.25, 1.0])
     with lead_left:
         st.markdown(
@@ -2082,7 +2082,7 @@ def _render_policy_package_summary(package_dict: Dict[str, Any], summary: Dict[s
             st.markdown(f"**{title}**")
             st.markdown("\n".join(f"- {item}" for item in items))
     render_narrative_block(
-        "AI 结构化政策解读",
+        "大模型结构化政策解读",
         {
             "headline": headline,
             "primary_path": primary_path,
@@ -2179,7 +2179,7 @@ def _render_discovered_metrics_panel(discovered_metrics: Dict[str, Any]) -> None
                 )
             )
             fig.update_layout(
-                title="Pareto 前沿：敏感性 × 稳健性",
+                title="帕累托前沿：敏感性 × 稳健性",
                 xaxis_title="政策敏感性",
                 yaxis_title="跨场景稳健性",
                 height=320,
@@ -2469,12 +2469,13 @@ def _llm_policy_narrative(
     }
     prompt = "\n".join(
         [
-            "请基于以下政策仿真信息，输出一段中文自然语言评估解读。",
+            "请基于以下政策仿真信息，输出一段面向政策制定者的中文后果研判。",
             "输出要求：",
             "1) 只用中文段落，不要 JSON、代码块、键值对、项目符号、标题标签。",
-            "2) 先说明政策主线，再说明对交易行为和指数路径的影响，最后说明风险和建议关注指标。",
-            "3) 语言要清晰、专业、易懂，可直接用于政策研判、结果复盘或系统说明。",
-            "4) 避免英文缩写和术语堆砌。",
+            "2) 不要复述数据清单；要解释政策主线如何改变预期、订单流、板块轮动、指数路径和风险热度。",
+            "3) 必须指出至少一个政策实施后可能出现的情景、触发条件或副作用，并说明政策制定者应监测的指标。",
+            "4) 语言要清晰、专业、易懂，可直接用于政策研判、结果复盘或系统说明。",
+            "5) 避免英文缩写和术语堆砌，避免套话式结尾。",
             f"数据：{json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str)}",
         ]
     )
@@ -2485,7 +2486,7 @@ def _llm_policy_narrative(
             backend.generate(
                 prompt,
                 system_prompt=(
-                    "你是政策评估讲解专家，请用自然、严谨、可解释的中文进行表述。"
+                    "你是政策评估讲解专家，请从仿真数据关系推导政策后果，用自然、严谨、可解释的中文表述。"
                 ),
                 timeout_budget=20.0,
             )
@@ -2681,11 +2682,14 @@ def _get_llm_visual_interpretation(prompt: str, cache_key: str, runtime_profile:
     for model_name in model_candidates:
         try:
             from core.inference.api_backend import APIBackend
-            backend = APIBackend(model=str(model_name), max_tokens=150, temperature=0.3)
+            backend = APIBackend(model=str(model_name), max_tokens=240, temperature=0.35)
             response = str(
                 backend.generate(
                     prompt,
-                    system_prompt="你是顶尖量化分析师。用一段精炼且专业的中文（不超过100字）解读图表趋势。直接返回内容，禁用Markdown、分点和换行。",
+                    system_prompt=(
+                        "你是政策仿真图表研判专家。用120到180字中文说明图表背后的政策含义、"
+                        "市场行为机制和下一步风险观察点。不要只复述数值，禁用Markdown、分点和换行。"
+                    ),
                 )
             ).strip()
             if not response or response.startswith("[API Error]"):
@@ -2741,7 +2745,7 @@ def _render_agent_disagreement_chart(package_dict: Dict[str, Any], policy_text: 
         "当前分歧核心在于政策传导节奏与风险溢价重估。"
     )
     cache_key = hashlib.sha256(f"disagree_{policy_text}_{json.dumps(agent_effects)}".encode()).hexdigest()
-    prompt = f"政策：{policy_text}，投资者影响得分为：{json.dumps(agent_effects, ensure_ascii=False)}。一句话解释谁最看好、谁最看空及原因。"
+    prompt = f"政策：{policy_text}，投资者影响得分为：{json.dumps(agent_effects, ensure_ascii=False)}。请解释哪些主体最可能增配或减配、分歧如何影响订单流，以及政策制定者应观察什么信号。"
     interpretation = _get_llm_visual_interpretation(prompt, cache_key, runtime_profile)
     st.info(f"模型洞察：{interpretation or fallback}")
 
@@ -2785,7 +2789,7 @@ def _render_role_orderflow_waterfall(frame: pd.DataFrame, package_dict: Dict[str
     stance = "净买主导" if lead_flow >= 0 else "净卖主导"
     fallback = f"{lead_role}是当前订单流主导力量（{lead_flow:+.0f}），市场处于{stance}阶段，体现对政策路径的再定价。"
     cache_key = hashlib.sha256(f"orderflow_{policy_text}_{json.dumps(agent_effects)}".encode()).hexdigest()
-    prompt = f"政策：{policy_text}，预期订单流为：{json.dumps(rows, ensure_ascii=False)}。一句话概述资金买卖主导力量是谁，是追高还是潜伏？"
+    prompt = f"政策：{policy_text}，预期订单流为：{json.dumps(rows, ensure_ascii=False)}。请判断资金买卖主导力量、交易是追高还是潜伏，并说明这对流动性和价格冲击的含义。"
     interpretation = _get_llm_visual_interpretation(prompt, cache_key, runtime_profile)
     st.info(f"模型洞察：{interpretation or fallback}")
 
@@ -2838,7 +2842,7 @@ def _render_sector_rotation_heatmap(package_dict: Dict[str, Any], policy_text: s
         "体现政策冲击下的板块轮动与估值重排。"
     )
     cache_key = hashlib.sha256(f"sector_{policy_text}_{json.dumps(sector_effects)}".encode()).hexdigest()
-    prompt = f"政策：{policy_text}，行业影响：{json.dumps(ordered, ensure_ascii=False)}。一句话总结：哪个板块最受益，哪个最承压？为什么出现这种轮动？"
+    prompt = f"政策：{policy_text}，行业影响：{json.dumps(ordered, ensure_ascii=False)}。请说明最受益和最承压板块、轮动机制，以及这种分化对政策执行效果的提示。"
     interpretation = _get_llm_visual_interpretation(prompt, cache_key, runtime_profile)
     st.info(f"模型洞察：{interpretation or fallback}")
 
@@ -3639,7 +3643,7 @@ def _render_policy_entry_preview(
         )
         st.caption((preview_policy_text or "请先输入政策文本。")[:160])
     with brief_right:
-        st.markdown("#### 反事实 A/B 对照基线")
+        st.markdown("#### 反事实甲乙对照基线")
         control_label = str(template.get("control_label", "无政策基线对照") or "无政策基线对照")
         control_text = str(template.get("control_text", "在相同初始条件下，观察不采取干预时的市场路径。") or "在相同初始条件下，观察不采取干预时的市场路径。")
         st.markdown(f"- 基线方案：{control_label}")
@@ -3927,7 +3931,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
     session = st.session_state.get("policy_lab_session")
     
     if not session:
-        st.info("入口编译预览已就绪。确认政策文本或模板后，点击“开始推演”进入多智能体市场路径与反事实 A/B 对照。")
+        st.info("入口编译预览已就绪。确认政策文本或模板后，点击“开始推演”进入多智能体市场路径与反事实甲乙对照。")
         return
         
     control_cols = st.columns(4)
@@ -4044,7 +4048,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
     scene_cols[1].markdown(
         f"""
         <div class="summary-card">
-          <div class="summary-label">A/B 对照基线</div>
+          <div class="summary-label">甲乙对照基线</div>
           <div class="summary-value">{str(session.get('control_label', '无政策基线对照'))}</div>
           <div class="summary-note">{str(session.get('control_text', '在相同初始条件下观察未干预路径。'))}</div>
         </div>
@@ -4120,7 +4124,7 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
                 session_frame,
                 index_label=selected_benchmark_label,
                 index_symbol=selected_benchmark_symbol,
-                source_text="trade tape 聚合 K 线 + 真实指数叠加",
+                source_text="逐笔成交聚合 K 线 + 真实指数叠加",
                 history_end=str(session_frame.iloc[-1]["time"]),
             )
             kline_fig, chart_frame = dashboard_workbench.render_trade_tape_kline_workbench(

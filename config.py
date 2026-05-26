@@ -4,6 +4,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+DEFAULT_DEEPSEEK_API_KEY = "sk-bd7577c5041644aa86520191a0e01941"
+DEFAULT_ZHIPU_API_KEY = "4d963afd591d4c93940b08b06d766e91.bWaMIWJnuKhOUo7y"
+
+
 def _load_local_env_file(path: str = ".env") -> None:
     """Load simple KEY=VALUE pairs from a local .env without overriding shell env."""
 
@@ -82,14 +86,18 @@ class SimConfig:
     # DeepSeek API
     API_BASE_URL: str = "https://api.deepseek.com"
     DEEPSEEK_API_KEY: Optional[str] = field(
-        default_factory=lambda: os.environ.get("DEEPSEEK_API_KEY")
+        default_factory=lambda: os.environ.get("DEEPSEEK_API_KEY", DEFAULT_DEEPSEEK_API_KEY).strip()
     )
     
 
     # 智谱 GLM API (快速模式专用)
     ZHIPU_API_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
     ZHIPU_API_KEY: Optional[str] = field(
-        default_factory=lambda: os.environ.get("ZHIPUAI_API_KEY") or os.environ.get("ZHIPU_API_KEY")
+        default_factory=lambda: (
+            os.environ.get("ZHIPUAI_API_KEY", "").strip()
+            or os.environ.get("ZHIPU_API_KEY", "").strip()
+            or DEFAULT_ZHIPU_API_KEY
+        )
     )
     LLM_DEFAULT_PROVIDER: str = field(
         default_factory=lambda: os.environ.get("LLM_DEFAULT_PROVIDER", "auto")

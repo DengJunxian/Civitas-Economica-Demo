@@ -9,6 +9,7 @@ import os
 from types import ModuleType
 from typing import Optional, List, Any, cast
 
+from config import DEFAULT_DEEPSEEK_API_KEY
 from core.llm.router import sync_llm_complete
 
 _openai_module: Optional[ModuleType]
@@ -35,7 +36,7 @@ class APIBackend:
         max_tokens: int = 512,
         temperature: float = 0.7
     ):
-        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
+        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY") or DEFAULT_DEEPSEEK_API_KEY
         self.base_url = base_url
         self.model = model
         self.max_tokens = max_tokens

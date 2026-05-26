@@ -10,6 +10,8 @@ from enum import Enum
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 
+from config import DEFAULT_DEEPSEEK_API_KEY
+
 
 class InferenceMode(str, Enum):
     """
@@ -55,7 +57,7 @@ class InferenceConfig:
     mode: InferenceMode = InferenceMode.LITE
     
     # API 配置
-    api_key: Optional[str] = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY"))
+    api_key: Optional[str] = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY") or DEFAULT_DEEPSEEK_API_KEY)
     api_base_url: str = "https://api.deepseek.com/v1"
     
     # 本地模型配置 (Standard 模式)
@@ -96,7 +98,7 @@ class InferenceConfig:
         
         return cls(
             mode=mode,
-            api_key=os.getenv("DEEPSEEK_API_KEY"),
+            api_key=os.getenv("DEEPSEEK_API_KEY") or DEFAULT_DEEPSEEK_API_KEY,
             local_model_path=os.getenv("CIVITAS_LOCAL_MODEL_PATH"),
             vllm_model_name=os.getenv("CIVITAS_VLLM_MODEL", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B")
         )

@@ -547,14 +547,14 @@ def _markdown_table(section: Mapping[str, Any], *, skip: Tuple[str, ...] = ("ena
             continue
         rows.append((key, _format_value(value)))
     if not rows:
-        return "_No metrics available._"
-    lines = ["| Metric | Value |", "| --- | --- |"]
+        return "_暂无可用指标。_"
+    lines = ["| 指标 | 数值 |", "| --- | --- |"]
     lines.extend([f"| {key} | {value} |" for key, value in rows])
     return "\n".join(lines)
 
 
 def render_realism_report_markdown(payload: Mapping[str, Any]) -> str:
-    title = str(payload.get("title", "Stylized Facts Realism Report"))
+    title = str(payload.get("title", "典型事实拟真评估报告"))
     meta = payload.get("report_meta") or official_report_meta("realism_report", title)
     path_fit = payload.get("path_fit", {})
     micro = payload.get("microstructure_fit", {})

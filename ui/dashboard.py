@@ -526,7 +526,7 @@ def render_discovered_metrics_panel(payload: Optional[Mapping[str, Any]], key_pr
         )
         fig.update_layout(
             **PLOTLY_DARK_LAYOUT,
-            title="目标发现 Pareto 前沿",
+            title="目标发现帕累托前沿",
             xaxis_title="政策敏感性",
             yaxis_title="跨场景稳健性",
             height=340,
@@ -550,7 +550,7 @@ def _render_chart_explanation(title: str, payload: Any, context: str, cache_name
         payload,
         context=context,
         cache_namespace=cache_namespace,
-        label="API 大模型解读",
+        label="在线大模型解读",
     )
 
 
@@ -749,17 +749,17 @@ def render_empty_market_board(key_prefix: str = "empty") -> go.Figure:
 
 
 def render_ab_world_compare(world_a: pd.DataFrame, world_b: pd.DataFrame, key_prefix: str = "ab") -> go.Figure:
-    merged = world_a[["step", "time", "close"]].rename(columns={"close": "A世界"}).merge(
-        world_b[["step", "close"]].rename(columns={"close": "B世界"}),
+    merged = world_a[["step", "time", "close"]].rename(columns={"close": "政策执行世界"}).merge(
+        world_b[["step", "close"]].rename(columns={"close": "政策缺失世界"}),
         on="step",
         how="left",
     )
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=merged["time"], y=merged["A世界"], mode="lines", name="A世界（政策执行）", line=dict(color="#21c55d", width=2)))
-    fig.add_trace(go.Scatter(x=merged["time"], y=merged["B世界"], mode="lines", name="B世界（政策缺失）", line=dict(color="#f97316", width=2)))
+    fig.add_trace(go.Scatter(x=merged["time"], y=merged["政策执行世界"], mode="lines", name="政策执行世界", line=dict(color="#21c55d", width=2)))
+    fig.add_trace(go.Scatter(x=merged["time"], y=merged["政策缺失世界"], mode="lines", name="政策缺失世界", line=dict(color="#f97316", width=2)))
     fig.update_layout(
         **PLOTLY_DARK_LAYOUT,
-        title="A/B 世界对照：政策有无的市场路径",
+        title="甲乙世界对照：政策有无的市场路径",
         yaxis=dict(title="指数点位"),
         legend=dict(orientation="h"),
         height=320,
@@ -768,13 +768,13 @@ def render_ab_world_compare(world_a: pd.DataFrame, world_b: pd.DataFrame, key_pr
     export_plot_bundle(fig, merged, f"{key_prefix}_ab_compare", f"{key_prefix}_ab_compare")
     if not merged.empty:
         _render_chart_explanation(
-            "A/B 世界对照",
+            "甲乙世界对照",
             {
-                "world_a_end": float(merged["A世界"].iloc[-1]),
-                "world_b_end": float(merged["B世界"].iloc[-1]),
-                "end_gap": float(merged["A世界"].iloc[-1] - merged["B世界"].iloc[-1]),
-                "peak_gap": float((merged["A世界"] - merged["B世界"]).max()),
-                "trough_gap": float((merged["A世界"] - merged["B世界"]).min()),
+                "world_a_end": float(merged["政策执行世界"].iloc[-1]),
+                "world_b_end": float(merged["政策缺失世界"].iloc[-1]),
+                "end_gap": float(merged["政策执行世界"].iloc[-1] - merged["政策缺失世界"].iloc[-1]),
+                "peak_gap": float((merged["政策执行世界"] - merged["政策缺失世界"]).max()),
+                "trough_gap": float((merged["政策执行世界"] - merged["政策缺失世界"]).min()),
             },
             "请说明政策执行与不执行两条路径的核心差异，以及哪一个阶段最能体现政策效果。",
         )
@@ -814,7 +814,7 @@ def render_lob_depth_animation(metrics: pd.DataFrame, key_prefix: str = "lob") -
     fig = go.Figure(data=frames[0].data, frames=frames)
     fig.update_layout(
         **PLOTLY_DARK_LAYOUT,
-        title="LOB 深度动画（买卖盘结构）",
+        title="盘口深度动画（买卖盘结构）",
         barmode="overlay",
         xaxis_title="价格",
         yaxis_title="挂单量",
@@ -855,7 +855,7 @@ def render_lob_depth_animation(metrics: pd.DataFrame, key_prefix: str = "lob") -
     export_plot_bundle(fig, metrics.head(len(frames)), f"{key_prefix}_lob_depth", f"{key_prefix}_lob_depth")
     if not metrics.empty:
         _render_chart_explanation(
-            "LOB 深度动画",
+            "盘口深度动画",
             {
                 "sample_steps": int(len(frames)),
                 "max_panic_level": float(pd.to_numeric(metrics.get("panic_level", pd.Series([0.0])), errors="coerce").fillna(0.0).max()),
@@ -1351,7 +1351,7 @@ def render_ai_insight_card(text: str) -> None:
     st.markdown(
         f"""
         <div class="insight-block" style="animation: insight-pulse 3.5s infinite;">
-            <div class="insight-block-label">API 大模型解读</div>
+            <div class="insight-block-label">在线大模型解读</div>
             <div class="insight-block-title">智能前瞻与状态点评</div>
             <div class="insight-block-body">{text}</div>
         </div>

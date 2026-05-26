@@ -85,7 +85,7 @@ def _build_regulator_result_frames(result: Dict[str, Any]) -> Dict[str, pd.DataF
 
 def render_regulator_optimization() -> None:
     st.markdown("## 监管策略优化")
-    st.caption("独立监管优化页：默认优先真实环境，输出 A/B 反事实对照、帕累托前沿、推荐方案与证据链。")
+    st.caption("独立监管优化页：默认优先真实环境，输出甲乙反事实对照、帕累托前沿、推荐方案与证据链。")
 
     with st.form("regulator_optimization_form", clear_on_submit=False):
         left, right = st.columns(2)
@@ -112,7 +112,7 @@ def render_regulator_optimization() -> None:
 
     result = st.session_state.get(_REGULATOR_RESULT_STATE_KEY)
     if not isinstance(result, dict):
-        st.info("先运行一次优化以查看 A/B 反事实对照、帕累托前沿和推荐证据链。")
+        st.info("先运行一次优化以查看甲乙反事实对照、帕累托前沿和推荐证据链。")
         return
 
     summary = result.get("training_summary", {}) if isinstance(result, dict) else {}
@@ -138,16 +138,16 @@ def render_regulator_optimization() -> None:
     with st.expander("导出与复现信息", expanded=False):
         st.caption(
             "可复现信息："
-            f"seed={reproducibility.get('seed', 0)} | "
-            f"config_hash={reproducibility.get('config_hash', '')} | "
+            f"随机种子={reproducibility.get('seed', 0)} | "
+            f"配置哈希={reproducibility.get('config_hash', '')} | "
             f"训练轮数={reproducibility.get('episodes', 0)} | "
-            f"max_steps={reproducibility.get('max_steps_per_episode', 0)}"
+            f"最大步数={reproducibility.get('max_steps_per_episode', 0)}"
         )
         if isinstance(env_selection, dict) and env_selection:
             st.caption(
                 "环境信息："
-                f"path={env_selection.get('selected_path', '')} | "
-                f"fallback={env_selection.get('fallback_used', False)}"
+                f"路径={env_selection.get('selected_path', '')} | "
+                f"是否回退={env_selection.get('fallback_used', False)}"
             )
         render_reproducibility_panel(
             build_reproducibility_meta(
@@ -167,7 +167,7 @@ def render_regulator_optimization() -> None:
         validation = dict(blackbox.get("validation", {}) or {})
         report_best = dict(opt_report.get("best_solution", {}) or {})
         st.caption(
-            "贝叶斯优化（BO）用于静态政策包搜索；多目标进化搜索（NSGA-II）输出多目标帕累托前沿；晋升默认路径需在固定回放窗口中同时优于规则基线。"
+            "贝叶斯优化用于静态政策包搜索；多目标进化搜索输出多目标帕累托前沿；晋升默认路径需在固定回放窗口中同时优于规则基线。"
         )
         cols = st.columns(4)
         cols[0].metric("贝叶斯优化最优分", f"{float(bo_best.get('score', 0.0)):.4f}")
@@ -197,7 +197,7 @@ def render_regulator_optimization() -> None:
                 "validation": opt_report.get("validation", {}),
                 "final_recommendation_text": opt_report.get("final_recommendation_text", ""),
             },
-            context="请解释 BO、NSGA-II、规则 baseline 与 Q-learning 的关系，并说明为什么当前默认生产路径可以或不可以晋升。",
+            context="请解释贝叶斯优化、多目标进化搜索、规则基线与强化学习的关系，并说明为什么当前默认生产路径可以或不可以晋升。",
             cache_namespace="regulator_opt_narrative_cache",
         )
     else:
@@ -205,7 +205,7 @@ def render_regulator_optimization() -> None:
 
     render_optimization_report_panel(result, key_prefix="regulator_optimization_report")
 
-    st.markdown("### 反事实对照（A/B）")
+    st.markdown("### 反事实甲乙对照")
     left, right = st.columns(2)
     with left:
         if frames["baseline"].empty:
@@ -218,7 +218,7 @@ def render_regulator_optimization() -> None:
         else:
             st.dataframe(localize_dataframe_columns(frames["deltas"]), use_container_width=True, hide_index=True)
     render_narrative_block(
-        "监管 A/B 对照解读",
+        "监管甲乙对照解读",
         {
             "baseline": frames["baseline"].to_dict(orient="records"),
             "deltas": frames["deltas"].head(10).to_dict(orient="records"),

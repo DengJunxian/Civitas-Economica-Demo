@@ -47,11 +47,11 @@ def cpp_extension_status() -> Dict[str, Any]:
         available = bool(getattr(order_book_cpp, "_civitas_lob", None) is not None)
         return {
             "available": available,
-            "engine": "C++ _civitas_lob" if available else "Python OrderBook fallback",
+            "engine": "C++ 撮合扩展" if available else "Python 撮合回退",
             "message": "C++ 扩展可用" if available else "未检测到 C++ 扩展，已使用 Python 撮合回退。",
         }
     except Exception as exc:
-        return {"available": False, "engine": "Python OrderBook fallback", "message": f"撮合扩展检测失败：{exc}"}
+        return {"available": False, "engine": "Python 撮合回退", "message": f"撮合扩展检测失败：{exc}"}
 
 
 def build_experiment_registry_entry(

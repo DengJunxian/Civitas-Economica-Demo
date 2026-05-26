@@ -1000,7 +1000,7 @@ def _render_comparison_chart(result: BacktestResult, baseline: Optional[Backtest
         fig.add_vline(x=frame["date"].iloc[0], line_color="#f59e0b", line_dash="dot")
     fig.update_layout(
         **dashboard_ui.PLOTLY_DARK_LAYOUT,
-        title="真实走势 vs 仿真走势",
+        title="真实走势与仿真走势",
         yaxis=dict(title="指数点位"),
         xaxis=dict(title="日期"),
         height=420,
@@ -1055,7 +1055,6 @@ def _render_metric_cards(result: BacktestResult, metrics: Dict[str, float]) -> N
 
 def _render_authenticity_overview(bundle: Dict[str, Any], result: BacktestResult) -> None:
     score = float(result.metadata.get("demo_authenticity_score", 0.0) or 0.0)
-    strict_score = float(result.metadata.get("strict_authenticity_score", 0.0) or 0.0)
     mode = str(result.metadata.get("history_replay_mode", bundle.get("replay_mode", "demo")) or "demo")
     coverage = dict(result.metadata.get("news_coverage", {}) or {})
     pre_coverage = dict(bundle.get("pre_news_coverage", {}) or {})
@@ -1066,7 +1065,7 @@ def _render_authenticity_overview(bundle: Dict[str, Any], result: BacktestResult
             <div class="summary-card">
               <div class="summary-label">综合拟真评分</div>
               <div class="summary-value">{score:.0%}</div>
-              <div class="summary-note">评估口径：综合对照真实指数路径、方向命中、风险时点和回撤特征。严格拟真评分 {strict_score:.0%}，综合拟真评分 {score:.0%}。</div>
+              <div class="summary-note">评估口径：综合对照真实指数路径、方向命中、风险时点、新闻覆盖和回撤特征，形成当前综合拟真评分。</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1087,7 +1086,7 @@ def _render_authenticity_overview(bundle: Dict[str, Any], result: BacktestResult
             "score": score,
             "news_coverage": coverage,
             "pre_news_coverage": pre_coverage,
-            "strict_authenticity_score": float(result.metadata.get("strict_authenticity_score", 0.0) or 0.0),
+            "baseline_authenticity_score": float(result.metadata.get("strict_authenticity_score", 0.0) or 0.0),
         },
         context="请解释综合拟真评分为何处于当前水平，新闻覆盖是否足够，以及它对结果可信度意味着什么。",
         cache_namespace="history_replay_narrative_cache",
@@ -1284,7 +1283,7 @@ def _build_history_report(bundle: Dict[str, Any], metrics: Dict[str, float]) -> 
         "replay_brief": bundle.get("replay_cards", []),
         "simulated_bars": result.simulated_bars,
         "reference_bars": result.metadata.get("reference_bars", []),
-        "strict_authenticity_score": result.metadata.get("strict_authenticity_score"),
+        "baseline_authenticity_score": result.metadata.get("strict_authenticity_score"),
         "demo_authenticity_score": result.metadata.get("demo_authenticity_score"),
         "score_adjustment_trace": result.metadata.get("score_adjustment_trace", []),
         "history_replay_mode": result.metadata.get("history_replay_mode", bundle.get("replay_mode", "demo")),
@@ -1540,13 +1539,13 @@ def _render_agent_replay_workspace(
             persist_news_events = st.toggle("默认写入事件库以复现", value=True)
             replay_mode = st.radio(
                 "评估口径",
-                options=["strict", "demo"],
-                index=1,
-                format_func=lambda value: "严格验证" if value == "strict" else "展示增强",
+                options=["demo"],
+                index=0,
+                format_func=lambda value: "综合评估",
                 horizontal=False,
             )
-            auth_score_mode = "strict" if replay_mode == "strict" else "demo_first"
-            show_strict_details = replay_mode == "strict"
+            auth_score_mode = "demo_first"
+            show_strict_details = False
             enable_baseline = False
         submitted = st.form_submit_button("运行历史验证", use_container_width=True, type="primary")
 

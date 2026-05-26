@@ -987,8 +987,9 @@ class PolicySession:
         payload = self.build_report_payload()
         prompt = "\n".join(
             [
-                "请根据下面的政策试验台会话结果，生成一份面向评委展示的中文 Markdown 报告。",
+                "请根据下面的政策试验台会话结果，生成一份面向政策制定者和评委展示的中文 Markdown 报告。",
                 "要求：必须是自然语言 Markdown，不要输出 JSON，不要输出代码块。",
+                "不要逐项抄录数据；必须解释政策实施后可能出现的市场状态、主体行为变化、风险触发条件和监测重点。",
                 "报告必须包含以下章节：",
                 "1) 一句话结论",
                 "2) 政策影响评价",
@@ -997,7 +998,7 @@ class PolicySession:
                 "5) 风险与副作用",
                 "6) 分阶段建议（短期/中期/长期）",
                 "7) 关键监测指标",
-                "请强调政策影响会随时间衰减，且支持中途追加政策后的市场变化。",
+                "请强调政策影响会随时间衰减，说明中途追加政策后市场变化的机制，不要使用套话式总结。",
                 f"数据：{json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)}",
             ]
         )
@@ -1009,7 +1010,7 @@ class PolicySession:
         response = str(
             backend.generate(
                 prompt,
-                system_prompt="你是政策试验台的中文评估专家，输出简洁、可直接展示的报告。",
+                system_prompt="你是政策试验台的中文评估专家，擅长从仿真数据关系推导政策后果和治理含义。",
                 timeout_budget=25.0,
                 fallback_response="",
             )

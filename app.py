@@ -74,6 +74,7 @@ ENTRY_ALIASES = {
     "新闻驱动历史回测": "历史验证",
     "历史回测": "历史验证",
     "政策A/B推演": "政策实验",
+    "政策甲乙对照推演": "政策实验",
     "真实性报告": "研判分析",
     "高级分析": "研判分析",
     "监管优化": "研判分析",
@@ -82,7 +83,7 @@ ENTRY_DESCRIPTIONS = {
     OVERVIEW_ENTRY: "用一屏建立平台定位、能力链路、工程特性与代表性结果。",
     "政策实验": "输入政策文本，查看结构化编译、多智能体响应与市场路径。",
     "历史验证": "基于真实历史窗口自动汇总政策与新闻，验证仿真与真实走势的一致性。",
-    "研判分析": "聚合 AI 证据、行为诊断、监管优化、研究验证与结果归档能力。",
+    "研判分析": "聚合大模型证据、行为诊断、监管优化、研究验证与结果归档能力。",
 }
 ENTRY_PURPOSE = {
     OVERVIEW_ENTRY: "快速建立平台认知并进入核心工作流",
@@ -206,7 +207,7 @@ def _render_value_bridge_tab() -> None:
         a.metric("已采集事件", int(flywheel.get("total_events", 0)))
         high_impact = int(dict(flywheel.get("impact_counter", {})).get("high", 0))
         b.metric("高影响事件", high_impact)
-        c.metric("TOP来源数", len(list(flywheel.get("top_sources", []))))
+        c.metric("主要来源数", len(list(flywheel.get("top_sources", []))))
         st.markdown("#### 事件来源与主题摘要")
         left, right = st.columns(2)
         with left:
@@ -238,7 +239,7 @@ def _render_value_bridge_tab() -> None:
         st.warning(f"反事实计算失败：{exc}")
         return
 
-    st.markdown("#### 监管反事实对照（A/B）")
+    st.markdown("#### 监管反事实甲乙对照")
     worlds = dict(counterfactual.get("worlds", {}) or {})
     scorecards = dict(counterfactual.get("scorecards", {}) or {})
     rec = str(counterfactual.get("recommended_timing", ""))
@@ -441,7 +442,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
 ## 结论摘要
 1. 系统能够围绕政策冲击、市场反应和风险扩散形成闭环推演。
 2. 多智能体行为与市场微观结构结果可以同步展示，便于机制解释与方案汇报。
-3. 监管动作、A/B 对照和归档材料可直接服务复盘、留痕与策略研判。
+3. 监管动作、甲乙对照和归档材料可直接服务复盘、留痕与策略研判。
 """
 
     design_outline = """# design_outline
@@ -450,7 +451,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
 - 政策实验
 - 历史验证
 - 研究验证
-- 反事实 A/B 推演
+- 反事实甲乙对照推演
 - 监管优化
 
 ## 技术实现
@@ -466,7 +467,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
 3. 进入政策实验，查看政策输入、结构化编译与多智能体推演
 4. 进入历史验证，比较仿真走势与真实市场路径
 5. 进入行为与风险诊断，说明群体行为与风险扩散机制
-6. 展示监管优化、A/B 差分与 Pareto 权衡
+6. 展示监管优化、甲乙差分与帕累托权衡
 7. 沉淀实验报告、分析摘要、证据链与结果归档
 8. 回到总览页，总结平台从政策理解到策略建议的闭环价值
 """
@@ -504,7 +505,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
                 "scenario": scenario.name,
                 "generated_at": now,
             },
-            app_flow=["政策实验", "历史验证", "研究验证", "反事实 A/B 推演", "监管优化"],
+            app_flow=["政策实验", "历史验证", "研究验证", "反事实甲乙对照推演", "监管优化"],
         )
         realism_payload = {
             "title": "真实性评估摘要",
@@ -526,11 +527,11 @@ def _generate_competition_materials() -> Dict[str, Path]:
             [
                 "# agent_taxonomy",
                 "",
-                "- retail_general: 情绪与政策敏感的散户资金",
-                "- mutual_fund: 基准约束下的机构配置资金",
-                "- quant_timing: 趋势/波动状态切换资金",
-                "- market_maker: 流动性与库存约束资金",
-                "- state_stabilization_fund: 稳市承接资金",
+                "- 散户资金：情绪与政策敏感的交易主体",
+                "- 公募基金：受基准约束的机构配置资金",
+                "- 量化择时资金：跟随趋势与波动状态切换的交易主体",
+                "- 做市资金：受流动性与库存约束的交易主体",
+                "- 稳定资金：承担市场稳定和承接功能的资金主体",
             ]
         )
         policy_causal_chain = {
@@ -545,11 +546,11 @@ def _generate_competition_materials() -> Dict[str, Path]:
         }
         realism_metrics_csv = "\n".join(
             [
-                "metric,value",
-                f"return_pct,{float(stat['return_pct'])}",
-                f"volatility,{float(stat['volatility'])}",
-                f"panic_max,{float(stat['panic_max'])}",
-                f"herding_avg,{float(stat['herding_avg'])}",
+                "指标,数值",
+                f"累计收益率,{float(stat['return_pct'])}",
+                f"波动率,{float(stat['volatility'])}",
+                f"最大恐慌度,{float(stat['panic_max'])}",
+                f"平均羊群度,{float(stat['herding_avg'])}",
             ]
         )
         competition_snapshot = {
@@ -565,7 +566,7 @@ def _generate_competition_materials() -> Dict[str, Path]:
             bundle_name=f"{scenario.name}_analysis_bundle",
             design_chapter_markdown=design_outline,
             realism_payload=realism_payload,
-            policy_ab_markdown="# 反事实与 A/B 说明\n\n- 系统会导出精简版对照材料，用于方案汇报、复盘说明与结果归档。",
+            policy_ab_markdown="# 反事实与甲乙对照说明\n\n- 系统会导出精简版对照材料，用于方案汇报、复盘说明与结果归档。",
             architecture_graph={"nodes": [], "edges": []},
             causal_chain_graph={"nodes": [], "edges": []},
             defense_outline_markdown=analysis_playbook,
@@ -616,14 +617,14 @@ def _render_sidebar_global() -> None:
         
         st.markdown("---")
         st.markdown("### 推演模式设置")
-        sim_mode_display = {"SMART": "智能模式（API 优先 + 自动回退）", "DEEP": "深度模式（Reasoner + Chat）"}
+        sim_mode_display = {"SMART": "智能模式（在线接口优先 + 自动回退）", "DEEP": "深度模式（推理优先 + 对话回退）"}
         selected_mode_key = st.radio(
-            "选择 LLM 调度策略",
+            "选择大模型调度策略",
             options=["SMART", "DEEP"],
             index=0 if st.session_state.simulation_mode == "SMART" else 1,
             format_func=lambda x: sim_mode_display.get(x, x),
             label_visibility="collapsed",
-            help="智能模式优先在线 API，失败自动回退；深度模式优先 Reasoner，适合深入解读。"
+            help="智能模式优先在线接口，失败自动回退；深度模式优先推理模型，适合深入解读。"
         )
         if selected_mode_key != st.session_state.simulation_mode:
             st.session_state.simulation_mode = selected_mode_key
@@ -652,7 +653,7 @@ def _render_sidebar_global() -> None:
             st.markdown(f"<div style='font-size: 12px; margin-top: 10px; color: #8aa0c2;'>{status} | 在线成功={online_success} | 降级={fallback_total} | 成功率={success_rate:.0%}</div>", unsafe_allow_html=True)
 
         st.markdown("---")
-        st.caption("主线入口聚焦政策分析、历史验证与研判分析；监管优化、A/B 对照与研究验证已收敛到模块内部。")
+        st.caption("主线入口聚焦政策分析、历史验证与研判分析；监管优化、甲乙对照与研究验证已收敛到模块内部。")
 
         if st.session_state.entry in {OVERVIEW_ENTRY, "研判分析"}:
             scenarios = list_competition_scenarios()
@@ -1051,7 +1052,7 @@ def _render_overview_home() -> None:
         <div class="summary-card">
           <div class="summary-label">技术意义</div>
           <div class="summary-value">让大模型从“能理解政策”走向“能参与政策预演”</div>
-          <div class="summary-note">通过结构化政策编译、多智能体认知决策、历史对照验证与反事实推演，把 AI 能力落到可运行、可验证、可交付的系统中。</div>
+          <div class="summary-note">通过结构化政策编译、多智能体认知决策、历史对照验证与反事实推演，把大模型能力落到可运行、可验证、可交付的系统中。</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1077,7 +1078,7 @@ def _render_overview_home() -> None:
         ),
         (
             "后端沉淀能力",
-            ["政策结构化包", "向量记忆 / 事件库", "监管优化 / Pareto", "多格式报告导出"],
+            ["政策结构化包", "向量记忆 / 事件库", "监管优化 / 帕累托", "多格式报告导出"],
             "很多能力已完成工程沉淀，前端负责把能力链按分析逻辑组织出来。",
         ),
         (
@@ -1103,7 +1104,7 @@ def _render_overview_home() -> None:
 def _render_advanced_analysis() -> None:
     st.session_state.runtime_mode = DEMO_MODE
     st.markdown("## 研判分析中心")
-    st.caption("这里集中展示 AI 证据链、行为诊断、监管优化、研究验证与结果归档能力。")
+    st.caption("这里集中展示大模型证据链、行为诊断、监管优化、研究验证与结果归档能力。")
     briefing_cols = st.columns(3)
     briefing_cards = [
         (
@@ -1112,7 +1113,7 @@ def _render_advanced_analysis() -> None:
         ),
         (
             "监管策略优化",
-            "围绕候选动作、A/B 差分、Pareto 权衡和推荐方案形成真正可汇报的决策支持过程。",
+            "围绕候选动作、甲乙差分、帕累托权衡和推荐方案形成真正可汇报的决策支持过程。",
         ),
         (
             "结果归档与复用",
@@ -1129,7 +1130,7 @@ def _render_advanced_analysis() -> None:
             """,
             unsafe_allow_html=True,
         )
-    tab0, tab1, tab2, tab3, tab4 = st.tabs(["研究工作台", "AI 决策证据", "行为与风险诊断", "监管优化与 A/B", "研究验证与归档"])
+    tab0, tab1, tab2, tab3, tab4 = st.tabs(["研究工作台", "大模型决策证据", "行为与风险诊断", "监管优化与甲乙对照", "研究验证与归档"])
 
     with tab0:
         _render_research_workbench_tab()

@@ -31,10 +31,10 @@ from ui.components.scorecard_panel import render_scorecard_panel
 from ui.narrative import render_narrative_block
 
 INDEX_OPTIONS = {
-    "上证指数 (sh000001)": "sh000001",
-    "沪深300 (sh000300)": "sh000300",
-    "深证成指 (sz399001)": "sz399001",
-    "创业板指 (sz399006)": "sz399006",
+    "上证指数（sh000001）": "sh000001",
+    "沪深300（sh000300）": "sh000300",
+    "深证成指（sz399001）": "sz399001",
+    "创业板指（sz399006）": "sz399006",
 }
 
 STRATEGY_OPTIONS = {
@@ -105,7 +105,7 @@ def _render_equity_chart(frame: pd.DataFrame) -> None:
     fig.add_trace(
         go.Scatter(x=frame["date"], y=frame["benchmark"], mode="lines", name="基准净值", line=dict(width=1.8, color="#2f80ed"))
     )
-    fig.update_layout(template="plotly_dark", height=380, margin=dict(l=10, r=10, t=35, b=10), title="策略净值 vs 基准净值")
+    fig.update_layout(template="plotly_dark", height=380, margin=dict(l=10, r=10, t=35, b=10), title="策略净值与基准净值")
     st.plotly_chart(fig, use_container_width=True, key="backtest_equity_chart")
     render_narrative_block(
         "策略净值与基准走势解读",
@@ -641,9 +641,9 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
     base_policy_shock = float(cfg_live.get("policy_shock", 0.0))
     p_col1, p_col2, p_col3 = st.columns(3)
     with p_col1:
-        policy_a = st.number_input("政策 A 冲击", value=base_policy_shock, step=0.05, key="policy_a_shock_input")
+        policy_a = st.number_input("政策甲冲击", value=base_policy_shock, step=0.05, key="policy_a_shock_input")
     with p_col2:
-        policy_b = st.number_input("政策 B 冲击", value=base_policy_shock + 0.30, step=0.05, key="policy_b_shock_input")
+        policy_b = st.number_input("政策乙冲击", value=base_policy_shock + 0.30, step=0.05, key="policy_b_shock_input")
     with p_col3:
         run_compare = st.button("生成政策甲乙对比报告", use_container_width=True)
 
@@ -672,7 +672,7 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
             render_narrative_block(
                 "政策甲乙对比解读",
                 _localize_table(compare_df).head(12).to_dict(orient="records"),
-                context="请比较政策 A 与政策 B 的收益、风险与稳定性差异，并指出更适合展示的方案。",
+                context="请比较政策甲与政策乙的收益、风险与稳定性差异，并指出更适合展示的方案。",
                 cache_namespace="backtest_panel_narrative_cache",
             )
             csv_data = compare_df.to_csv(index=False).encode("utf-8-sig")

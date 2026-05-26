@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from config import DEFAULT_DEEPSEEK_API_KEY, DEFAULT_ZHIPU_API_KEY
+
 
 def _load_local_env_file(path: str = ".env") -> None:
     """Load simple KEY=VALUE pairs from local .env without overriding shell env."""
@@ -46,11 +48,14 @@ def _env_int(name: str, default: int) -> int:
 
 @dataclass(frozen=True, slots=True)
 class LLMSettings:
-    deepseek_api_key: str = field(default_factory=lambda: os.environ.get("DEEPSEEK_API_KEY", "").strip())
+    deepseek_api_key: str = field(
+        default_factory=lambda: os.environ.get("DEEPSEEK_API_KEY", "").strip() or DEFAULT_DEEPSEEK_API_KEY
+    )
     zhipu_api_key: str = field(
         default_factory=lambda: (
             os.environ.get("ZHIPUAI_API_KEY", "").strip()
             or os.environ.get("ZHIPU_API_KEY", "").strip()
+            or DEFAULT_ZHIPU_API_KEY
         )
     )
     default_provider: str = field(default_factory=lambda: os.environ.get("LLM_DEFAULT_PROVIDER", "auto").strip() or "auto")

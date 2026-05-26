@@ -49,7 +49,7 @@ _SMART_PROFILE = RuntimeModeProfile(
     fast_slow_trigger=True,
     pause_for_llm_seconds=0.1,
     model_priority=("deepseek-v4-flash", "deepseek-chat", "glm-4-flashx"),
-    summary="默认在线 API 优先，单次调用失败时自动回退离线兜底链路。",
+    summary="默认在线接口优先，单次调用失败时自动回退离线兜底链路。",
 )
 
 _DEEP_PROFILE = RuntimeModeProfile(
@@ -63,7 +63,7 @@ _DEEP_PROFILE = RuntimeModeProfile(
     fast_slow_trigger=True,
     pause_for_llm_seconds=0.35,
     model_priority=("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-reasoner", "deepseek-chat", "glm-4-flashx"),
-    summary="启用 API 驱动的深度推演，强调快慢思考触发与委员会式防幻觉路径。",
+    summary="启用在线接口驱动的深度推演，强调快慢思考触发与委员会式防幻觉路径。",
 )
 
 

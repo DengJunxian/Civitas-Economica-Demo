@@ -135,7 +135,7 @@ def render_replay_scrubber(
     st.session_state.setdefault(cursor_key, 0)
     st.session_state.setdefault(playing_key, False)
 
-    st.markdown("### Replay scrubber")
+    st.markdown("### 回放定位器")
     controls = st.columns([0.7, 0.7, 0.7, 3.2])
     if controls[0].button("暂停" if st.session_state[playing_key] else "播放", key=f"{key_prefix}_play", use_container_width=True):
         st.session_state[playing_key] = not bool(st.session_state[playing_key])
@@ -146,7 +146,7 @@ def render_replay_scrubber(
         st.session_state[cursor_key] = min(len(timeline) - 1, int(st.session_state[cursor_key]) + 1)
         st.session_state[playing_key] = False
 
-    mode = controls[3].radio("回放粒度", ["交易日", "tick"], horizontal=True, key=f"{key_prefix}_mode")
+    mode = controls[3].radio("回放粒度", ["交易日", "逐笔"], horizontal=True, key=f"{key_prefix}_mode")
     if st.session_state[playing_key]:
         st.session_state[cursor_key] = min(len(timeline) - 1, int(st.session_state[cursor_key]) + 1)
         if int(st.session_state[cursor_key]) >= len(timeline) - 1:

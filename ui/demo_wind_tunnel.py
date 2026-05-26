@@ -318,7 +318,7 @@ def render_demo_tab(ctrl: Optional[Any] = None) -> None:
     _render_three_stage_story(scenario, current_step)
 
     st.markdown("---")
-    st.subheader("A/B 世界对照")
+    st.subheader("甲乙世界对照")
     world_b = _counterfactual_world(metrics)
     fig_market = dashboard_ui.render_market_overview(metrics, current_step, key_prefix="defense")
     fig_ab = dashboard_ui.render_ab_world_compare(metrics, world_b, key_prefix="defense")

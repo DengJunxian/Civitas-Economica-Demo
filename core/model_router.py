@@ -110,12 +110,12 @@ class ModelRouter:
 
     def __init__(
         self,
-        deepseek_key: str,
+        deepseek_key: Optional[str] = None,
         zhipu_key: Optional[str] = None,
         local_cache_path: Optional[str] = None,
     ):
-        self.deepseek_key = deepseek_key
-        self.zhipu_key = zhipu_key
+        self.deepseek_key = deepseek_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY or ""
+        self.zhipu_key = zhipu_key or GLOBAL_CONFIG.ZHIPU_API_KEY or ""
 
         self.clients: Dict[str, AsyncOpenAI] = {}
         self._init_clients()
@@ -124,8 +124,8 @@ class ModelRouter:
         self.available_models = self._get_available_models()
 
         self.fallback_events: List[Dict[str, Any]] = []
-        self.has_deepseek = bool(deepseek_key)
-        self.has_zhipu = bool(zhipu_key)
+        self.has_deepseek = bool(self.deepseek_key)
+        self.has_zhipu = bool(self.zhipu_key)
 
         default_cache_path = Path("data") / "cache" / "model_router_cache.json"
         self.local_cache_path = Path(local_cache_path) if local_cache_path else default_cache_path

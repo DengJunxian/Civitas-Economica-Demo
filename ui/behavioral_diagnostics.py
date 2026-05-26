@@ -60,7 +60,7 @@ def _render_social_propagation_report(report: Dict[str, Any]) -> None:
 
     st.dataframe(
         pd.DataFrame(
-            [{"Node type": key, "Count": value} for key, value in sorted(node_types.items(), key=lambda item: item[1], reverse=True)]
+            [{"节点类型": key, "数量": value} for key, value in sorted(node_types.items(), key=lambda item: item[1], reverse=True)]
         ),
         use_container_width=True,
         hide_index=True,
@@ -208,7 +208,7 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
 
     # Intervention A/B panel
     ab_path = Path("outputs") / "intervention_effect_report.json"
-    st.markdown("### 干预前后对照（A/B）")
+    st.markdown("### 干预前后甲乙对照")
     if ab_path.exists():
         try:
             ab = json.loads(ab_path.read_text(encoding="utf-8"))
@@ -231,7 +231,7 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
                 cache_namespace="behavioral_diag_narrative_cache",
             )
         except Exception as exc:
-            st.warning(f"A/B 报告读取失败：{exc}")
+            st.warning(f"甲乙对照报告读取失败：{exc}")
     else:
         st.info("未发现 outputs/intervention_effect_report.json。")
 

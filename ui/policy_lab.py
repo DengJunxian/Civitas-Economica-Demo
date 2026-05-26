@@ -3075,34 +3075,38 @@ def _build_agent_fmri_rows(session: Dict[str, Any], package_dict: Dict[str, Any]
         score = float(raw_score or 0.0)
         action_key = "BUY" if score >= 0.12 else "SELL" if score <= -0.12 else "HOLD"
         status_key = "Risk-On" if score >= 0.18 else "Risk-Off" if score <= -0.18 else "Observe"
-        action = zh_action_name(action_key)
-        status = zh_value(status_key)
+        action_display = zh_action_name(action_key)
+        status_display = zh_value(status_key)
         confidence = min(0.92, 0.45 + abs(score) * 0.35 + panic * 0.10)
         qty = int(max(0.0, abs(score) * 12000.0))
         display_agent = _translate_role(str(agent_name))
         rows.append(
             {
-                "agent": display_agent,
+                "agent": str(agent_name),
+                "agent_display": display_agent,
                 "agent_key": str(agent_name),
                 "score": score,
-                "status": status,
+                "status": status_key,
+                "status_display": status_display,
                 "sentiment": max(-1.0, min(1.0, score - panic * 0.35)),
                 "decision": {
-                    "action": action,
+                    "action": action_key,
+                    "action_display": action_display,
                     "ticker": str(session.get("index_symbol", "A_SHARE_IDX")),
                     "price": round(price, 2),
                     "qty": qty,
                     "confidence": round(confidence, 2),
                 },
-                "decision_label": f"{action} · {qty:,}",
+                "decision_label": f"{action_key} · {qty:,}",
+                "decision_label_display": f"{action_display} · {qty:,}",
                 "thought": (
                     f"围绕“{policy_text[:48] or '当前政策'}”做重估。"
                     f"当前买量 {buy_volume:.0f}、卖量 {sell_volume:.0f}，"
-                    f"恐慌度 {panic:.2f}，因此倾向 {action}。"
+                    f"恐慌度 {panic:.2f}，因此倾向 {action_display}。"
                 ),
-                "meta_line": f"情绪 {max(-1.0, min(1.0, score - panic * 0.35)):+.2f}｜状态 {status}",
+                "meta_line": f"情绪 {max(-1.0, min(1.0, score - panic * 0.35)):+.2f}｜状态 {status_display}",
                 "history": [
-                    f"记录 {idx + 1}: {action}",
+                    f"记录 {idx + 1}: {action_display}",
                     f"记录 {idx + 2}: {zh_action_name('HOLD') if action_key != 'HOLD' else zh_action_name('BUY')}",
                     f"记录 {idx + 3}: {zh_action_name('SELL') if action_key == 'BUY' else zh_action_name('HOLD')}",
                 ],
@@ -3134,9 +3138,11 @@ def _render_agent_fmri_panel(session: Dict[str, Any], package_dict: Dict[str, An
         )
         for item in rows:
             agent_name = str(item["agent"])
+            display_agent = str(item.get("agent_display", agent_name))
             sentiment = float(item["sentiment"])
             selected = agent_name == str(st.session_state.get(select_key, ""))
-            button_label = f"{agent_name}  {'●' if sentiment >= 0 else '○'}  {str(item['decision']['action'])}"
+            action_text = str(item.get("decision", {}).get("action_display") or zh_action_name(str(item["decision"]["action"])))
+            button_label = f"{display_agent}  {'●' if sentiment >= 0 else '○'}  {action_text}"
             if st.button(
                 button_label,
                 key=f"policy_lab_agent_btn_{agent_name}",
@@ -3159,7 +3165,7 @@ def _render_agent_fmri_panel(session: Dict[str, Any], package_dict: Dict[str, An
             st.markdown(
                 f"""
                 <div class="pulse-card pulse-card-{tone}">
-                  <div class="summary-label">{selected['agent']}</div>
+                  <div class="summary-label">{selected.get('agent_display', selected['agent'])}</div>
                   <div class="summary-value">{float(selected['sentiment']):+.2f}</div>
                   <div class="summary-note">{selected['meta_line']}</div>
                 </div>
@@ -3168,10 +3174,11 @@ def _render_agent_fmri_panel(session: Dict[str, Any], package_dict: Dict[str, An
             )
         with top_right:
             score_frame = pd.DataFrame(rows)
+            score_frame["agent_label"] = score_frame.apply(lambda row: row.get("agent_display") or row.get("agent"), axis=1)
             fig = go.Figure(
                 data=[
                     go.Bar(
-                        x=score_frame["agent"],
+                        x=score_frame["agent_label"],
                         y=score_frame["score"],
                         marker_color=["#22c55e" if value >= 0 else "#ef4444" for value in score_frame["score"]],
                     )
@@ -3189,7 +3196,7 @@ def _render_agent_fmri_panel(session: Dict[str, Any], package_dict: Dict[str, An
             )
             st.plotly_chart(fig, use_container_width=True)
         st.markdown("#### 当前决策")
-        action_cn = str(selected["decision"]["action"])
+        action_cn = str(selected.get("decision", {}).get("action_display") or zh_action_name(str(selected["decision"]["action"])))
         st.info(f"**操作**: {action_cn} | **信心度**: {selected['decision']['confidence']*100:.0f}% | **预期交易量**: {selected['decision']['qty']} 份")
         st.markdown("#### 判断依据")
         st.markdown(f"> {selected['thought']}")

@@ -17,19 +17,28 @@
 <node id="政府"/>
 <node id="提高流动性支持"/>
 <node id="稳定市场预期"/>
+<node id="盘中事件"/>
+<node id="重大新闻冲击"/>
+<node id="市场波动"/>
+<node id="释放流动性支持"/>
+<node id="资本市场"/>
 <edge source="下调印花税" target="政策工具">
   <data key="d0">属于</data>
   <data key="d1">2.8</data>
 </edge>
 <edge source="下调印花税" target="释放流动性">
   <data key="d0">导致</data>
-  <data key="d1">2.0999999999999996</data>
+  <data key="d1">4.9</data>
 </edge>
 <edge source="下调印花税" target="政策">
   <data key="d0">属于</data>
-  <data key="d1">1.8</data>
+  <data key="d1">6.300000000000001</data>
 </edge>
 <edge source="下调印花税" target="市场情绪">
+  <data key="d0">利好</data>
+  <data key="d1">0.8</data>
+</edge>
+<edge source="下调印花税" target="资本市场">
   <data key="d0">利好</data>
   <data key="d1">0.8</data>
 </edge>
@@ -47,7 +56,7 @@
 </edge>
 <edge source="释放流动性" target="政策">
   <data key="d0">属于</data>
-  <data key="d1">1.8</data>
+  <data key="d1">5.4</data>
 </edge>
 <edge source="释放流动性" target="流动性不足">
   <data key="d0">缓解</data>
@@ -60,6 +69,10 @@
 <edge source="重大新闻" target="市场冲击因素">
   <data key="d0">属于</data>
   <data key="d1">1.0</data>
+</edge>
+<edge source="重大新闻" target="盘中事件">
+  <data key="d0">属于</data>
+  <data key="d1">0.8</data>
 </edge>
 <edge source="市场冲击因素" target="盘中波动">
   <data key="d0">导致</data>
@@ -77,8 +90,24 @@
   <data key="d0">发布</data>
   <data key="d1">0.9</data>
 </edge>
+<edge source="稳市政策" target="政策">
+  <data key="d0">发布</data>
+  <data key="d1">1.0</data>
+</edge>
 <edge source="提高流动性支持" target="稳定市场预期">
   <data key="d0">导致</data>
-  <data key="d1">0.7</data>
+  <data key="d1">1.6</data>
+</edge>
+<edge source="重大新闻冲击" target="市场波动">
+  <data key="d0">导致</data>
+  <data key="d1">0.6</data>
+</edge>
+<edge source="释放流动性支持" target="政策">
+  <data key="d0">属于</data>
+  <data key="d1">0.9</data>
+</edge>
+<edge source="释放流动性支持" target="资本市场">
+  <data key="d0">利好</data>
+  <data key="d1">0.8</data>
 </edge>
 </graph></graphml>

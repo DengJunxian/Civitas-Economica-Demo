@@ -208,7 +208,7 @@ VALUE_TRANSLATIONS = {
     "complement": "补充指标",
     "leading": "前导指标",
     "lagging": "滞后指标",
-    "strict": "基准评估",
+    "strict": "严格验证",
     "demo": "展示增强",
     "factor": "因子回测",
     "agent": "新闻驱动政策仿真",

@@ -26,7 +26,7 @@ from core.competition_compliance import (
     write_competition_compliance_artifacts,
 )
 from core.model_router import ModelRouter
-from core.runtime_mode import merge_mode_feature_flags, resolve_runtime_mode_profile
+from core.runtime_mode import merge_mode_feature_flags, normalize_runtime_mode, resolve_runtime_mode_profile
 from core.ui_text import display_runtime_mode, display_scenario_name, localize_dataframe_columns, zh_world_name
 from ui.backtest_panel import render_backtest_panel
 from ui.behavioral_diagnostics import render_behavioral_diagnostics
@@ -118,7 +118,8 @@ def _feature_flag_enabled(flag_name: str, *, default: bool = False) -> bool:
 
 
 def _sync_runtime_mode_profile() -> None:
-    mode = str(st.session_state.get("simulation_mode", "SMART"))
+    mode = normalize_runtime_mode(str(st.session_state.get("simulation_mode", "SMART")))
+    st.session_state.simulation_mode = mode
     profile = resolve_runtime_mode_profile(mode)
     st.session_state.runtime_mode_profile = profile.to_dict()
     flags = st.session_state.get("feature_flags", {})
@@ -617,14 +618,14 @@ def _render_sidebar_global() -> None:
         
         st.markdown("---")
         st.markdown("### 推演模式设置")
-        sim_mode_display = {"SMART": "智能模式（在线接口优先 + 自动回退）", "DEEP": "深度模式（推理优先 + 对话回退）"}
+        sim_mode_display = {"SMART": "智能模式（仅智谱 GLM）", "DEEP": "高级模式（DeepSeek + 智谱混用）"}
         selected_mode_key = st.radio(
             "选择大模型调度策略",
             options=["SMART", "DEEP"],
             index=0 if st.session_state.simulation_mode == "SMART" else 1,
             format_func=lambda x: sim_mode_display.get(x, x),
             label_visibility="collapsed",
-            help="智能模式优先在线接口，失败自动回退；深度模式优先推理模型，适合深入解读。"
+            help="智能模式只接入智谱模型；高级模式沿用 DeepSeek 与智谱混合调度。"
         )
         if selected_mode_key != st.session_state.simulation_mode:
             st.session_state.simulation_mode = selected_mode_key

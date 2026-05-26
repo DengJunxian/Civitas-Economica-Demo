@@ -9,7 +9,8 @@ import os
 from types import ModuleType
 from typing import Optional, List, Any, cast
 
-from config import DEFAULT_DEEPSEEK_API_KEY
+from config import DEFAULT_DEEPSEEK_API_KEY, DEFAULT_ZHIPU_API_KEY
+from core.runtime_mode import llm_mode_for_model
 from core.llm.router import sync_llm_complete
 
 _openai_module: Optional[ModuleType]
@@ -31,31 +32,46 @@ class APIBackend:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        base_url: str = "https://api.deepseek.com/v1",
+        base_url: Optional[str] = None,
         model: str = "deepseek-reasoner",
         max_tokens: int = 512,
         temperature: float = 0.7
     ):
-        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY") or DEFAULT_DEEPSEEK_API_KEY
-        self.base_url = base_url
         self.model = model
+        self.api_key = api_key or self._default_api_key_for_model(model)
+        self.base_url = base_url or self._default_base_url_for_model(model)
         self.max_tokens = max_tokens
         self.temperature = temperature
         
         self._client: Optional[Any] = None
 
+    @staticmethod
+    def _default_api_key_for_model(model: str) -> str:
+        name = str(model or "").lower()
+        if name.startswith("glm-"):
+            return (
+                os.getenv("ZHIPUAI_API_KEY", "").strip()
+                or os.getenv("ZHIPU_API_KEY", "").strip()
+                or DEFAULT_ZHIPU_API_KEY
+            )
+        return os.getenv("DEEPSEEK_API_KEY") or DEFAULT_DEEPSEEK_API_KEY
+
+    @staticmethod
+    def _default_base_url_for_model(model: str) -> str:
+        name = str(model or "").lower()
+        if name.startswith("glm-"):
+            return os.getenv("ZHIPU_API_BASE_URL", "https://open.bigmodel.cn/api/paas/v4").strip()
+        return os.getenv("DEEPSEEK_API_BASE_URL", "https://api.deepseek.com/v1").strip()
+
     def _mode_for_model(self) -> str:
-        name = str(self.model or "").lower()
-        if "v4-pro" in name or "reasoner" in name:
-            return "slow"
-        return "fast"
+        return llm_mode_for_model(self.model)
         
     def _get_client(self) -> Any:
         if self._client is None:
             if not OPENAI_AVAILABLE:
                 raise ImportError("openai 库未安装，请运行: pip install openai")
             if not self.api_key:
-                raise ValueError("DEEPSEEK_API_KEY 未设置")
+                raise ValueError("模型 API Key 未设置")
             module: Optional[ModuleType] = cast(Optional[ModuleType], _openai_module)
             if module is None:
                 raise ImportError("openai 客户端不可用")
@@ -87,7 +103,7 @@ class APIBackend:
         try:
             routed = sync_llm_complete(
                 messages,
-                mode=kwargs.get("mode", self._mode_for_model()),
+                mode=kwargs.get("mode") or self._mode_for_model(),
                 task_type=kwargs.get("task_type"),
                 model=self.model,
                 temperature=kwargs.get("temperature", self.temperature),

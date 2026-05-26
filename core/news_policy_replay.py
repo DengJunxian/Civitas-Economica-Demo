@@ -62,6 +62,7 @@ class NewsDrivenPolicyReplayEngine(FactorBacktestEngine):
 
     def _build_policy_session(self, frame: pd.DataFrame) -> PolicySession:
         start_date = str(pd.to_datetime(frame.iloc[0]["date"], errors="coerce").strftime("%Y-%m-%d"))
+        model_priority = tuple(self.config.llm_model_priority or ([self.config.llm_model] if self.config.llm_model else ["glm-4-flashx"]))
         return PolicySession.create(
             agents=[],
             total_days=max(1, int(len(frame))),
@@ -69,13 +70,13 @@ class NewsDrivenPolicyReplayEngine(FactorBacktestEngine):
             start_date=start_date,
             half_life_days=10.0,
             enable_random_policy_events=False,
-            simulation_mode="SMART",
+            simulation_mode=str(self.config.runtime_mode or "SMART"),
             use_isolated_matching=False,
             market_pipeline_v2=True,
             llm_primary=False,
             enable_policy_committee=False,
             steps_per_day=1,
-            model_priority=("deepseek-chat",),
+            model_priority=model_priority,
             hybrid_replay=True,
             exogenous_backdrop=self._build_backdrop_rows(frame),
             hybrid_backdrop_weight=0.60,
@@ -197,6 +198,8 @@ class NewsDrivenPolicyReplayEngine(FactorBacktestEngine):
             scope=self.config.news_scope,
             topk_per_day=max(1, int(self.config.news_topk_per_day)),
             persist=bool(self.config.persist_news_events),
+            llm_model=str(self.config.llm_model or "glm-4-flashx"),
+            llm_mode=self.config.llm_mode or None,
         )
         digest_map = {item["date"]: item for item in news_bundle.digest_rows()}
 

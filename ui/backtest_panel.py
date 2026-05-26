@@ -21,6 +21,7 @@ from core.backtester import (
     HistoricalBacktester,
 )
 from core.eval import build_replay_scorecard
+from core.runtime_mode import llm_mode_for_model, normalize_runtime_mode, resolve_runtime_mode_profile
 from core.tear_sheet import (
     build_standard_tear_sheet,
     compare_scenarios,
@@ -345,6 +346,25 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
         st.session_state.policy_ab_compare = None
 
     cfg_state = st.session_state.get("backtest_cfg", {})
+    mode_display = {
+        "SMART": "智能模式（仅智谱 GLM）",
+        "DEEP": "高级模式（DeepSeek + 智谱混用）",
+    }
+    current_runtime_mode = normalize_runtime_mode(str(cfg_state.get("runtime_mode", st.session_state.get("simulation_mode", "SMART"))))
+    selected_runtime_mode = st.radio(
+        "模型模式",
+        options=["SMART", "DEEP"],
+        index=0 if current_runtime_mode == "SMART" else 1,
+        format_func=lambda value: mode_display.get(value, value),
+        horizontal=True,
+        key="backtest_runtime_mode_selector",
+        help="智能模式只调用智谱模型生成解读；高级模式沿用 DeepSeek 与智谱混合配置。",
+    )
+    runtime_profile = resolve_runtime_mode_profile(selected_runtime_mode)
+    st.session_state["simulation_mode"] = runtime_profile.mode
+    st.session_state["runtime_mode_profile"] = runtime_profile.to_dict()
+    llm_model = str(runtime_profile.model_priority[0]) if runtime_profile.model_priority else "glm-4-flashx"
+    llm_mode = llm_mode_for_model(llm_model)
 
     with st.form("backtest_config_form"):
         col_a, col_b, col_c = st.columns(3)
@@ -463,6 +483,10 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
             civitas_factor_weight=float(civitas_factor_weight),
             export_qlib_bundle=bool(export_qlib),
             qlib_bundle_path=qlib_bundle_path,
+            runtime_mode=runtime_profile.mode,
+            llm_model=llm_model,
+            llm_mode=llm_mode,
+            llm_model_priority=list(runtime_profile.model_priority),
         )
 
         st.session_state.backtest_cfg = {
@@ -486,6 +510,10 @@ def render_backtest_panel(ctrl: Any = None, *, show_header: bool = True) -> None
             "civitas_factor_weight": civitas_factor_weight,
             "export_qlib_bundle": export_qlib,
             "qlib_bundle_path": qlib_bundle_path,
+            "runtime_mode": runtime_profile.mode,
+            "llm_model": llm_model,
+            "llm_mode": llm_mode,
+            "llm_model_priority": list(runtime_profile.model_priority),
         }
 
         run_backtester = HistoricalBacktester(config)

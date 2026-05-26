@@ -303,16 +303,17 @@ class ModelRouter:
         """
         根据仿真模式获取模型优先级。
         
-        SMART (智能模式): DeepSeek Chat -> GLM (回退)
-        DEEP (深度模式): DeepSeek Reasoner -> DeepSeek Chat (超时/失败回退)
-        FAST (快速模式): DeepSeek Chat -> GLM (回退)
+        SMART (智能模式): 仅智谱 GLM
+        DEEP/ADVANCED (高级模式): DeepSeek -> GLM 混合回退
+        FAST (快速模式): 仅智谱 GLM
         """
-        if mode == "DEEP":
+        normalized = str(mode or "SMART").strip().upper()
+        if normalized in {"DEEP", "ADVANCED"}:
             base_priority = ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-reasoner", "deepseek-chat", "glm-4-flashx"]
-        elif mode == "SMART" or mode == "FAST":
-            base_priority = ["deepseek-v4-flash", "deepseek-chat", "glm-4-flashx", "glm-4-flashx-250414"]
+        elif normalized in {"SMART", "FAST"}:
+            base_priority = ["glm-4-flashx", "glm-4-flashx-250414"]
         else:
-            base_priority = ["deepseek-v4-flash", "deepseek-chat", "glm-4-flashx", "glm-4-flashx-250414"]
+            base_priority = ["glm-4-flashx", "glm-4-flashx-250414"]
             
         return [m for m in base_priority if m in self.available_models]
 
@@ -325,7 +326,7 @@ class ModelRouter:
         cache_key: Optional[str] = None,
     ) -> Tuple[str, Optional[str], str]:
         if not priority_models:
-            priority_models = self.get_model_priority("SMART") or ["deepseek-chat", "glm-4-flashx"]
+            priority_models = self.get_model_priority("SMART") or ["glm-4-flashx", "glm-4-flashx-250414"]
 
         resolved_cache_key = cache_key or self._build_cache_key(messages, priority_models)
         cached = self._read_local_cache(resolved_cache_key)
@@ -407,7 +408,7 @@ class ModelRouter:
         cache_key: Optional[str] = None,
     ) -> Tuple[str, Optional[str], str]:
         if not priority_models:
-            priority_models = self.get_model_priority("SMART") or ["deepseek-chat", "glm-4-flashx"]
+            priority_models = self.get_model_priority("SMART") or ["glm-4-flashx", "glm-4-flashx-250414"]
         return self._run_coro_sync(
             self.call_with_fallback(
                 messages=messages,

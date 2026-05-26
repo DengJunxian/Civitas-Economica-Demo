@@ -154,6 +154,8 @@ class HistoryNewsService:
         persist_local_cache: bool = True,
         persist_dataset: str = "history_replay_news",
         scenario_prefix: str = "history_replay_news",
+        llm_model: str = "glm-4-flashx",
+        llm_mode: Optional[str] = None,
     ) -> HistoryNewsBundle:
         start_ts = self._to_day_start(start_date)
         end_ts = self._to_day_end(end_date)
@@ -174,7 +176,7 @@ class HistoryNewsService:
         grouped = self._group_by_day(filtered, topk_per_day=max(1, int(topk_per_day)))
 
         digests = [
-            self._build_daily_digest(day, rows, symbol=symbol)
+            self._build_daily_digest(day, rows, symbol=symbol, llm_model=llm_model, llm_mode=llm_mode)
             for day, rows in sorted(grouped.items(), key=lambda item: item[0])
         ]
 
@@ -517,8 +519,16 @@ class HistoryNewsService:
             grouped[day] = entries[:topk_per_day]
         return grouped
 
-    def _build_daily_digest(self, day: str, rows: Sequence[Mapping[str, Any]], *, symbol: str) -> DailyNewsDigest:
-        llm = self._llm_digest(day=day, rows=rows, symbol=symbol)
+    def _build_daily_digest(
+        self,
+        day: str,
+        rows: Sequence[Mapping[str, Any]],
+        *,
+        symbol: str,
+        llm_model: str = "glm-4-flashx",
+        llm_mode: Optional[str] = None,
+    ) -> DailyNewsDigest:
+        llm = self._llm_digest(day=day, rows=rows, symbol=symbol, llm_model=llm_model, llm_mode=llm_mode)
         if llm is None:
             summary, shock_score = self._fallback_digest(rows)
         else:
@@ -550,7 +560,15 @@ class HistoryNewsService:
             source_mix=source_mix,
         )
 
-    def _llm_digest(self, *, day: str, rows: Sequence[Mapping[str, Any]], symbol: str) -> Optional[Dict[str, Any]]:
+    def _llm_digest(
+        self,
+        *,
+        day: str,
+        rows: Sequence[Mapping[str, Any]],
+        symbol: str,
+        llm_model: str = "glm-4-flashx",
+        llm_mode: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         if not rows:
             return {"summary": "当日未检索到可用新闻，沿用政策主线。", "shock_score": 0.0}
         try:
@@ -578,11 +596,12 @@ class HistoryNewsService:
             ]
         )
         try:
-            backend = APIBackend(model="deepseek-chat", max_tokens=180, temperature=0.2)
+            backend = APIBackend(model=str(llm_model or "glm-4-flashx"), max_tokens=180, temperature=0.2)
             text = str(
                 backend.generate(
                     prompt,
                     system_prompt="你是金融政策仿真助手，输出简洁且可执行。",
+                    mode=llm_mode,
                     timeout_budget=15.0,
                     fallback_response="",
                 )

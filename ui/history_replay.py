@@ -16,6 +16,7 @@ from core.backtester import BacktestConfig, BacktestResult, FactorBacktestEngine
 from core.history_news import HistoryNewsService
 from core.news_policy_replay import NewsDrivenPolicyReplayEngine
 from core.runtime_paths import resolve_runtime_path
+from core.runtime_mode import RuntimeModeProfile, llm_mode_for_model, normalize_runtime_mode, resolve_runtime_mode_profile
 from ui.backtest_panel import render_backtest_panel
 from ui import dashboard as dashboard_ui
 from core.ui_text import localize_dataframe_columns, zh_value
@@ -397,6 +398,7 @@ def _synthesize_period_policy_text(
     start_date: str,
     end_date: str,
     symbol: str,
+    runtime_profile: Optional[RuntimeModeProfile] = None,
 ) -> str:
     fallback_text = _fallback_period_policy_text(digest_rows, start_date, end_date, symbol)
     if not digest_rows:
@@ -416,12 +418,18 @@ def _synthesize_period_policy_text(
             f"事件摘要：{json.dumps(digest_rows[:12], ensure_ascii=False)}",
         ]
     )
+    model_name = (
+        str(runtime_profile.model_priority[0])
+        if runtime_profile is not None and runtime_profile.model_priority
+        else "glm-4-flashx"
+    )
     try:
-        backend = APIBackend(model="deepseek-chat", max_tokens=280, temperature=0.2)
+        backend = APIBackend(model=model_name, max_tokens=280, temperature=0.2)
         text = str(
             backend.generate(
                 prompt,
                 system_prompt="你是宏观政策研究员，请输出清晰、严谨、可执行的中文政策解读。",
+                mode=llm_mode_for_model(model_name),
                 timeout_budget=15.0,
                 fallback_response="",
             )
@@ -1483,6 +1491,11 @@ def _render_agent_replay_workspace(
         st.session_state.history_replay_result = None
 
     default_start, default_end = _default_window()
+    mode_display = {
+        "SMART": "智能模式（仅智谱 GLM）",
+        "DEEP": "高级模式（DeepSeek + 智谱混用）",
+    }
+    current_runtime_mode = normalize_runtime_mode(str(st.session_state.get("history_replay_runtime_mode", st.session_state.get("simulation_mode", "SMART"))))
 
     with st.form("history_replay_form"):
         col1, col2 = st.columns([1.2, 1.0])
@@ -1501,6 +1514,14 @@ def _render_agent_replay_workspace(
                 help="留空则自动使用模型提取结果；填写后优先使用你提供的文本。",
             )
         with col2:
+            selected_runtime_mode = st.radio(
+                "模型模式",
+                options=["SMART", "DEEP"],
+                index=0 if current_runtime_mode == "SMART" else 1,
+                format_func=lambda value: mode_display.get(value, value),
+                horizontal=True,
+                help="智能模式只调用智谱模型；高级模式沿用 DeepSeek 与智谱混排的历史配置。",
+            )
             background = st.selectbox(
                 "市场背景基调",
                 options=list(BACKGROUND_TEMPLATES.keys()),
@@ -1553,6 +1574,12 @@ def _render_agent_replay_workspace(
         if start_date >= end_date:
             st.error("开始日期必须早于结束日期。")
             return
+        runtime_profile = resolve_runtime_mode_profile(selected_runtime_mode)
+        st.session_state["history_replay_runtime_mode"] = runtime_profile.mode
+        st.session_state["simulation_mode"] = runtime_profile.mode
+        st.session_state["runtime_mode_profile"] = runtime_profile.to_dict()
+        llm_model = str(runtime_profile.model_priority[0]) if runtime_profile.model_priority else "glm-4-flashx"
+        llm_mode = llm_mode_for_model(llm_model)
 
         progress = st.progress(0.0)
         status = st.empty()
@@ -1569,6 +1596,8 @@ def _render_agent_replay_workspace(
                 scope="macro_index",
                 topk_per_day=int(news_topk_per_day),
                 persist=False,
+                llm_model=llm_model,
+                llm_mode=llm_mode,
             )
             digest_rows = pre_news_bundle.digest_rows()
             pre_news_coverage = dict(pre_news_bundle.coverage or {})
@@ -1583,6 +1612,7 @@ def _render_agent_replay_workspace(
             start_date=str(start_date),
             end_date=str(end_date),
             symbol=INDEX_OPTIONS[symbol_label],
+            runtime_profile=runtime_profile,
         )
         manual_policy_text = str(policy_text or "").strip()
         effective_policy_text = manual_policy_text or auto_policy_text
@@ -1615,6 +1645,10 @@ def _render_agent_replay_workspace(
             persist_news_events=bool(persist_news_events),
             auth_score_mode=str(auth_score_mode),
             random_seed=42,
+            runtime_mode=runtime_profile.mode,
+            llm_model=llm_model,
+            llm_mode=llm_mode,
+            llm_model_priority=list(runtime_profile.model_priority),
             feature_flags={
                 "agent_replay": bool(enable_agent_replay),
                 "strict_history_replay": bool(replay_mode == "strict"),
@@ -1703,6 +1737,10 @@ def _render_agent_replay_workspace(
             "history_case": None,
             "pre_news_coverage": pre_news_coverage,
             "pre_news_digest": pre_news_digest,
+            "runtime_mode": runtime_profile.mode,
+            "runtime_profile": runtime_profile.to_dict(),
+            "llm_model": llm_model,
+            "llm_mode": llm_mode,
         }
         bundle["authenticity_layers"] = _build_authenticity_layers(result)
         bundle["chart_data"] = _build_authenticity_chart_data(result, bundle["authenticity_layers"], baseline_result)
@@ -1734,6 +1772,7 @@ def _render_agent_replay_workspace(
 
     bullets = [
         f"核心政策输入：{bundle['policy_name']}",
+        f"模型模式：{mode_display.get(str(bundle.get('runtime_mode', 'SMART')), str(bundle.get('runtime_mode', 'SMART')))}",
         f"有效响应拟合度（趋势方向匹配）：{display_metrics.get('trend_alignment', 0.0):.0%}",
         f"单日影响错位均值：约 {display_metrics.get('response_gap', 0.0):.0f} 天以内",
     ]

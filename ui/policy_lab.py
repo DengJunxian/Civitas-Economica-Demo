@@ -24,7 +24,7 @@ from core.macro.government import GovernmentAgent, PolicyShock
 from core.objective_discovery import ObjectiveDiscoveryEngine
 from core.policy_session import PolicySession
 from core.runtime_paths import resolve_runtime_path
-from core.runtime_mode import RuntimeModeProfile, resolve_runtime_mode_profile
+from core.runtime_mode import RuntimeModeProfile, normalize_runtime_mode, resolve_runtime_mode_profile
 from core.ui_text import (
     localize_dataframe_columns,
     translate_display_text,
@@ -92,8 +92,11 @@ class PolicyNarrativeCard:
 
 
 def _resolve_runtime_profile() -> RuntimeModeProfile:
-    mode = str(st.session_state.get("simulation_mode", "SMART")).strip().upper()
-    return resolve_runtime_mode_profile(mode)
+    mode = normalize_runtime_mode(str(st.session_state.get("simulation_mode", "SMART")))
+    st.session_state["simulation_mode"] = mode
+    profile = resolve_runtime_mode_profile(mode)
+    st.session_state["runtime_mode_profile"] = profile.to_dict()
+    return profile
 
 
 def _run_async(coro: Any) -> Any:
@@ -159,7 +162,7 @@ def _default_template_library() -> List[Dict[str, Any]]:
 def _runtime_mode_text(runtime_profile: RuntimeModeProfile) -> str:
     mode_map = {
         "SMART": "标准推演模式",
-        "DEEP": "深度多智能体模式",
+        "DEEP": "高级推演模式",
         "LIVE": "实时联机模式",
         "DEMO": "场景推演模式",
     }
@@ -3700,13 +3703,30 @@ def _render_policy_entry_preview(
         st.dataframe(risk_rows, use_container_width=True, hide_index=True)
 
     st.info(
-        "本页接入的模型为智谱 GLM-4-flashx，用于政策文本理解、结构化抽取、部分智能体认知推理和解释性内容生成。"
+        "本页支持智能模式（仅智谱 GLM）与高级模式（DeepSeek + 智谱混用），用于政策文本理解、结构化抽取、部分智能体认知推理和解释性内容生成。"
     )
 
 
 def render_policy_lab(*, presentation_mode: str = "standard") -> None:
     st.subheader("政策实验")
     st.caption("仅供教学科研与仿真，不构成投资建议。")
+    mode_display = {
+        "SMART": "智能模式（仅智谱 GLM）",
+        "DEEP": "高级模式（DeepSeek + 智谱混用）",
+    }
+    current_mode = normalize_runtime_mode(str(st.session_state.get("simulation_mode", "SMART")))
+    selected_runtime_mode = st.radio(
+        "模型模式",
+        options=["SMART", "DEEP"],
+        index=0 if current_mode == "SMART" else 1,
+        format_func=lambda value: mode_display.get(value, value),
+        horizontal=True,
+        key="policy_lab_runtime_mode_selector",
+        help="智能模式只调用智谱模型；高级模式才启用原先 DeepSeek 与智谱混排的配置。",
+    )
+    if selected_runtime_mode != st.session_state.get("simulation_mode"):
+        st.session_state["simulation_mode"] = selected_runtime_mode
+        st.session_state["runtime_mode_profile"] = resolve_runtime_mode_profile(selected_runtime_mode).to_dict()
     runtime_profile = _resolve_runtime_profile()
     presentation_mode = str(presentation_mode or "standard").strip().lower()
     st.caption(f"当前模式：{_runtime_mode_text(runtime_profile)}")
@@ -3736,6 +3756,8 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
 
     st.markdown("### 政策实验入口：从自然语言到结构化政策冲击")
     st.caption("这里是整个平台最关键的入口。重点不是把政策文字展示出来，而是把自然语言政策真正编译成可驱动仿真的结构化政策包。")
+    provider_label = "智谱 GLM" if runtime_profile.mode == "SMART" else "DeepSeek + 智谱"
+    primary_model_label = "、".join(runtime_profile.model_priority[:2]) if runtime_profile.model_priority else provider_label
     entry_cols = st.columns([1.2, 1.0])
     with entry_cols[0]:
         selected_template_label = st.selectbox(
@@ -3751,11 +3773,11 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
     )
     with entry_cols[1]:
         st.markdown(
-            """
+            f"""
             <div class="summary-card">
               <div class="summary-label">大模型参与环节</div>
-              <div class="summary-value">GLM-4-flashx 负责把政策文本变成可执行推演输入</div>
-              <div class="summary-note">重点承担政策语义理解、结构化信息抽取、部分智能体认知推理和解释性内容生成。</div>
+              <div class="summary-value">{provider_label} 负责把政策文本变成可执行推演输入</div>
+              <div class="summary-note">当前候选链：{primary_model_label}；承担政策语义理解、结构化抽取、部分智能体认知推理和解释生成。</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -4063,11 +4085,11 @@ def render_policy_lab(*, presentation_mode: str = "standard") -> None:
         unsafe_allow_html=True,
     )
     scene_cols[2].markdown(
-        """
+        f"""
         <div class="summary-card">
           <div class="summary-label">模型参与说明</div>
-          <div class="summary-value">GLM-4-flashx 已接入会话推演链路</div>
-          <div class="summary-note">用于政策理解、结构化抽取、部分智能体认知推理与解释生成。</div>
+          <div class="summary-value">{provider_label} 已接入会话推演链路</div>
+          <div class="summary-note">当前候选链：{primary_model_label}；用于政策理解、结构化抽取、部分智能体认知推理与解释生成。</div>
         </div>
         """,
         unsafe_allow_html=True,

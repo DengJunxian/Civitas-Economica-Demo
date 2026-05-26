@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 import streamlit as st
 
+from core.runtime_mode import llm_mode_for_model
 from core.ui_text import zh_metric_name
 
 
@@ -358,15 +359,24 @@ def _llm_narrative(title: str, payload: Any, context: str = "", **context_kwargs
         _build_prompt(title, payload, context, **context_kwargs),
         _build_prompt(title, payload, context, retry_values=_specific_value_list(payload, limit=5), **context_kwargs),
     ]
+    model_name = "glm-4-flashx"
+    try:
+        runtime_profile = st.session_state.get("runtime_mode_profile", {})
+        priority = runtime_profile.get("model_priority", []) if isinstance(runtime_profile, dict) else []
+        if priority:
+            model_name = str(priority[0])
+    except Exception:
+        model_name = "glm-4-flashx"
+    model_mode = llm_mode_for_model(model_name)
 
     for prompt in prompts:
         try:
-            backend = APIBackend(model="deepseek-chat", max_tokens=420, temperature=0.35)
+            backend = APIBackend(model=model_name, max_tokens=420, temperature=0.35)
             content = str(
                 backend.generate(
                     prompt,
                     system_prompt=system_prompt,
-                    mode="fast",
+                    mode=model_mode,
                     task_type="ui_narrative",
                     max_tokens=420,
                     temperature=0.35,

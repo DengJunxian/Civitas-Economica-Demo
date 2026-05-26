@@ -646,7 +646,7 @@ JSON 格式示例：
         
         content_raw, reasoning, model_used = self.model_router.sync_call_with_fallback(
             messages,
-            priority_models=self.model_priority or ["deepseek-reasoner", "glm-4-flashx", "deepseek-chat"],
+            priority_models=self.model_priority or ["glm-4-flashx"],
             timeout_budget=15.0
         )
         
@@ -838,7 +838,7 @@ JSON 格式示例：
             ("macro_analyst", "Focus on macro and policy evidence. Output only strict JSON."),
             ("risk_analyst", "Focus on risk and social evidence. Output only strict JSON."),
         ]
-        priority = self.model_priority or model_priority or ["deepseek-reasoner", "deepseek-chat", "glm-4-flashx"]
+        priority = self.model_priority or model_priority or ["glm-4-flashx"]
         try:
             per_role_timeout = float(os.environ.get("CIVITAS_AGENT_LLM_CALL_TIMEOUT_SECONDS", "9.0") or 9.0)
         except (TypeError, ValueError):

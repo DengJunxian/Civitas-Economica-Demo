@@ -223,7 +223,7 @@ class CivitasModel(Model):
                 agent_id=f"nt_{idx}",
                 cash_balance=10_000_000_000.0,
             )
-            nt_priority = ["deepseek-reasoner"] if mode in ["DEEP", "SMART"] else ["deepseek-chat"]
+            nt_priority = ["deepseek-reasoner", "glm-4-flashx"] if mode == "DEEP" else ["glm-4-flashx"]
             CivitasAgent(
                 model=self,
                 investor_type=InvestorType.DISCIPLINED_QUANT,

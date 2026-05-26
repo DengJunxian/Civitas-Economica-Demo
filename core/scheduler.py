@@ -19,9 +19,9 @@ from core.account import Portfolio
 
 class SimulationMode(Enum):
     """仿真模式枚举"""
-    SMART = "SMART"  # 智能模式：自适应调度，≤15秒/天
-    FAST = "FAST"    # 快速模式：仅对话模型，≤5秒/天
-    DEEP = "DEEP"    # 深度模式：仅推理模型，≤30秒/天
+    SMART = "SMART"  # 智能模式：仅智谱 GLM，≤15秒/天
+    FAST = "FAST"    # 快速模式：仅智谱 GLM，≤5秒/天
+    DEEP = "DEEP"    # 高级模式：DeepSeek + 智谱混合，≤30秒/天
 
 
 from core.mesa.civitas_model import CivitasModel

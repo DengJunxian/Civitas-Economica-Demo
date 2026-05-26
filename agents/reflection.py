@@ -208,7 +208,7 @@ class ReflectionEngine:
                     {"role": "system", "content": "你是一位善于自我反思的投资者。"},
                     {"role": "user", "content": reflection_prompt}
                 ],
-                priority_models=["deepseek-reasoner", "glm-4-flashx", "deepseek-chat"],
+                priority_models=["glm-4-flashx"],
                 timeout_budget=30.0
             )
             
@@ -283,7 +283,7 @@ class ReflectionEngine:
                     {"role": "system", "content": "你是一位专业的金融日记作者。"},
                     {"role": "user", "content": diary_prompt}
                 ],
-                priority_models=["deepseek-reasoner", "glm-4-flashx", "deepseek-chat"],
+                priority_models=["glm-4-flashx"],
                 timeout_budget=40.0
             )
             

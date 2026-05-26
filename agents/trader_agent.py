@@ -153,7 +153,10 @@ class TraderAgent(BaseAgent):
         
         # GraphRAG 璁板繂灞?
         self.graph_memory = GraphMemoryBank(agent_id=self.agent_id)
-        self.graph_extractor = GraphExtractor(model_router=self.brain.model_router if hasattr(self, 'brain') else model_router)
+        self.graph_extractor = GraphExtractor(
+            model_router=self.brain.model_router if hasattr(self, 'brain') else model_router,
+            model_priority=model_priority,
+        )
         
         # Sync initial confidence
         self.brain.state.confidence = self.profile.get("confidence_level", 0.5) * 100
@@ -862,9 +865,10 @@ class TraderAgent(BaseAgent):
         beliefs: List[str] = []
         try:
             if getattr(self.brain, "model_router", None):
+                priority = getattr(self.brain, "model_priority", None) or ["glm-4-flashx"]
                 content, _, _ = self.brain.model_router.sync_call_with_fallback(
                     messages=messages,
-                    priority_models=["deepseek-chat", "glm-4-flashx"],
+                    priority_models=list(priority),
                     timeout_budget=20.0,
                 )
                 parsed = json.loads(content)
@@ -1645,4 +1649,3 @@ class TraderAgent(BaseAgent):
         if self.social_graph and self.social_node_id is not None:
             return self.social_graph.generate_social_summary(self.social_node_id)
         return "Not bound to social graph."
-

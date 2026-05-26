@@ -95,6 +95,39 @@ async def test_fast_low_latency_tasks_do_not_call_slow_model():
 
 
 @pytest.mark.asyncio
+async def test_smart_mode_uses_zhipu_only():
+    deepseek = FakeClient("deepseek", ["should-not-run"])
+    zhipu = FakeClient("zhipu", ["glm-ok"])
+    router = LLMRouter(deepseek_client=deepseek, zhipu_client=zhipu)
+
+    response = await router.complete([{"role": "user", "content": "policy"}], mode="smart")
+
+    assert response.ok is True
+    assert response.provider == "zhipu"
+    assert response.model == "glm-4-flashx"
+    assert response.fallback_chain == ["zhipu:glm-4-flashx"]
+    assert deepseek.calls == []
+
+
+@pytest.mark.asyncio
+async def test_smart_mode_ignores_deepseek_model_override():
+    deepseek = FakeClient("deepseek", ["should-not-run"])
+    zhipu = FakeClient("zhipu", ["glm-ok"])
+    router = LLMRouter(deepseek_client=deepseek, zhipu_client=zhipu)
+
+    response = await router.complete(
+        [{"role": "user", "content": "policy"}],
+        mode="smart",
+        model="deepseek-chat",
+    )
+
+    assert response.ok is True
+    assert response.provider == "zhipu"
+    assert response.model == "glm-4-flashx"
+    assert deepseek.calls == []
+
+
+@pytest.mark.asyncio
 async def test_router_logs_do_not_expose_authorization_header(caplog):
     caplog.set_level(logging.WARNING, logger="civitas.llm.router")
     leaked_header = "Authorization" + ": Bearer should_not_leak"

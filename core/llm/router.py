@@ -61,6 +61,8 @@ class LLMRouter:
     def build_chain(self, mode: str, task_type: str | None = None) -> list[RouteCandidate]:
         normalized = str(mode or self.settings.default_provider or "auto").strip().lower()
         task = str(task_type or "").strip()
+        if normalized in {"smart", "zhipu", "glm", "glm_only"}:
+            return [RouteCandidate("zhipu", "glm-4-flashx", None)]
         if normalized == "slow":
             return [
                 RouteCandidate("deepseek", "deepseek-v4-pro", True),
@@ -123,10 +125,14 @@ class LLMRouter:
         json_mode: bool = False,
         fallback_response: str | None = None,
     ) -> LLMResponse:
+        normalized_mode = str(mode or self.settings.default_provider or "auto").strip().lower()
         chain = self.build_chain(mode, task_type=task_type)
         if model:
-            provider = "zhipu" if str(model).startswith("glm-") else "deepseek"
-            chain.insert(0, RouteCandidate(provider, str(model), thinking))
+            model_name = str(model)
+            if normalized_mode in {"smart", "zhipu", "glm", "glm_only"} and not model_name.startswith("glm-"):
+                model_name = "glm-4-flashx"
+            provider = "zhipu" if model_name.startswith("glm-") else "deepseek"
+            chain.insert(0, RouteCandidate(provider, model_name, thinking))
 
         seen: set[str] = set()
         ordered_chain: list[RouteCandidate] = []

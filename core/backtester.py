@@ -62,6 +62,10 @@ class BacktestConfig:
     news_topk_per_day: int = 8
     persist_news_events: bool = True
     auth_score_mode: str = "demo_first"
+    runtime_mode: str = "SMART"
+    llm_model: str = ""
+    llm_mode: str = ""
+    llm_model_priority: List[str] = field(default_factory=list)
 
     tick_per_day: int = 4
     export_qlib_bundle: bool = False
@@ -1375,5 +1379,4 @@ def _safe_population_size(population: Any) -> int:
         return len(population)
     except Exception:
         return 0
-
 

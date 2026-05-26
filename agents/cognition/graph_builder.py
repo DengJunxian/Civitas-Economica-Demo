@@ -2,7 +2,7 @@
 import json
 import re
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -11,8 +11,9 @@ class GraphExtractor:
     使用大模型（通过 ModelRouter）从杂乱的宏观资讯或交易复盘
     提取出标准化的高质量概念三元组。
     """
-    def __init__(self, model_router: Any):
+    def __init__(self, model_router: Any, model_priority: Optional[Sequence[str]] = None):
         self.model_router = model_router
+        self.model_priority = list(model_priority or ["glm-4-flashx"])
 
     def _extract_json_array(self, text: str) -> List[Dict[str, Any]]:
         try:
@@ -59,7 +60,7 @@ class GraphExtractor:
         try:
             content, _, _ = await self.model_router.call_with_fallback(
                 messages=messages,
-                priority_models=["deepseek-chat", "glm-4-flashx"],
+                priority_models=list(self.model_priority),
                 timeout_budget=15.0
             )
             

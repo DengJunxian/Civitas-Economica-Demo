@@ -105,7 +105,7 @@ class PolicySessionConfig:
     enable_policy_committee: bool = False
     runner_symbol: str = "A_SHARE_IDX"
     steps_per_day: int = 1
-    model_priority: Sequence[str] = field(default_factory=lambda: ("deepseek-chat",))
+    model_priority: Sequence[str] = field(default_factory=lambda: ("glm-4-flashx",))
     hybrid_replay: bool = False
     exogenous_backdrop: Optional[Sequence[Mapping[str, Any]] | str] = None
     hybrid_backdrop_weight: float = 0.0
@@ -195,7 +195,7 @@ class PolicySession:
             enable_policy_committee=bool(enable_policy_committee),
             runner_symbol=str(runner_symbol or "A_SHARE_IDX"),
             steps_per_day=max(1, int(steps_per_day)),
-            model_priority=tuple(model_priority or ("deepseek-chat",)),
+            model_priority=tuple(model_priority or ("glm-4-flashx",)),
             hybrid_replay=bool(hybrid_replay),
             exogenous_backdrop=exogenous_backdrop,
             hybrid_backdrop_weight=float(hybrid_backdrop_weight or 0.0),
@@ -1003,7 +1003,7 @@ class PolicySession:
             ]
         )
         backend = APIBackend(
-            model=str(self.config.model_priority[0]) if self.config.model_priority else "deepseek-chat",
+            model=str(self.config.model_priority[0]) if self.config.model_priority else "glm-4-flashx",
             max_tokens=900,
             temperature=0.25,
         )

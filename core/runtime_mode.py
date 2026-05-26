@@ -48,13 +48,13 @@ _SMART_PROFILE = RuntimeModeProfile(
     enable_policy_committee=False,
     fast_slow_trigger=True,
     pause_for_llm_seconds=0.1,
-    model_priority=("deepseek-v4-flash", "deepseek-chat", "glm-4-flashx"),
-    summary="默认在线接口优先，单次调用失败时自动回退离线兜底链路。",
+    model_priority=("glm-4-flashx", "glm-4-flashx-250414"),
+    summary="仅接入智谱 GLM 模型，适合低延迟政策理解、结构化抽取和常规推演。",
 )
 
 _DEEP_PROFILE = RuntimeModeProfile(
     mode="DEEP",
-    label="深度模式",
+    label="高级模式",
     competition_safe_mode=False,
     market_pipeline_v2=True,
     llm_primary=True,
@@ -63,15 +63,31 @@ _DEEP_PROFILE = RuntimeModeProfile(
     fast_slow_trigger=True,
     pause_for_llm_seconds=0.35,
     model_priority=("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-reasoner", "deepseek-chat", "glm-4-flashx"),
-    summary="启用在线接口驱动的深度推演，强调快慢思考触发与委员会式防幻觉路径。",
+    summary="沿用 DeepSeek + 智谱混合调度，启用推理优先、对话回退与委员会式校验。",
 )
 
 
-def resolve_runtime_mode_profile(mode: str) -> RuntimeModeProfile:
+def normalize_runtime_mode(mode: str) -> str:
     normalized = str(mode or "SMART").strip().upper()
+    if normalized in {"DEEP", "ADVANCED", "HIGH", "高级", "高级模式"}:
+        return "DEEP"
+    return "SMART"
+
+
+def resolve_runtime_mode_profile(mode: str) -> RuntimeModeProfile:
+    normalized = normalize_runtime_mode(mode)
     if normalized == "DEEP":
         return _DEEP_PROFILE
     return _SMART_PROFILE
+
+
+def llm_mode_for_model(model_name: str) -> str:
+    name = str(model_name or "").strip().lower()
+    if name.startswith("glm-"):
+        return "smart"
+    if "v4-pro" in name or "reasoner" in name:
+        return "slow"
+    return "fast"
 
 
 def merge_mode_feature_flags(

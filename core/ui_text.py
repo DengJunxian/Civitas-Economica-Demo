@@ -388,13 +388,12 @@ def localize_dataframe_columns(df: pd.DataFrame) -> pd.DataFrame:
     display = df.copy()
     display = display.rename(columns={col: zh_label(str(col)) for col in display.columns})
     for col in display.columns:
-        if display[col].dtype == object:
-            if str(col) in {"指标", "指标名称"}:
-                display[col] = display[col].map(lambda value: zh_metric_name(value) if isinstance(value, str) else value)
-            elif str(col) == "世界线":
-                display[col] = display[col].map(lambda value: zh_world_name(value) if isinstance(value, str) else value)
-            else:
-                display[col] = display[col].map(lambda value: zh_value(value) if isinstance(value, str) else value)
+        if str(col) in {"指标", "指标名称"}:
+            display[col] = display[col].map(lambda value: zh_metric_name(value) if isinstance(value, str) else value)
+        elif str(col) == "世界线":
+            display[col] = display[col].map(lambda value: zh_world_name(value) if isinstance(value, str) else value)
+        else:
+            display[col] = display[col].map(lambda value: zh_value(value) if isinstance(value, str) else value)
     return display
 
 

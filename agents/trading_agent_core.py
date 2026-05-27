@@ -41,7 +41,7 @@ if not logger.handlers:
 
 
 # ----------------------------------------------------------------------------
-# 1. 配置文件加载 (Configuration Driven - 绝对消除魔法数字)
+# 1. 配置文件加载，避免魔法数字
 # ----------------------------------------------------------------------------
 def _load_config(path: str = "config.yaml") -> Dict[str, Any]:
     """
@@ -69,7 +69,7 @@ GLOBAL_CONFIG = _load_config()
 
 
 # ----------------------------------------------------------------------------
-# 2. Pydantic 数据模型与枚举类型定义 (Type Hinting & strict validation)
+# 2. Pydantic 数据模型与枚举类型定义
 # ----------------------------------------------------------------------------
 class CognitiveBias(str, Enum):
     Loss_Aversion = "Loss_Aversion"
@@ -128,7 +128,7 @@ class TradeAction(BaseModel):
 
 
 # ----------------------------------------------------------------------------
-# 3. 核心实体类：TradingAgent
+# 3. 核心实体类：Trading智能体
 # ----------------------------------------------------------------------------
 class TradeIntent(BaseModel):
     """
@@ -183,7 +183,7 @@ class TradingAgent:
         Returns:
             str: 用于注入给 Prompt 的上下文关联记忆字符串。
         """
-        # TODO: 实际与 ChromaDB (Vector Store) 联通
+        # 后续接入：与 ChromaDB 向量库联通
         # 此处使用简单的模拟返回
         await asyncio.sleep(0.01)  # 模拟异步 IO
         decay_rate = GLOBAL_CONFIG.get("ebbinghaus_base_decay_rate", 0.1)
@@ -475,7 +475,7 @@ class TradingAgent:
 
 
 # ----------------------------------------------------------------------------
-# 4. 工厂模式设计：AgentFactory
+# 4. 工厂模式设计：智能体工厂
 # ----------------------------------------------------------------------------
 class AgentFactory:
     """
@@ -542,4 +542,3 @@ class AgentFactory:
 
         logger.info(f"成功生成了 {len(population)} 名在统计学上呈特化分布的智能体 (Agents)!")
         return population
-

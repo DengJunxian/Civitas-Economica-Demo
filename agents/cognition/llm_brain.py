@@ -1,4 +1,3 @@
-# file: agents/cognition/llm_brain.py
 """
 LLM 大脑与推理引擎
 
@@ -19,7 +18,7 @@ from core.utils import truncate_text
 @dataclass
 class Decision:
     """决策结果"""
-    action: str  # BUY, SELL, HOLD
+    action: str
     quantity: int
     price: Optional[float] = None
     reason: str = ""
@@ -100,9 +99,9 @@ class DeepSeekReasoner(BaseReasoner):
     """
     
     def __init__(self, api_key: Optional[str] = None, model_priority: Optional[List[str]] = None):
-        # 注意: 这里最好共享 Router，但为了兼容旧代码，我们在此实例化
-        # 如果 Config 正确加载，这里可以用 Global Router?
-        # 为了支持 Parallel Refactoring，我们建议从外部传入 Router，或者使用 Global 单例
+        # 注意: 这里最好共享 路由器，但为了兼容旧代码，我们在此实例化
+        # 如果 配置 正确加载，这里可以用 全局 路由器?
+        # 为了支持 Parallel Refactoring，我们建议从外部传入 路由器，或者使用 全局 单例
         from config import GLOBAL_CONFIG
         self.router = ModelRouter(
             deepseek_key=api_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY,
@@ -125,7 +124,7 @@ class DeepSeekReasoner(BaseReasoner):
 
     def _build_user_prompt(self, market_state: Dict, account_state: Dict, memory_context: str = "") -> str:
         """构建用户提示词"""
-        # Truncate potentially long text fields
+
         news = truncate_text(market_state.get('news', '无'), max_length=500)
         history = truncate_text(market_state.get('history', ''), max_length=500)
         memory = truncate_text(memory_context, max_length=800)
@@ -162,8 +161,8 @@ class DeepSeekReasoner(BaseReasoner):
         """异步获取决策"""
         messages = self.build_messages(market_state, account_state)
         
-        # 使用 Router 调用 (Smart Mode)
-        # 优先使用实例绑定的优先级，否则向 Router 查询 SMART 模式默认值
+        # 使用 路由器 调用
+        # 优先使用实例绑定的优先级，否则向 路由器 查询 SMART 模式默认值
         priority = self.model_priority or self.router.get_model_priority("SMART")
         
         content, reasoning, model = await self.router.call_with_fallback(
@@ -181,7 +180,7 @@ class DeepSeekReasoner(BaseReasoner):
     def derive_decision(self, market_state: Dict, account_state: Dict) -> ReasoningResult:
         """同步获取决策 (不推荐，仅兼容)"""
         import asyncio
-        # 创建新的 loop 或使用现有 loop
+        # 创建新的 事件循环 或使用现有 事件循环
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -193,7 +192,7 @@ class DeepSeekReasoner(BaseReasoner):
     def _parse_response(self, content: str) -> Decision:
         """解析 JSON 响应"""
         try:
-            # 尝试提取 JSON Block
+            # 尝试提取 JSON 块
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
                 json_str = json_match.group()
@@ -211,5 +210,5 @@ class DeepSeekReasoner(BaseReasoner):
                 greed_level=float(data.get("greed_level", 0.0))
             )
         except Exception as e:
-            # 解析失败，保持 HOLD
+            # 解析失败，保持 持有
             return Decision(action="HOLD", quantity=0, reason=f"Parse Error: {e}")

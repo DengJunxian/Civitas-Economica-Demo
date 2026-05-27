@@ -56,7 +56,7 @@ class AgentNode:
     feed_capacity: int = 3
     source_exposure_count: Dict[int, int] = field(default_factory=dict)
 
-    # BDI 抽象（beliefs/desires/intentions）
+    # BDI 抽象
     beliefs: List[str] = field(default_factory=list)
     desires: List[str] = field(default_factory=list)
     intentions: List[str] = field(default_factory=list)

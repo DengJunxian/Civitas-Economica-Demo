@@ -1,4 +1,3 @@
-# file: app.py
 """Civitas front-end in Streamlit: Policy Lab / History Replay / Advanced Analysis."""
 
 from __future__ import annotations
@@ -100,7 +99,7 @@ def _render_policy_lab_compatible(presentation_mode: str) -> None:
     try:
         render_policy_lab(presentation_mode=presentation_mode)
     except TypeError:
-        # Fallback for older deployments where render_policy_lab() has no kwargs.
+
         render_policy_lab()
 
 

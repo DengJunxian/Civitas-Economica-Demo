@@ -1,4 +1,3 @@
-﻿# file: ui/backtest_panel.py
 """因子回测面板。"""
 
 from __future__ import annotations

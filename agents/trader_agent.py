@@ -1,15 +1,8 @@
-﻿# file: agents/trader_agent.py
 """
-TraderAgent 瀹炵幇 鈥?鍩轰簬璁ょ煡闂幆鐨勪氦鏄撴櫤鑳戒綋
+交易智能体实现。
 
-瀹炵幇 BaseAgent 瀹氫箟鐨?Perceive-Reason-Decide-Act 闂幆銆?
-鏍稿績鐗规€?
-1. 蹇冪悊鐢诲儚椹卞姩: 椋庨櫓鍘屾伓銆佽嚜淇＄▼搴︺€佸叧娉ㄥ箍搴︾瓑涓€у寲鍙傛暟
-2. 妯℃嫙 DeepSeek R1 鎺ㄧ悊: 鐢熸垚绫讳汉鎬濈淮閾?(Chain of Thought)
-3. 缁撴瀯鍖栧喅绛? 杈撳嚭鏍囧噯 Limit Order
-4. 蹇參鎬濊€冨弻灞傛灦鏋?(System 1/2): 鑺傜害绠楀姏锛屾ā鎷熺洿瑙変笌娣辨€?
-
-浣滆€? Civitas Economica Team
+该模块实现感知、推理、决策、下单的认知闭环，并结合画像参数、
+大模型推理、结构化订单和快慢思考机制完成交易决策。
 """
 
 import asyncio
@@ -51,7 +44,7 @@ class LegacyDecisionAction:
 
 class TraderAgent(BaseAgent):
     """
-    TraderAgent 鈥?鍏峰瀹屾暣璁ょ煡闂幆鐨勪氦鏄撴櫤鑳戒綋
+    具备完整认知闭环的交易智能体。
     """
 
     def __init__(
@@ -60,7 +53,7 @@ class TraderAgent(BaseAgent):
         cash_balance: float = 100_000.0,
         portfolio: Optional[Dict[str, int]] = None,
         psychology_profile: Optional[Dict[str, float]] = None,
-        model_router: Optional[Any] = None, # Support Router
+        model_router: Optional[Any] = None,
         persona: Optional[Persona] = None,
         use_llm: bool = True,
         model_priority: Optional[List[str]] = None,
@@ -85,14 +78,14 @@ class TraderAgent(BaseAgent):
             or (isinstance(psychology_profile, dict) and bool(psychology_profile.get("behavior_layer_enabled", False)))
         )
         
-        # 浜烘牸鐢诲儚闆嗘垚
+
         self.persona = persona if persona else Persona(name=agent_id)
         
-        # 绀句氦缃戠粶闆嗘垚
+
         self.social_node_id: Optional[int] = None
         self.social_graph: Optional[SocialGraph] = None
         
-        # Map Persona to legacy psychology profile for compatibility
+
         self.profile = {
             "risk_aversion": self._map_persona_to_risk_aversion(),
             "confidence_level": 0.5 + (self.persona.overconfidence * 0.5),
@@ -105,7 +98,7 @@ class TraderAgent(BaseAgent):
         if isinstance(psychology_profile, dict) and psychology_profile.get("institution_type"):
             self.institution_type = str(psychology_profile.get("institution_type", "")).strip().lower().replace(" ", "_")
 
-        # Initialize Brain
+
         if agent_id.startswith("Debate_"):
             from agents.debate_brain import DebateBrain
             self.brain = DebateBrain(
@@ -135,14 +128,14 @@ class TraderAgent(BaseAgent):
                 institution_type = str(psychology_profile.get("institution_type", "")).strip().lower().replace(" ", "_")
                 self.brain.layered_memory.institution_type = institution_type
                 self.brain.layered_memory.constraint_profile = build_institution_constraint_profile(institution_type)
-        # 娉ㄥ叆妯″瀷浼樺厛绾?(濡傛灉 Brain 鏀寔)
+
         if hasattr(self.brain, 'model_priority'):
             self.brain.model_priority = model_priority
         
-        # 鍚堣鍙嶉璁板繂锛堝瓨鍌ㄨ椋庢帶鎷掔粷鐨勫師鍥狅級
+
         self.compliance_feedback: List[str] = []
         
-        # 蹇?鎱㈡€濊€冩ā寮忕姸鎬佽窡韪?
+        # 快慢思考模式状态跟踪
         self._last_news_count = 0
         self._last_social_sentiment = "neutral"
         self._fast_mode_consecutive_steps = 0
@@ -151,29 +144,29 @@ class TraderAgent(BaseAgent):
         self.last_thinking_path = "fast"
         self.last_behavior_card: Dict[str, Any] = {}
         
-        # GraphRAG 璁板繂灞?
+        # 图谱增强记忆层
         self.graph_memory = GraphMemoryBank(agent_id=self.agent_id)
         self.graph_extractor = GraphExtractor(
             model_router=self.brain.model_router if hasattr(self, 'brain') else model_router,
             model_priority=model_priority,
         )
         
-        # Sync initial confidence
+
         self.brain.state.confidence = self.profile.get("confidence_level", 0.5) * 100
 
-        # === Phase 1: Analyst Roles ===
+
         self.news_analyst = NewsAnalyst(config_paths=news_config, max_articles=news_max_articles)
         self.quant_analyst = QuantAnalyst()
         self.risk_analyst = RiskAnalyst()
 
-        # === Risk Alert Meeting (RAM) State ===
+
         self._portfolio_value_history: List[float] = []
         self._last_cvar: Optional[float] = None
         self._ram_until_step: int = -1
         self._ram_last_trigger: str = ""
         self._ram_cooldown_steps: int = max(1, int(ram_cooldown_steps))
 
-        # Phase 4: Wind-Tunnel + Beliefs
+
         self._price_history: List[float] = []
         self._wind_tunnel_confidence: float = 0.5
         self._wind_tunnel_records: List[Dict[str, Any]] = []
@@ -522,7 +515,7 @@ class TraderAgent(BaseAgent):
         self.social_graph = graph
         if node_id in graph.agents:
             graph.agents[node_id].agent_id = self.agent_id
-        # Initial sync so social diffusion can consume semantic profile.
+
         self.sync_social_semantic_profile()
 
     def _risk_tilt_from_persona(self) -> float:
@@ -585,8 +578,8 @@ class TraderAgent(BaseAgent):
         market_snapshot: MarketSnapshot,
         public_news: List[str],
     ) -> Dict[str, Any]:
-        """Perception stage."""
-        # 1. 杩囨护鏂伴椈 (鍩轰簬 attention_span)
+        """感知阶段。"""
+
         span = int(self.profile.get("attention_span", 3))
         observed_news = public_news[:span] if public_news else []
         
@@ -731,7 +724,7 @@ class TraderAgent(BaseAgent):
         return decision_payload
 
     async def _async_extract_and_store(self, text: str, current_time: float, is_news: bool = False):
-        """Background graph extraction to avoid blocking the trade loop."""
+        """后台抽取图谱，避免阻塞交易循环。"""
         triplets = await self.graph_extractor.extract_graph(text)
         if not triplets:
             return
@@ -741,14 +734,14 @@ class TraderAgent(BaseAgent):
             self.graph_memory.add_triplet(t["subject"], t["predicate"], t["target"], t["weight"])
             topics.add(t["subject"])
             
-        # 濡傛灉鏄畯瑙傛柊闂伙紝鐢熸垚鐭湡鑳跺泭缂撳瓨
+
         if is_news and topics:
-            capsule_topic = list(topics)[0] # 鍙栦富瑕佹蹇典綔涓?topic
-            summary = f"[{capsule_topic}] 鐩稿叧鍔ㄦ€佸凡鍙戠敓: {text[:50]}..."
+            capsule_topic = list(topics)[0]
+            summary = f"[{capsule_topic}] 相关动态已发生: {text[:50]}..."
             self.graph_memory.add_capsule(capsule_topic, summary, current_time, ttl_seconds=3600)
 
     def _collect_analyst_reports(self, perceived_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Collect analyst reports with defensive fallback payloads."""
+        """收集分析师报告，并在失败时返回防御性兜底结果。"""
         reports: Dict[str, Any] = {}
         snapshot: MarketSnapshot = perceived_data.get("snapshot")
 
@@ -790,7 +783,7 @@ class TraderAgent(BaseAgent):
         return reports
 
     def _update_ram_state(self, risk_report: Dict[str, Any], emotional_state: str) -> None:
-        """Update Risk Alert Meeting (RAM) state machine."""
+        """更新风险会议状态机。"""
         cvar = float(risk_report.get("cvar", 0.0) or 0.0)
         cvar_drop = None
         trigger_reason = ""
@@ -798,10 +791,10 @@ class TraderAgent(BaseAgent):
         if self._last_cvar is not None:
             cvar_drop = cvar - self._last_cvar
             if cvar_drop < -abs(self._last_cvar) * 0.5 and cvar < 0:
-                trigger_reason = f"CVaR 闄￠檷: {self._last_cvar:.4f} -> {cvar:.4f}"
+                trigger_reason = f"CVaR 下降: {self._last_cvar:.4f} -> {cvar:.4f}"
 
         if emotional_state == "Fearful":
-            trigger_reason = trigger_reason or "鎯呯华 Fearful 瑙﹀彂椋庢帶浼氳"
+            trigger_reason = trigger_reason or "恐惧情绪触发风险会议"
 
         if trigger_reason:
             self._ram_until_step = max(self._ram_until_step, self._step_count + self._ram_cooldown_steps)
@@ -819,7 +812,7 @@ class TraderAgent(BaseAgent):
         return os.path.join(base_dir, f"beliefs_{self.agent_id}.json")
 
     def _persist_beliefs(self, new_beliefs: List[str]) -> None:
-        """Persist trade beliefs for future prompt reinforcement."""
+        """持久化交易信念，用于后续提示词增强。"""
         path = self._beliefs_file_path()
         beliefs = []
         if os.path.exists(path):
@@ -905,7 +898,7 @@ class TraderAgent(BaseAgent):
         emotional_state: str,
         social_signal: str
     ) -> Dict[str, Any]:
-        """Core cognition method combining market, emotion, and social signals."""
+        """结合市场、情绪和社交信号生成交易动作。"""
         snapshot: MarketSnapshot = perceived_data["snapshot"]
         if self._ram_until_step >= self._step_count:
             holding = self.portfolio.get(snapshot.symbol, 0)
@@ -916,7 +909,7 @@ class TraderAgent(BaseAgent):
                         "qty": holding,
                         "price": round(snapshot.last_price * 0.98, 2)
                     },
-                    "reasoning": f"[RAM] 椋庢帶浼氳瑙﹀彂锛屽己鍒堕伩闄╂竻浠撱€傚師鍥狅細{self._ram_last_trigger}",
+                    "reasoning": f"[RAM] 风险会议触发，强制避险清仓。原因：{self._ram_last_trigger}",
                     "symbol": snapshot.symbol,
                     "timestamp": snapshot.timestamp,
                     "analyst_reports": perceived_data.get("analyst_reports", {}),
@@ -926,7 +919,7 @@ class TraderAgent(BaseAgent):
                 }
             return {
                 "decision": {"action": "HOLD"},
-                "reasoning": f"[RAM] 椋庢帶浼氳瑙﹀彂锛屽綋鍓嶆棤鎸佷粨锛屼繚鎸佽鏈涖€傚師鍥狅細{self._ram_last_trigger}",
+                "reasoning": f"[RAM] 风险会议触发，当前无持仓，保持观望。原因：{self._ram_last_trigger}",
                 "symbol": snapshot.symbol,
                 "timestamp": snapshot.timestamp,
                 "analyst_reports": perceived_data.get("analyst_reports", {}),
@@ -935,17 +928,17 @@ class TraderAgent(BaseAgent):
                 "behavior_context": {"enabled": False, "mode": "RAM"},
             }
 
-        # 1. System 1 (Rule-based) Enforcement
-        # 濡傛灉琚爣璁颁负闈?LLM Agent锛屽己鍒朵娇鐢ㄥ揩鎬濊€?(妯℃嫙璁＄畻妯″紡)
+
+
         if not self.use_llm:
             return self._fast_think(perceived_data, emotional_state, social_signal)
 
-        # 0.5. System 1 vs System 2 Check (Standard)
+
         if not self._needs_deep_thinking(perceived_data, social_signal):
             self._fast_mode_consecutive_steps += 1
             return self._fast_think(perceived_data, emotional_state, social_signal)
             
-        # Trigger System 2 (Slow Thinking)
+
         self._fast_mode_consecutive_steps = 0
         self.slow_think_count += 1
         self.last_thinking_path = "slow"
@@ -953,10 +946,10 @@ class TraderAgent(BaseAgent):
         snapshot: MarketSnapshot = perceived_data["snapshot"]
         news = perceived_data["news"]
 
-        # Sync semantic profile before deep reasoning.
+
         self.sync_social_semantic_profile()
         
-        # 1. 妫€绱?GraphRAG 璁板繂涓庣煡璇嗚兌鍥?
+
         current_time = snapshot.timestamp
         graph_context = ""
         capsules = self.graph_memory.get_valid_capsules(current_time)
@@ -964,29 +957,32 @@ class TraderAgent(BaseAgent):
         news_text = "; ".join(news) if news else ""
         
         if news_text:
-            # 绠€鍗曠殑鍏抽敭璇嶆彁鍙栭€昏緫鐢ㄤ簬鏌ュ浘
-            if "鍒╃巼" in news_text or "闄嶅噯" in news_text: extracted_keywords.append("鍒╃巼")
+            # 简单关键词提取逻辑用于查图
+            if "利率" in news_text or "降准" in news_text:
+                extracted_keywords.append("利率")
             if "liquidity" in news_text.lower():
                 extracted_keywords.append("liquidity")
-            if "鏀跨瓥" in news_text: extracted_keywords.append("鏀跨瓥")
-            if not extracted_keywords: extracted_keywords = ["甯傚満", "椋庨櫓"]
+            if "政策" in news_text:
+                extracted_keywords.append("政策")
+            if not extracted_keywords:
+                extracted_keywords = ["市场", "风险"]
         
         if capsules:
-            graph_context = "銆愮煡璇嗚兌鍥?瀹忚鍏辫瘑缂撳瓨)銆慭n" + "\n".join(capsules)
+            graph_context = "【知识胶囊：宏观共识缓存】\n" + "\n".join(capsules)
         elif extracted_keywords:
             subgraph = self.graph_memory.retrieve_subgraph(extracted_keywords, depth=2)
             if subgraph:
-                graph_context = "銆愮鏈夎鐭ュ浘璋卞叧鑱斻€慭n" + subgraph
+                graph_context = "【私有认知图谱关联】\n" + subgraph
                 
-        # 濡傛灉鏈夋柊娑堟伅涓旀病鏈夊懡涓紦瀛橈紝鍚庡彴鍚姩鎻愬彇浠ュ厖瀹炲浘璋?
+
         if news_text and not capsules:
             asyncio.create_task(self._async_extract_and_store(news_text, current_time, is_news=True))
             
-        # 2. Construct Market State
+
         market_state = {
             "price": snapshot.last_price,
-            "trend": getattr(snapshot, "market_trend", "闇囪崱"), 
-            "panic_level": getattr(snapshot, "panic_level", 0.5), 
+            "trend": getattr(snapshot, "market_trend", "震荡"),
+            "panic_level": getattr(snapshot, "panic_level", 0.5),
             "news": news_text if news_text else "no-major-news",
             "last_rejection_reason": self.compliance_feedback[-1] if self.compliance_feedback else None,
             "policy_description": getattr(snapshot, "policy_description", ""),
@@ -1004,13 +1000,16 @@ class TraderAgent(BaseAgent):
             "behavioral_state": perceived_data.get("behavioral_state", self.last_behavioral_state),
         }
         
-        # Map numeric trend to string for Brain
-        trend_val = snapshot.market_trend
-        if trend_val > 0.02: market_state["trend"] = "涓婃定"
-        elif trend_val < -0.02: market_state["trend"] = "涓嬭穼"
-        else: market_state["trend"] = "闇囪崱"
 
-        # 2. Construct Account State
+        trend_val = snapshot.market_trend
+        if trend_val > 0.02:
+            market_state["trend"] = "上涨"
+        elif trend_val < -0.02:
+            market_state["trend"] = "下跌"
+        else:
+            market_state["trend"] = "震荡"
+
+
         account_state = {
             "cash": perceived_data["cash"],
             "market_value": perceived_data["portfolio_value"] - perceived_data["cash"],
@@ -1018,7 +1017,7 @@ class TraderAgent(BaseAgent):
             "risk_appetite": self.current_risk_appetite,
         }
 
-        # 3. Call Brain with Enhanced Context
+
         try:
             decision_output = await self.brain.think_async(
                 market_state=market_state, 
@@ -1027,7 +1026,7 @@ class TraderAgent(BaseAgent):
                 social_signal=social_signal
             )
             
-            # Inject symbol/timestamp for decide phase
+
             decision_output["symbol"] = snapshot.symbol
             decision_output["timestamp"] = snapshot.timestamp
             decision_output = self._apply_behavioral_intent_overlay(decision_output, snapshot)
@@ -1049,38 +1048,38 @@ class TraderAgent(BaseAgent):
         snapshot = perceived_data.get("snapshot")
         panic_level = getattr(snapshot, "panic_level", 0)
         
-        # Adjust sensitivity based on Persona
-        loss_threshold = -0.10 / (self.persona.loss_aversion / 2.25) # More averse -> smaller threshold (easier to regret)
-        panic_threshold = 0.6 * self.persona.patience # More patient -> higher threshold
+
+        loss_threshold = -0.10 / (self.persona.loss_aversion / 2.25)
+        panic_threshold = 0.6 * self.persona.patience
         
         if pnl_pct < loss_threshold:
             self.emotional_state = "Regretful" # 鎮旀仺 (澶т簭)
         elif pnl_pct < loss_threshold / 2:
-            self.emotional_state = "Anxious"   # 鐒﹁檻 (灏忎簭)
+            self.emotional_state = "Anxious"
         elif pnl_pct > 0.10:
             self.emotional_state = "Greedy"    # 璐┆ (澶ц禋)
         elif pnl_pct > 0.05:
-            self.emotional_state = "Confident" # 鑷俊 (灏忚禋)
+            self.emotional_state = "Confident"
         elif panic_level > panic_threshold:
             self.emotional_state = "Fearful"   # 鎭愭儳 (甯傚満鎭愭厡)
         else:
-            self.emotional_state = "Neutral"   # 涓€?
+            self.emotional_state = "Neutral"
             
     def perceive_social_signal(self, perceived_data: Dict[str, Any]) -> str:
         """Perceive social signal from graph neighbors and market trend."""
-        # 1. 浼樺厛浣跨敤鐪熷疄绀句氦缃戠粶
+
         if self.social_graph and self.social_node_id is not None:
             bearish_ratio = self.social_graph.get_bearish_ratio(self.social_node_id)
             
-            # Thresholds based on conformity
-            panic_threshold = 1.0 - (self.persona.conformity * 0.8) # High conformity -> Low threshold (0.2)
+
+            panic_threshold = 1.0 - (self.persona.conformity * 0.8)
             
             if bearish_ratio > panic_threshold:
                 return f"Panic Alert! {bearish_ratio:.0%} of neighbors are selling!"
             elif bearish_ratio > panic_threshold * 0.6:
                 return "Neighbors are getting nervous."
                 
-        # 2. 鍙湁鍦ㄦ病鏈夌綉缁滆繛鎺ユ椂锛屾墠鍥為€€鍒板競鍦鸿秼鍔夸唬鐞?
+
         snapshot = perceived_data.get("snapshot")
         trend = getattr(snapshot, "market_trend", 0)
         
@@ -1589,11 +1588,11 @@ class TraderAgent(BaseAgent):
             self.brain.state.confidence *= 0.95
 
     # ------------------------------------------
-    # 棰濆鏂规硶 (閽堝 TraderAgent 鐗瑰畾璇锋眰)
+    # 额外方法：面向交易智能体的专用需求
     # ------------------------------------------
     
     def get_psychology_description(self) -> str:
-        """Return short text summary of agent psychology profile."""
+        """返回智能体心理画像摘要。"""
         return (
             f"Risk: {self.profile.get('risk_aversion', 0.5):.2f}, "
             f"Conf: {self.brain.state.confidence:.1f}"

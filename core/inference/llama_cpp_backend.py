@@ -1,4 +1,3 @@
-# file: core/inference/llama_cpp_backend.py
 """
 llama.cpp 本地推理后端
 

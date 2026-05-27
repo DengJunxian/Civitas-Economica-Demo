@@ -1,4 +1,3 @@
-# file: agents/roles/quant_analyst.py
 """
 QuantAnalyst —— 量化指标分析师。
 

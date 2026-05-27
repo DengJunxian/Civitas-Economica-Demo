@@ -1,4 +1,3 @@
-# file: core/policy.py
 """
 Market Policy & Regulatory Engine
 
@@ -54,7 +53,7 @@ class CircuitBreaker(Policy):
         
         self.is_halted = False
         self.halt_start_time = 0.0
-        self.reference_price = 0.0 # Should be set daily
+        self.reference_price = 0.0
 
     def update_reference_price(self, price: float):
         self.reference_price = price
@@ -64,14 +63,14 @@ class CircuitBreaker(Policy):
         Check if market should be halted or resumed.
         Returns: True if market is OPEN, False if HALTED.
         """
-        # 1. Check if currently halted
+
         if self.is_halted:
             if timestamp - self.halt_start_time > self.halt_duration:
-                self.is_halted = False # Resume
+                self.is_halted = False
                 return True
             return False
 
-        # 2. Check deviation
+
         if self.reference_price > 0:
             deviation = abs(current_price - self.reference_price) / self.reference_price
             if deviation > self.threshold_pct:
@@ -88,14 +87,14 @@ class CircuitBreaker(Policy):
         timestamp = order.timestamp if order.timestamp else time.time()
         current_price = market_state.get("last_price", self.reference_price)
 
-        # Update status first
+
         is_open = self.check_market_status(current_price, timestamp)
         
         if not is_open:
             return PolicyResult(False, f"Market Halted (Circuit Breaker Triggered)")
             
-        # Optional: Reject Limit orders outside bands even if market open? 
-        # For simple CB, we just halt.
+
+
         return PolicyResult(True)
 
 class TransactionTax(Policy):
@@ -110,13 +109,13 @@ class TransactionTax(Policy):
         if not self.active:
             return trade
             
-        # Calculate tax
-        # We don't modify the Trade price usually, but we might attach metadata or log it.
-        # Ideally, tax is deducted from cash balance, which is handled in Agent's update.
-        # But we can mark it on the trade for record keeping.
+
+
+
+
         
-        # We can add an attribute dynamically or use a field if Trade allows.
-        # For now, let's assume we return it as is, but PolicyManager calculates total tax.
+
+
         return trade
     
     def calculate_tax(self, trade: Trade) -> float:
@@ -130,7 +129,7 @@ class PolicyManager:
     def __init__(self):
         self.policies: Dict[str, Policy] = {}
         
-        # Default Policies
+
         self.policies["circuit_breaker"] = CircuitBreaker(threshold_pct=0.10)
         self.policies["tax"] = TransactionTax(rate=0.001)
 

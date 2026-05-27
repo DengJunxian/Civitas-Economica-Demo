@@ -2,18 +2,18 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Virtual environments
+# 虚拟环境
 .env
 .venv/
 env/
 venv/
 
-# IDE/editor
+# 编辑器配置
 .idea/
 .vscode/
 *.swp
 
-# Logs/build artifacts
+# 日志与构建产物
 *.log
 *.so
 *.pyd
@@ -29,7 +29,7 @@ build_lib/
 .tmp/
 __pycache__/
 
-# Generated runtime outputs
+# 运行时生成输出
 .playwright-cli/
 artifacts/
 output/
@@ -37,21 +37,22 @@ outputs/
 tmp/
 tmp/pytest_realism_reporting/
 
-# Temporary and local data caches
+# 临时文件与本地数据缓存
 tmp_akshare_test.py
 tests/update_config.py
 data/seed_events.jsonl
 data/event_graph.graphml
 data/cache/
+data/snapshots/
 data/chroma_smoke_test/
 chroma_db/
 
-# Agent tooling
+# 智能体工具缓存
 .gemini/
 .agents/
 .agent/
 _agents/
 _agent/
 
-# OS
+# 操作系统文件
 .DS_Store

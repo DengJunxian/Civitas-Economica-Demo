@@ -1,4 +1,3 @@
-# file: core/behavioral_finance.py
 """
 行为金融量化库
 
@@ -20,7 +19,7 @@ from typing import Any, Dict, List, Literal, Mapping, Optional, Sequence, Tuple
 import numpy as np
 
 
-# ========== 前景理论 (Prospect Theory) ==========
+# ========== 前景理论 ==========
 
 @dataclass
 class ProspectTheoryParams:
@@ -56,10 +55,10 @@ def prospect_value(
     x = outcome - reference
     
     if x >= 0:
-        # 收益区域：V(x) = x^α
+        # 收益区域：V = x^α
         return np.power(x, params.alpha)
     else:
-        # 损失区域：V(x) = -λ * (-x)^β
+        # 损失区域：V = -λ *^β
         return -params.lambda_ * np.power(-x, params.beta)
 
 
@@ -149,7 +148,7 @@ def disposition_effect_score(
         return 0.0
 
 
-# ========== 羊群效应 (Herding Effect) ==========
+# ========== 羊群效应 ==========
 
 def calculate_csad(returns: np.ndarray, market_return: float) -> float:
     """
@@ -194,8 +193,8 @@ def calculate_lsv_herding(
         return 0.0, 'none'
     
     buy_ratio = buy_counts[valid_mask] / total[valid_mask]
-    # LSV = |p(i) - E[p]| - AF
-    # AF = Adjustment Factor for finite sample
+
+
     
     # 简化：直接返回买入比例的偏差
     herding_score = np.mean(np.abs(buy_ratio - 0.5))
@@ -206,8 +205,8 @@ def calculate_lsv_herding(
 
 
 def csad_regression(
-    returns_history: np.ndarray,  # Shape: (T, N) T期，N只股票
-    market_returns: np.ndarray,   # Shape: (T,)
+    returns_history: np.ndarray,  # Shape: T期，N只股票
+    market_returns: np.ndarray,
     window: int = 20
 ) -> Dict[str, float]:
     """
@@ -247,7 +246,7 @@ def csad_regression(
     y = csad_recent
     
     try:
-        # β = (X'X)^(-1) X'y
+
         XtX_inv = np.linalg.inv(X.T @ X)
         beta = XtX_inv @ X.T @ y
         
@@ -299,7 +298,7 @@ def herding_intensity(
     return np.clip(deviation_ratio, 0, 1)
 
 
-# ========== 过度自信 (Overconfidence) ==========
+# ========== 过度自信 ==========
 
 def overconfidence_score(
     predicted_returns: List[float],
@@ -362,7 +361,7 @@ def predict_next_return(
     return float(np.clip(predicted, -0.05, 0.05))
 
 
-# ========== 心理账户 (Mental Accounting) ==========
+# ========== 心理账户 ==========
 
 @dataclass
 class MentalAccount:
@@ -633,7 +632,7 @@ def create_behavioral_profile(
     )
 
 
-# ========== Cumulative Prospect Theory (CPT) Profiles ==========
+
 
 @dataclass
 class CPTAgentProfile:
@@ -700,7 +699,7 @@ def cpt_expected_utility(
     return float(np.sum(utils))
 
 
-# ========== Reference-Point-Driven Behavioral Layer ==========
+
 
 
 def _safe_price(value: float, fallback: float = 1.0) -> float:
@@ -847,9 +846,9 @@ def prospect_direction_preference(
     weighted_utility /= total_w
     underwater_ratio = underwater / total_w
 
-    # Direction in [-1, 1], positive = buy bias, negative = sell bias
+
     direction = float(np.tanh(weighted_utility / 55.0))
-    # Loss-aversion intensity (dynamic) increases when more anchors are underwater
+
     loss_intensity = float(np.clip(loss_aversion * (1.0 + 0.8 * underwater_ratio), 0.5, 6.0))
 
     return {
@@ -941,7 +940,7 @@ def behavioral_update_step(
     )
 
 
-# ========== Disposition Effect (PGR / PLR) ==========
+
 
 
 @dataclass
@@ -983,7 +982,7 @@ def calculate_pgr_plr(counter: DispositionCounter) -> Dict[str, float]:
     }
 
 
-# ========== Stylized Facts Helpers ==========
+
 
 
 def all_time_high_effect(returns: Sequence[float], ath_flags: Sequence[bool]) -> Dict[str, float]:
@@ -1147,7 +1146,7 @@ class StylizedFactsTracker:
                 "n_obs": len(self.loss_aversion_intensity),
             },
         }
-        # Alias keys kept for compatibility with external evaluators.
+
         payload["volatility clustering"] = payload["volatility_clustering"]
         payload["drawdown distribution"] = payload["drawdown_distribution"]
         payload["all_time_high effect"] = payload["all_time_high_effect"]

@@ -91,7 +91,7 @@ class PortfolioConstructionLayer:
         return pd.Series(inv / inv_sum, index=assets)
 
     def _mean_variance(self, assets: pd.Index, mu: pd.Series, cov: pd.DataFrame) -> pd.Series:
-        # Try PyPortfolioOpt first.
+
         try:  # pragma: no cover - optional dependency
             from pypfopt import EfficientFrontier
 
@@ -103,7 +103,7 @@ class PortfolioConstructionLayer:
         except Exception:
             pass
 
-        # Fallback: ridge-regularized closed-form proxy.
+
         cov_values = cov.values + np.eye(len(assets)) * 1e-6
         try:
             inv_cov = np.linalg.inv(cov_values)
@@ -118,7 +118,7 @@ class PortfolioConstructionLayer:
         return pd.Series(w, index=assets, dtype=float)
 
     def _hrp(self, assets: pd.Index, data: PortfolioInput, cov: pd.DataFrame) -> pd.Series:
-        # HRP needs return history in PyPortfolioOpt; fallback to inverse-vol when unavailable.
+
         if data.returns_history is None or data.returns_history.empty:
             return self._inverse_vol(assets, cov)
         try:  # pragma: no cover - optional dependency
@@ -149,7 +149,7 @@ class PortfolioConstructionLayer:
             adjusted.loc[members] = adjusted.loc[members] * scale
             capped_assets.update(members)
 
-        # Keep full-investment without violating capped buckets.
+
         if self.constraints.fully_invested and self.constraints.long_only:
             residual = 1.0 - float(adjusted.sum())
             if residual > 1e-12:
@@ -185,7 +185,7 @@ class PortfolioConstructionLayer:
 
         ratio = float(np.clip(target / max(estimated_drawdown, 1e-12), 0.0, 1.0))
         if self.constraints.fully_invested:
-            # Blend towards defensive inverse-vol allocation.
+
             defensive = self._inverse_vol(weights.index, cov)
             return ratio * weights + (1.0 - ratio) * defensive
         return weights * ratio
@@ -212,7 +212,7 @@ class PortfolioConstructionLayer:
                     w = w / total
             return w
 
-        # Long-short normalization by gross exposure.
+
         gross = float(np.sum(np.abs(w.values)))
         if gross < 1e-12:
             return w

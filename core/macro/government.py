@@ -90,7 +90,7 @@ class PolicyCompiler:
                 "rumor_shock",
             )
         ):
-            # Neutral fallback: slight sentiment move to avoid dead-flat dynamics.
+
             shock.sentiment_delta = 0.01 if "支持" in text else -0.01 if "风险" in text else 0.0
 
         return shock
@@ -349,7 +349,7 @@ class GovernmentAgent:
             credit_spread=shock.credit_spread_delta,
             sentiment_index=shock.sentiment_delta,
         )
-        # Tax cuts work through liquidity/sentiment channels in this simplified model.
+
         macro_state.apply_delta(
             liquidity_index=-0.8 * shock.stamp_tax_delta,
             sentiment_index=-2.0 * shock.stamp_tax_delta,

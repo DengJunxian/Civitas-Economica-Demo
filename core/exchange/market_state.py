@@ -1,4 +1,3 @@
-﻿# file: core/exchange/market_state.py
 """交易所状态封装与步进执行器。"""
 
 from __future__ import annotations

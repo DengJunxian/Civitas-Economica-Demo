@@ -1,4 +1,3 @@
-# file: core/inference/vllm_backend.py
 """
 vLLM 高性能推理后端
 

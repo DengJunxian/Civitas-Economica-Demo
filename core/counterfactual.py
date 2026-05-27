@@ -1,4 +1,3 @@
-# file: core/counterfactual.py
 """
 反事实推理模块 (Counterfactual Reasoning)
 
@@ -37,7 +36,7 @@ class CounterfactualResult:
     universe_b_name: str
     fork_point: int  # 分叉点（K线索引）
     
-    # K 线数据 (DataFrame)
+    # K 线数据
     candles_a: pd.DataFrame
     candles_b: pd.DataFrame
     
@@ -85,7 +84,7 @@ class ParallelUniverseEngine:
         Returns:
             (model_a, model_b)
         """
-        # Create Universe A
+
         model_a = CivitasModel(
             n_agents=config.n_agents,
             panic_ratio=config.panic_ratio,
@@ -94,7 +93,7 @@ class ParallelUniverseEngine:
             seed=config.seed
         )
         
-        # Create Universe B (Same Seed -> Same Agents/Network)
+
         model_b = CivitasModel(
             n_agents=config.n_agents,
             panic_ratio=config.panic_ratio,
@@ -190,15 +189,15 @@ class ParallelUniverseEngine:
                     "volume": c.volume
                 })
             if not data:
-                # Fallback if empty
+
                 return pd.DataFrame({"close": [base_config.initial_price]})
             return pd.DataFrame(data)
             
         candles_a = get_candles_df(model_a)
         candles_b = get_candles_df(model_b)
         
-        # 获取网络统计 (Infected count history)
-        # model.diffusion.history is List[Dict]
+        # 获取网络统计
+
         net_stats_a = model_a.diffusion.history if hasattr(model_a.diffusion, 'history') else []
         net_stats_b = model_b.diffusion.history if hasattr(model_b.diffusion, 'history') else []
         

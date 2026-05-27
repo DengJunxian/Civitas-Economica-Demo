@@ -1,10 +1,8 @@
-# file: core/backtester.py
 """
-鍘嗗彶鍥炴祴涓庨噺鍖栫爺绌舵鏋躲€?
-璁捐鍙傝€?
-- Qlib: 鍥犲瓙鐮旂┒ + 鍥炴祴鎶ュ憡闂幆
-- Zipline: initialize/handle_data 浜嬩欢椹卞姩绛栫暐鎺ュ彛
-- Lean: 鎴愭湰/婊戠偣/鎵ц妯″瀷瑙ｈ€?- bt: 鍙粍鍚堢瓥鐣ユā鏉匡紙鍔ㄩ噺/鍧囧€煎洖褰?椋庨櫓骞充环/娑堟伅椹卞姩锛?"""
+历史回测与量化研究框架。
+
+设计参考因子研究、事件驱动策略接口、成本滑点模型和可组合策略模板。
+"""
 
 from __future__ import annotations
 
@@ -57,7 +55,7 @@ class BacktestConfig:
     policy_text: str = ""
     sentiment_weight: float = 0.5
     civitas_factor_weight: float = 0.5
-    news_source_strategy: str = "mixed"  # mixed | online | local
+    news_source_strategy: str = "mixed"
     news_scope: str = "macro_index"
     news_topk_per_day: int = 8
     persist_news_events: bool = True
@@ -142,12 +140,12 @@ class BacktestResult:
             + self.volatility_correlation
         ) / 3
         if avg_corr >= 0.8:
-            return "A (浼樼)"
+            return "A (优秀)"
         if avg_corr >= 0.6:
-            return "B (鑹ソ)"
+            return "B (良好)"
         if avg_corr >= 0.4:
-            return "C (涓€鑸?"
-        return "D (闇€鏀硅繘)"
+            return "C (一般)"
+        return "D (需改进)"
 
     def get_summary(self) -> Dict[str, Any]:
         return {
@@ -564,7 +562,7 @@ class PortfolioSystemStrategy(BaseStrategy):
         policy = float(row.get("policy_shock_factor", 0.0))
         volatility = max(float(abs(row.get("volatility_20", 0.0))), 0.002)
 
-        # Risky asset expected return blends alpha/news/policy cues; cash is 0.
+
         expected_returns = pd.Series({"risky_asset": alpha + 0.35 * sentiment + 0.2 * policy, "cash": 0.0})
         cov = pd.DataFrame(
             [[volatility**2, 0.0], [0.0, 1e-6]],
@@ -1379,4 +1377,3 @@ def _safe_population_size(population: Any) -> int:
         return len(population)
     except Exception:
         return 0
-

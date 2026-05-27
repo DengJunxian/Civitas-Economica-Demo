@@ -1,4 +1,3 @@
-# file: core/integrated_market_engine.py
 
 import time
 import random
@@ -27,7 +26,7 @@ from core.exchange.bar_builder import TradeTapeBarBuilder, TradeTapeEntry
 if TYPE_CHECKING:
     from agents.base_agent import MarketSnapshot
 
-# Import C++ Optimized OrderBook
+
 try:
     from core.exchange.order_book_cpp import OrderBookCPP, _civitas_lob
     from core.exchange.order_book import Order as OrderModel
@@ -39,29 +38,30 @@ except ImportError as e:
     USE_CPP_LOB = False
     print(f"[!] Falling back to Python: {e}")
 
-# Assumes a config.py exists with these constants. 
+
 from config import GLOBAL_CONFIG
 from core.data.market_data_provider import MarketDataProvider, MarketDataQuery
 
 # ==========================================
-# PART 1: Infrastructure & Calendar
-# (Derived from market_engine.py)
+
+
 # ==========================================
 
 class ChinaTradingCalendar:
     """
-    Manages A-share trading days.
-    Rules: Weekends + Statutory Holidays (Closed on Adjusted Working Days).
+    管理 A 股交易日。
+
+    规则包含周末与法定节假日，调休工作日不自动视为交易日。
     """
     
-    # Format: 'YYYY-MM-DD'
+
     HOLIDAYS_WEEKDAY_2025 = [
-        "2025-01-01", # New Year
-        "2025-01-28", "2025-01-29", "2025-01-30", "2025-01-31", "2025-02-03", "2025-02-04", # CNY
-        "2025-04-04", # Tomb Sweeping
-        "2025-05-01", "2025-05-02", "2025-05-05", # Labor Day
-        "2025-06-02", # Dragon Boat
-        "2025-10-01", "2025-10-02", "2025-10-03", "2025-10-06", "2025-10-07", "2025-10-08" # National Day
+        "2025-01-01",
+        "2025-01-28", "2025-01-29", "2025-01-30", "2025-01-31", "2025-02-03", "2025-02-04",
+        "2025-04-04",
+        "2025-05-01", "2025-05-02", "2025-05-05",
+        "2025-06-02",
+        "2025-10-01", "2025-10-02", "2025-10-03", "2025-10-06", "2025-10-07", "2025-10-08"
     ]
     
     HOLIDAYS_WEEKDAY_2026 = [
@@ -88,19 +88,19 @@ class ChinaTradingCalendar:
             curr += timedelta(days=1)
             d_str = curr.strftime("%Y-%m-%d")
             
-            # 1. Check Weekend (5=Sat, 6=Sun)
+
             if curr.weekday() >= 5:
                 continue
                 
-            # 2. Check Holidays
+
             if d_str in ChinaTradingCalendar.ALL_HOLIDAYS:
                 continue
             
             return d_str
 
 # ==========================================
-# PART 2: Core Data Structures
-# (Merged from coremarket_engine.py & market_engine.py)
+
+
 # ==========================================
 
 @dataclass
@@ -141,7 +141,7 @@ def blend_price_with_backdrop(
     w = max(0.0, min(1.0, float(backdrop_weight)))
     raw = (1.0 - w) * endo_p + w * exo_p
 
-    # Higher exogenous volume dampens endogenous impact.
+
     vol = max(0.0, float(exogenous_volume))
     damp = 1.0 + min(3.0, vol / 1_000_000.0) * 0.20
     return float(old_p + (raw - old_p) / damp)
@@ -171,8 +171,8 @@ def _resolve_feature_flags(overrides: Optional[Dict[str, Any]] = None) -> Dict[s
     return flags
 
 # ==========================================
-# PART 3: Matching Engine
-# (From coremarket_engine.py, enhanced for Simulation)
+
+
 # ==========================================
 
 class MatchingEngine:
@@ -192,24 +192,24 @@ class MatchingEngine:
         self.prev_close = prev_close
         self.clock = clock
         
-        # Order Books or LOB
-        # Unified Interface: self.lob will always be an object with .add_order(), .get_depth(), etc.
+
+
         if USE_CPP_LOB:
             self.lob = OrderBookCPP(symbol, prev_close)
             print("[MatchingEngine] Using high-performance C++ OrderBook")
         else:
-            # Fallback to Python Implementation
-            # Ensure proper import path and class usage
+
+
             from core.exchange.order_book import OrderBook
             self.lob = OrderBook(symbol, prev_close)
             print("[MatchingEngine] Using Pure Python OrderBook (Fallback)")
         
-        # Statistics
+
         self.last_price = prev_close
         self.total_volume = 0
         self.trades_history: List[Trade] = []
         
-        # Buffer for current step generation
+
         self.step_trades_buffer: List[Trade] = []
 
     def update_prev_close(self, close_price: float):
@@ -303,7 +303,7 @@ class MatchingEngine:
         if hasattr(self, 'lob'):
             return self.lob._check_price_limit(price)
             
-        # Fallback if no LOB (Unlikely)
+
         limit = GLOBAL_CONFIG.PRICE_LIMIT 
         upper = self.prev_close * (1 + limit)
         lower = self.prev_close * (1 - limit)
@@ -323,14 +323,14 @@ class MatchingEngine:
         if isinstance(order, ExecutionPlan):
             return self.submit_execution_plan(order, liquidity_injection_prob)
 
-        # 1. Price Limit Check
+
         if not self._check_price_limit(order.price):
-            # In a real exchange, this is a Reject. 
-            # We return empty list to signify no trades.
+
+
             return []
 
-        # 2. National Team Intervention (Liquidity Injection)
-        # If it's a sell order and probability triggers, generate a buy order first.
+
+
         if order.side == OrderSide.SELL and liquidity_injection_prob > 0:
             if random.random() < liquidity_injection_prob:
                 team_order = Order(
@@ -342,7 +342,7 @@ class MatchingEngine:
                     order_type=OrderType.LIMIT,
                     symbol=self.symbol
                 )
-                # Inject directly
+
                 if USE_CPP_LOB:
                     lob_team_order = OrderModel(
                         agent_id=team_order.agent_id,
@@ -356,19 +356,19 @@ class MatchingEngine:
                     )
                     self.lob.add_order(lob_team_order)
                 else:
-                    # For Python implementation, we might need adjustments if using heapq directly
-                    # But if using unified interface self.lob, we should use that.
-                    # The original code used heapq.heappush directly for Python fallback?
-                    # "else: heapq.heappush..."
-                    # Let's stick to using self.lob.add_order for consistency if possible.
-                    # But self.lob is OrderBook instance.
+
+
+
+
+
+
                     
                     self.lob.add_order(team_order)
 
-        # 3. Matching Logic
+
         generated_trades = []
 
-        # 3. Matching Logic
+
         generated_trades = []
 
 
@@ -376,10 +376,10 @@ class MatchingEngine:
         lob_id = order.order_id
         
         if USE_CPP_LOB:
-             # C++ implementation might need a different dictionary or specific fields
-             # But here we are creating a specific Order object for the LOB
-             # Check if OrderBookCPP expects core.types.Order or its own thing
-             # Assuming it expects the same fields.
+
+
+
+
              
              lob_order = OrderModel(
                 agent_id=order.agent_id,
@@ -392,7 +392,7 @@ class MatchingEngine:
                 timestamp=order.timestamp
             )
         else:
-            # Python implementation
+
             from core.types import Order as PyOrder
             lob_order = PyOrder(
                 agent_id=order.agent_id,
@@ -405,30 +405,30 @@ class MatchingEngine:
                 timestamp=order.timestamp
             )
             
-        # Execute Matching via Polymorphic Interface
-        # Both implementations should have .add_order(order) returning List[Trade]
+
+
         trades = self.lob.add_order(lob_order)
             
-        # Sync back filled quantity to the local order object
+
         order.filled_qty = lob_order.filled_qty
             
-        # Convert LOB Trades back to local Trade object (if necessary)
-        # The Scheduler expects core.market_engine.Trade objects
+
+
         for t in trades:
-            # Map fields from LOB Trade to MarketEngine Trade
-            # Check attribute names carefully. Python Trade has: trade_id, price, quantity, maker_id...
+
+
             
-            # LOB Trade structure:
-            # price, quantity, maker_agent_id, taker_agent_id, maker_order_id, taker_order_id, etc.
-            # We need to map them correctly.
-            # Assuming 't' matches what lob.add_order returns.
-            # If using Python OrderBook, it returns a list of Trade objects defined in ITSELF or types.py?
-            # It seems core/exchange/order_book.py might generate dicts or its own Trade tuples.
-            # Based on current code structure, let's assume 't' has attributes.
+
+
+
+
+
+
+
             
-            # Direct mapping to core.types.Trade
+
             local_trade = Trade(
-                trade_id=str(uuid.uuid4()), # Generate new ID
+                trade_id=str(uuid.uuid4()),
                 price=t.price,
                 quantity=int(t.quantity),
                 maker_id=getattr(t, 'maker_order_id', getattr(t, 'maker_id', 'unknown')), 
@@ -444,46 +444,33 @@ class MatchingEngine:
             )
             generated_trades.append(local_trade)
             
-            # Update Engine Stats
+
             self.last_price = local_trade.price
             self.total_volume += local_trade.quantity
             self.trades_history.append(local_trade)
 
-        # Add to step buffer for Candle generation
+
         self.step_trades_buffer.extend(generated_trades)
         return generated_trades
 
 
 
     def get_order_book_depth(self, level=5) -> Dict:
-        """Get L5 Market Depth."""
-        # Unified call
+        """获取五档市场深度。"""
+
         return self.lob.get_depth(level)
 
     def flush_step_trades(self) -> List[Trade]:
-        """Return trades from the current step and clear buffer."""
+        """返回当前步成交并清空缓冲区。"""
         trades = self.step_trades_buffer[:]
         self.step_trades_buffer = []
         return trades
 
     def run_call_auction(self, orders: List[Order], market_time: float = None) -> Tuple[float, List[Trade]]:
         """
-        闆嗗悎绔炰环锛圕all Auction锛?
-        
-        妯℃嫙A鑲″競鍦?:15-9:25鐨勯泦鍚堢珵浠烽樁娈点€?
-        閫氳繃璁＄畻鑳戒娇鎴愪氦閲忔渶澶у寲鐨勪环鏍兼潵纭畾寮€鐩樹环銆?
-        
-        绠楁硶锛?
-        1. 灏嗘墍鏈変拱鍗栬鍗曟寜浠锋牸鎺掑簭
-        2. 璁＄畻姣忎釜浠锋牸姘村钩鐨勭疮璁′拱鍗栭噺
-        3. 鎵惧埌浣挎垚浜ら噺鏈€澶у寲鐨勪环鏍间綔涓哄紑鐩樹环
-        
-        Args:
-            orders: 闆嗗悎绔炰环闃舵鐨勬墍鏈夎鍗?
-            market_time: 褰撳墠甯傚満鏃堕棿 (鍙€?
-            
-        Returns:
-            (寮€鐩樹环, 鎴愪氦鍒楄〃)
+        模拟 A 股集合竞价阶段。
+
+        通过最大化可成交量、最小化不平衡量来确定开盘价。
         """
         if not orders:
             return self.prev_close, []
@@ -518,8 +505,8 @@ class MatchingEngine:
         return opening_price, trades
 
 # ==========================================
-# PART 4: Helpers (Loader & Policy)
-# (From market_engine.py)
+
+
 # ==========================================
 
 class RealMarketLoader:
@@ -636,12 +623,13 @@ class RealMarketLoader:
 
 class PolicyInterpreter:
     """
-    鏀跨瓥瑙ｉ噴鍣細閫氳繃 DeepSeek 鎴?GLM 鍒嗘瀽鏀跨瓥鏂囨湰锛岄噺鍖栧叾瀵瑰競鍦虹殑褰卞搷銆?
-    鏀寔浣跨敤 ModelRouter 杩涜澶氭ā鍨嬭矾鐢便€?
+    政策解释器。
+
+    通过 DeepSeek 或 GLM 分析政策文本，量化其对市场的影响，并支持多模型路由。
     """
     
     def __init__(self, api_key_or_router):
-        # 鏀寔浼犲叆 router 鎴?key (鍏煎鏃ф帴鍙?
+
         if hasattr(api_key_or_router, 'call_with_fallback'):
             self.router = api_key_or_router
             self.api_key = self.router.deepseek_key if self.router.deepseek_key else "dummy"
@@ -649,53 +637,46 @@ class PolicyInterpreter:
             self.router = None
             self.api_key = api_key_or_router
             
-        self.last_reasoning = None  # 淇濆瓨鏈€杩戜竴娆＄殑鎺ㄧ悊杩囩▼
+        self.last_reasoning = None
 
     async def interpret(self, policy_text: str) -> Dict:
         """
-        鍒嗘瀽鏀跨瓥鏂囨湰锛岃繑鍥為噺鍖栧弬鏁般€?
-        
-        Args:
-            policy_text: 鏀跨瓥鎻忚堪鏂囨湰
-            
-        Returns:
-            Dict: 鍖呭惈 tax_rate, liquidity_injection, fear_factor, initial_news, 
-                  sentiment_shift, reasoning 绛夊瓧娈?
+        分析政策文本并返回量化参数。
         """
         if not self.api_key: 
             return self._default_policy()
 
-        # 鏋勯€?prompt
-        prompt = f"""浣犳槸涓€浣嶈祫娣辩殑A鑲″競鍦烘斂绛栧垎鏋愬笀銆傝鍒嗘瀽浠ヤ笅鏀跨瓥瀵瑰競鍦虹殑褰卞搷锛屽苟缁欏嚭閲忓寲鍙傛暟銆?
+        # 构造政策分析提示词
+        prompt = f"""你是一位资深 A 股市场政策分析师。请分析以下政策对市场的影响，并给出量化参数。
 
-銆愬緟鍒嗘瀽鏀跨瓥銆?
+【待分析政策】
 {policy_text}
 
-銆愬綋鍓嶅競鍦哄熀鍑嗐€?
-- 鍗拌姳绋庣巼: {GLOBAL_CONFIG.TAX_RATE_STAMP:.4%}
-- 娑ㄨ穼鍋滈檺鍒? {GLOBAL_CONFIG.PRICE_LIMIT:.0%}
+【当前市场基准】
+- 印花税率: {GLOBAL_CONFIG.TAX_RATE_STAMP:.4%}
+- 涨跌停限制: {GLOBAL_CONFIG.PRICE_LIMIT:.0%}
 
-銆愬垎鏋愯姹傘€?
-1. 鐩存帴鏁堝簲锛氭祦鍔ㄦ€у拰浜ゆ槗鎴愭湰褰卞搷
-2. 淇″彿鏁堝簲锛氭斂绛栫殑闅愬惈淇″彿鍜屽競鍦鸿В璇?
-3. 浜岄樁璁ょ煡锛氭姇璧勮€呴鏈熺殑鑷垜瀹炵幇
-4. 鏃舵晥鎬э細鐭湡鎯呯华 vs 涓湡鍩烘湰闈?
+【分析要求】
+1. 直接效应：流动性和交易成本影响
+2. 信号效应：政策的隐含信号和市场解读
+3. 二阶认知：投资者预期的自我实现
+4. 时效性：短期情绪与中期基本面
 
-銆愯緭鍑烘牸寮忋€?
-涓ユ牸杩斿洖 JSON 鏍煎紡锛屼笉瑕佸寘鍚?Markdown 鏍煎紡鏍囪锛?
+【输出格式】
+严格返回 JSON 格式，不要包含 Markdown 标记：
 {{
-    "tax_rate": <鏂板嵃鑺辩◣鐜囷紝float>,
-    "liquidity_injection": <娴佸姩鎬ф敞鍏ユ鐜囷紝0.0-1.0>,
-    "fear_factor": <鎭愭厡鍥犲瓙锛?.0-1.0>,
-    "sentiment_shift": <鎯呯华鍋忕Щ閲忥紝-1.0鍒?.0>,
-    "initial_news": "<绠€鐭柊闂绘爣棰?",
-    "market_impact": "<涓€鍙ヨ瘽鎬荤粨>",
-    "reasoning_summary": "<鍒嗘瀽杩囩▼鎽樿>"
+    "tax_rate": <新的印花税率，float>,
+    "liquidity_injection": <流动性注入概率，0.0-1.0>,
+    "fear_factor": <恐慌因子，0.0-1.0>,
+    "sentiment_shift": <情绪偏移量，-1.0到1.0>,
+    "initial_news": "<简短新闻标题>",
+    "market_impact": "<一句话总结>",
+    "reasoning_summary": "<分析过程摘要>"
 }}
 """
         try:
-            # 浣跨敤 Router 鎴?AsyncClient (DeepSeek)
-            # 涓轰簡鍦?Loop Architecture 涓珮鏁堣繍琛岋紝杩欓噷蹇呴』鏄紓姝ヨ皟鐢?
+
+
             
             content = ""
             reasoning = ""
@@ -707,7 +688,7 @@ class PolicyInterpreter:
                     zhipu_key=GLOBAL_CONFIG.ZHIPU_API_KEY
                 )
             
-            # 浣跨敤榛樿浼樺厛绾?
+
             priority = ["deepseek-reasoner", "glm-4-flashx", "deepseek-chat"]
             
             response = await self.router.call_with_fallback(
@@ -717,37 +698,37 @@ class PolicyInterpreter:
                 fallback_response='{"tax_rate": 0.0005, "fear_factor": 0, "liquidity_injection": 0}'
             )
             
-            # router 杩斿洖鐨勬槸 content, reasoning, model
+
             content = response[0]
             reasoning = response[1]
 
             self.last_reasoning = reasoning
             
-            # 瑙ｆ瀽 JSON
+            # 解析 JSON
             import json
             import re
             
-            # 娓呯悊 Markdown
+            # 清理 Markdown 包裹
             if "```" in content: 
                 content = re.sub(r"```json|```", "", content).strip()
             
-            # 灏濊瘯瑙ｆ瀽
+
             try:
                 result = json.loads(content)
             except json.JSONDecodeError:
-                # 灏濊瘯淇甯歌 JSON 閿欒
+
                 match = re.search(r'\{.*\}', content, re.DOTALL)
                 if match:
                     result = json.loads(match.group())
                 else:
-                    raise ValueError("鏃犳硶鎻愬彇 JSON")
+                    raise ValueError("无法提取 JSON")
 
             result['reasoning'] = self.last_reasoning
-            print(f"[OK] 鏀跨瓥鍒嗘瀽瀹屾垚: {result.get('initial_news', '鏈煡')}")
+            print(f"[OK] 政策分析完成: {result.get('initial_news', '未知')}")
             return result
 
         except Exception as e:
-            print(f"[!] 鏀跨瓥鍒嗘瀽澶辫触: {e}")
+            print(f"[!] 政策分析失败: {e}")
             return self._default_policy()
 
     def _default_policy(self) -> Dict:
@@ -763,8 +744,8 @@ class PolicyInterpreter:
         }
 
 # ==========================================
-# PART 5: Market Data Manager
-# (Integrated Logic)
+
+
 # ==========================================
 
 class MarketDataManager:
@@ -798,16 +779,16 @@ class MarketDataManager:
         ).hexdigest()
         self.rng = random.Random(self.seed)
         
-        # 鏀跨瓥绠＄悊鍣?(Legacy, keeping for now)
+        # 保留旧版政策管理器，用于兼容历史调用路径
         self.policy_manager = PolicyManager()
         
-        # 椋庢帶寮曟搸锛堥泦涓紡缃戝叧锛?(Keep as dual check or remove later)
+
         self.risk_engine = RiskEngine(
             stamp_duty_rate=GLOBAL_CONFIG.TAX_RATE_STAMP,
             commission_rate=GLOBAL_CONFIG.TAX_RATE_COMMISSION
         )
         
-        # Load Data
+
         self.history_candles = RealMarketLoader.load_history() if load_real_data else []
         self.sim_candles = []
         self.trade_tape: List[Any] = []
@@ -815,7 +796,7 @@ class MarketDataManager:
         
         initial_price = self.history_candles[-1].close if self.history_candles else 3000.0
         
-        # Initialize Core Engine
+
         self.engine = MatchingEngine(prev_close=initial_price, clock=self.clock)
         self.bar_builder = TradeTapeBarBuilder(
             seed=self.seed,
@@ -836,8 +817,8 @@ class MarketDataManager:
                 config=MarketKernelConfig(seed=self.seed, feature_flags=self.feature_flags),
             )
         
-        # State
-        self.current_news = "Waiting for market open"
+
+        self.current_news = "等待市场开盘"
         self.panic_level = 0.0 
         self.csad_history = []
         self.text_factor_state: Dict[str, Any] = {
@@ -852,11 +833,11 @@ class MarketDataManager:
         
     @property
     def candles(self) -> List[Candle]:
-        """Unified view of history + simulation"""
+        """返回历史与仿真合并后的 K 线。"""
         return self.history_candles + self.sim_candles
 
     def clear_simulation(self):
-        """Reset simulation state"""
+        """重置仿真状态。"""
         self.sim_candles = []
         self.csad_history = []
         self.trade_tape = []
@@ -871,8 +852,8 @@ class MarketDataManager:
             "regime_bias": "neutral",
         }
         self.latest_impact_paths = []
-        # Reset engine state but keep price if continued? 
-        # Usually reset to last historical price
+
+
         initial_price = self.history_candles[-1].close if self.history_candles else 3000.0
         self.engine = MatchingEngine(prev_close=initial_price, clock=self.clock)
         if self.kernel is not None:
@@ -885,16 +866,16 @@ class MarketDataManager:
         self.policy.liquidity_injection = params.get("liquidity_injection", 0.0)
         self.policy.tax_rate = params.get("tax_rate", GLOBAL_CONFIG.TAX_RATE_STAMP)
         self.policy.description = text
-        self.current_news = params.get("initial_news", "Policy Implemented")
+        self.current_news = params.get("initial_news", "政策已执行")
         self.panic_level = params.get("fear_factor", 0.0)
         
-        # 鍚屾鏀跨瓥绠＄悊鍣ㄧ姸鎬?
+
         self.policy_manager.set_policy_param("tax", "rate", self.policy.tax_rate)
-        # Note: Circuit breaker threshold might be set via explicit API, 
-        # but here we interpret general policy text.
+
+
 
     def ingest_seed_event(self, seed_event: Any) -> None:
-        """Map a SeedEvent-like payload to market text factors."""
+        """将种子事件映射为市场文本因子。"""
         factors = getattr(seed_event, "text_factors", None)
         if not isinstance(factors, dict):
             return
@@ -939,38 +920,38 @@ class MarketDataManager:
             self.current_news = headline
 
     def calculate_csad(self, agent_returns):
-        """Calculate Cross-Sectional Absolute Deviation to detect herd behavior."""
+        """计算横截面绝对偏差，用于识别羊群行为。"""
         if agent_returns is None or len(agent_returns) == 0:
             return
         rm = np.mean(agent_returns)
         csad = np.mean(np.abs(agent_returns - rm))
         self.csad_history.append(csad)
         
-        # Dynamic Panic Adjustment
+
         if rm < -0.02 and csad < 0.02: 
             self.panic_level = min(1.0, self.panic_level + 0.1)
         elif self.policy.liquidity_injection > 0.5:
             self.panic_level = max(0.0, self.panic_level - 0.05)
     
-    # Old finalize_step removed to avoid duplication
-    # The active finalize_step is defined below.
+
+
 
 
     def submit_agent_order(self, order: Order):
-        """Pass agent orders to the matching engine with centralized risk check."""
+        """将智能体订单提交给集中风控后的撮合引擎。"""
         
-        # 0. Regulatory Module Check (New)
+
         if self.regulatory_module:
-            # 0.1 Check Circuit Breaker
+
             if self.regulatory_module.circuit_breaker.is_halted:
                  order.status = OrderStatus.REJECTED
                  order.reason = "Market Halted (Circuit Breaker)"
                  return []
                  
-            # 0.2 Check Programmatic Trading Regulation
+
             allowed, reg_reason = self.regulatory_module.trading_regulator.register_order(
                 agent_id=order.agent_id,
-                order_type=order.order_type.value, # Use value string
+                order_type=order.order_type.value,
                 price=order.price,
                 qty=order.quantity
             )
@@ -981,10 +962,10 @@ class MarketDataManager:
                 print(f"[Regulatory] Order REJECTED for Agent {order.agent_id}: {reg_reason}")
                 return []
         
-        # 1. 鐩樺墠椋庢帶缃戝叧锛圠egacy Check锛?
+
         market_data = {
             "last_price": self.engine.last_price,
-            "best_bid": None, # Could be improved with actual LOB depth
+            "best_bid": None,
             "best_ask": None
         }
         
@@ -993,26 +974,26 @@ class MarketDataManager:
         )
         
         if not allowed:
-            # Order Blocked by Risk Gateway
+
             print(f"[Risk Control] Order REJECTED for Agent {order.agent_id}: {reason}")
             order.status = OrderStatus.REJECTED
             order.reason = reason
             return []
             
-        # 2. 娉ㄥ唽璁㈠崟鍒伴珮棰戠洃鎺у櫒锛圠egacy锛?
+
         self.risk_engine.hft_monitor.register_order(order.agent_id)
 
-        # 3. 妫€鏌ユ斂绛栭檺鍒讹紙Legacy PolicyManager锛?
+
         market_state = {"last_price": self.engine.last_price}
         policy_res = self.policy_manager.check_order(order, market_state)
         
         if not policy_res.is_allowed:
-            # Order Rejected by Policy
+
             order.status = OrderStatus.REJECTED
             order.reason = policy_res.reason
             return []
             
-        # 4. Proceed to Matching
+
         if self.kernel is not None:
             current_ts = self.clock.timestamp if self.clock else time.time()
             trades = self.kernel.submit_order(
@@ -1041,7 +1022,7 @@ class MarketDataManager:
                     ]
                 )
         
-        # 5. 娉ㄥ唽鎴愪氦鍒伴珮棰戠洃鎺у櫒锛圠egacy锛?
+
         if trades:
             self.risk_engine.hft_monitor.register_trade(order.agent_id)
             
@@ -1051,23 +1032,23 @@ class MarketDataManager:
         """Generate a MarketSnapshot for agents."""
         from agents.base_agent import MarketSnapshot
         
-        # Get L5 Depth
+
         depth = self.engine.get_order_book_depth(5)
         
-        # Calculate volatility (simple std dev)
+
         vol = 0.0
         if len(self.candles) > 20:
              closes = [c.close for c in self.candles[-20:]]
              vol = float(np.std(closes))
              
-        # Trend (5-day return)
+
         trend = 0.0
         if len(self.candles) > 5:
             start_p = self.candles[-5].close
             if start_p > 0:
                 trend = (self.candles[-1].close - start_p) / start_p
 
-        # Derive Best Bid/Ask
+
         best_bid = depth['bids'][0]['price'] if depth['bids'] else None
         best_ask = depth['asks'][0]['price'] if depth['asks'] else None
         
@@ -1115,10 +1096,10 @@ class MarketDataManager:
         open_p = self.engine.last_price
         current_ts = self.clock.timestamp if self.clock else time.time()
         
-        # 1. Get Date
+
         new_date_str = ChinaTradingCalendar.get_next_trading_day(last_date_str)
         
-        # 2. Get executed trades for this step
+
         if trades is None:
             if self.kernel is not None:
                 self.kernel.advance_to(current_ts)
@@ -1146,9 +1127,9 @@ class MarketDataManager:
             ]
         self.trade_tape.extend(step_trade_tape)
         
-        # 3. Generate Candle
+
         if not step_trades:
-            # No trades: Simulate random drift based on panic
+
             drift = self.rng.normalvariate(0, 0.003)
             text_sentiment = self._safe_float(self.text_factor_state.get("sentiment_score"), 0.0)
             text_shock = self._safe_float(self.text_factor_state.get("policy_shock"), 0.0)
@@ -1159,15 +1140,15 @@ class MarketDataManager:
             elif text_regime == "risk_on":
                 drift += text_shock * 0.0010
             
-            # 鎭愭厡鏃跺鍔犲悜涓嬪亸绉伙紝浣嗚娓╁拰锛堜笌鎭愭厡绋嬪害鎴愭瘮渚嬶級
+
             if self.panic_level > 0.3:
-                drift -= self.panic_level * 0.003  # 鏈€澶х害0.3%鐨勯澶栦笅琛?
+                drift -= self.panic_level * 0.003
             
-            # 鍧囧€煎洖褰? 鍋忕鍓嶆敹杩囧鏃舵媺鍥?
+
             deviation = (open_p - self.engine.prev_close) / self.engine.prev_close
-            drift -= deviation * 0.1  # 娓╁拰鐨勫洖褰掑姏
+            drift -= deviation * 0.1
             
-            # Simple drift
+
             close_p = open_p * (1 + drift)
             high_p = max(open_p, close_p)
             low_p = min(open_p, close_p)
@@ -1189,7 +1170,7 @@ class MarketDataManager:
             c.volume = 0
             self.engine.last_price = close_p
         else:
-            # Policy Effect: Update Taxes on Trades
+
             for t in step_trades:
                 t.seller_tax = self.policy_manager.calculate_total_tax(t)
             
@@ -1209,9 +1190,9 @@ class MarketDataManager:
             )
             self.replay_metrics = self.bar_builder.build_replay_metrics(self.trade_tape, self.sim_candles + [c])
 
-        # 5. Store Candle & Prepare next day
-        self.sim_candles.append(c) # Fix: Append to sim_candles, not self.candles (which is a property)
-        self.engine.update_prev_close(c.close) # Set Prev Close for next step's limit check
+
+        self.sim_candles.append(c)
+        self.engine.update_prev_close(c.close)
         if self.kernel is not None:
             self.kernel.prev_close = c.close
         
@@ -1228,28 +1209,28 @@ class MarketDataManager:
     def _clamp(value: float, low: float, high: float) -> float:
         return max(low, min(high, value))
 
-# Usage Example
+
 if __name__ == "__main__":
-    # Initialize
+
     manager = MarketDataManager(api_key=None, load_real_data=False)
     
-    # 1. Apply Policy
+
     manager.apply_policy("Reduce stamp tax to boost liquidity.")
     print(f"Policy: {manager.policy}")
     
-    # 2. Create Orders
+
     orders = [
         Order(price=3010.0, quantity=100, agent_id="alice", side="buy", timestamp=time.time()),
         Order(price=3005.0, quantity=100, agent_id="bob", side="sell", timestamp=time.time()+1),
-        Order(price=3000.0, quantity=500, agent_id="charlie", side="sell", timestamp=time.time()+2) # Aggressive sell
+        Order(price=3000.0, quantity=500, agent_id="charlie", side="sell", timestamp=time.time()+2)
     ]
     
-    # 3. Run Step
+
     for o in orders:
         trades = manager.submit_agent_order(o)
         for t in trades:
             print(f"Trade Executed: Price {t.price}, Qty {t.quantity} | Buyer pays: {t.buyer_pay_amount:.2f}")
             
-    # 4. Finalize
+
     candle = manager.finalize_step(1, "2024-01-01")
     print(f"Daily Candle Generated: {candle}")

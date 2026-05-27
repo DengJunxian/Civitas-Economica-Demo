@@ -1,4 +1,4 @@
-﻿"""History replay page for factor backtest and news-driven policy replay."""
+"""History replay page for factor backtest and news-driven policy replay."""
 
 from __future__ import annotations
 
@@ -326,7 +326,7 @@ def _beautify_metrics_for_display(metrics: Dict[str, float]) -> Dict[str, float]
     vol_similarity = float(np.clip(metrics.get("vol_similarity", 0.0), 0.0, 1.0))
     response_gap = float(max(metrics.get("response_gap", 0.0), 0.0))
 
-    # Higher deviation means further from "credible replay" territory.
+
     deviation_score = float(
         np.clip(
             0.40 * (1.0 - trend)
@@ -340,7 +340,7 @@ def _beautify_metrics_for_display(metrics: Dict[str, float]) -> Dict[str, float]
     if deviation_score <= 0.35:
         return dict(metrics)
 
-    # Beautification strength is capped to avoid over-polishing.
+
     strength = float(np.clip((deviation_score - 0.35) / 0.65, 0.0, 1.0) * 0.38)
     polished = dict(metrics)
     polished["trend_alignment"] = float(trend + (max(trend, 0.62) - trend) * strength)
@@ -490,13 +490,13 @@ def _moderate_display_confidence(result: BacktestResult) -> None:
     metadata = dict(result.metadata or {})
     strict_raw = _safe_float(metadata.get("strict_authenticity_score"))
     demo_raw = _safe_float(metadata.get("demo_authenticity_score"))
-    # Convert raw metrics to [0, 1] proxies without aggressive score inflation.
+
     corr_norm = float(np.clip(((_safe_float(result.price_correlation) or 0.0) + 1.0) / 2.0, 0.0, 1.0))
     vol_norm = float(np.clip(_safe_float(result.volatility_correlation) or 0.0, 0.0, 1.0))
     rmse_fit = float(np.clip(1.0 - (_safe_float(result.price_rmse) or 0.0) * 2.5, 0.0, 1.0))
     proxy = float(np.clip(0.50 * corr_norm + 0.20 * vol_norm + 0.30 * rmse_fit, 0.0, 1.0))
 
-    # Keep strict/demo driven by model output if present, otherwise fall back to proxy.
+
     strict = float(np.clip(strict_raw if strict_raw is not None else proxy, 0.0, 1.0))
     demo_source = demo_raw if demo_raw is not None else (0.85 * strict + 0.15 * proxy)
     demo = float(np.clip(demo_source, 0.0, 1.0))

@@ -10,7 +10,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence
 
 import numpy as np
 
-try:  # Optional dependency.
+try:
     import empyrical as ep
 except Exception:  # pragma: no cover - optional package
     ep = None

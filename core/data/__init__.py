@@ -1,4 +1,4 @@
-# core/data module
+
 """
 Data acquisition and replay components.
 """

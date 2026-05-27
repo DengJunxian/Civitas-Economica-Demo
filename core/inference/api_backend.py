@@ -1,4 +1,3 @@
-# file: core/inference/api_backend.py
 """
 API 推理后端
 
@@ -114,7 +113,7 @@ class APIBackend:
             if routed.ok or kwargs.get("fallback_response") is not None:
                 return routed.text
         except Exception:
-            # Fallback to legacy direct client path if router initialization/call fails.
+
             pass
         
         try:

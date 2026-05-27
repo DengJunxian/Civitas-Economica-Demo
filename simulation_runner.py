@@ -50,7 +50,7 @@ class BufferedIntent:
     price: float
     symbol: str = "A_SHARE_IDX"
     order_type: str = "limit"
-    intent_type: str = "order"  # order | cancel
+    intent_type: str = "order"
     activate_step: Optional[int] = None
     expire_step: Optional[int] = None
     metadata: Dict[str, Any] = field(default_factory=dict)

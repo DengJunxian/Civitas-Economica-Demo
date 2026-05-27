@@ -1,4 +1,3 @@
-# file: agents/debate_brain.py
 """
 多角色辩论决策系统
 
@@ -36,7 +35,7 @@ class DebateMessage:
     role: DebateRole
     content: str
     timestamp: float = field(default_factory=time.time)
-    emotion_score: float = 0.0  # -1 恐惧, +1 贪婪
+    emotion_score: float = 0.0
 
 
 @dataclass
@@ -70,7 +69,7 @@ class DebateBrain(DeepSeekBrain):
     # 类级别辩论历史存储
     debate_history: Dict[str, List[DebateRecord]] = {}
     
-    # 角色 Prompt 模板
+    # 角色 提示词 模板
     ROLE_PROMPTS = {
         DebateRole.BULL: """你是这位投资者内心的「贪婪人格」，代号"牛牛"。
 你的核心信念：
@@ -257,7 +256,7 @@ class DebateBrain(DeepSeekBrain):
         # 规则3: 极端行情不追高杀跌
         # (这里简化处理)
         
-        # 通过 LLM 进行更智能的审核
+        # 通过 大模型 进行更智能的审核
         if self.model_router:
             review_prompt = f"""
 作为风控经理，审核以下交易决策：

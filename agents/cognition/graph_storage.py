@@ -1,4 +1,3 @@
-# file: agents/cognition/graph_storage.py
 import os
 import networkx as nx
 from typing import Dict, List

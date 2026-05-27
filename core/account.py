@@ -1,4 +1,3 @@
-# file: core/account.py
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -35,9 +34,9 @@ class Portfolio:
     def __init__(self, initial_cash: float = GLOBAL_CONFIG.DEFAULT_CASH):
         self.available_cash = float(initial_cash)
         self.withdrawable_cash = float(initial_cash)
-        # 使用 list 存储批次，以便进行 FIFO 管理和 T+1 过滤
+        # 使用 list 存储批次，以便进行 先进先出 管理和 T+1 过滤
         self.positions: Dict[str, List[PositionBatch]] = {} 
-        self.frozen_cash = 0.0 # 预留给挂单冻结的资金 (虽然Prompt未显式要求，但为撮合必备)
+        self.frozen_cash = 0.0 # 预留给挂单冻结的资金 (虽然提示词未显式要求，但为撮合必备)
 
     def deposit(self, amount: float):
         """入金"""
@@ -99,7 +98,7 @@ class Portfolio:
         # 1. 扣款
         self.available_cash -= total_cost
         
-        # 逻辑说明：如果通过卖出今日股票获得了现金(available > withdrawable)，买入时优先消耗这部分"未结算资金"。
+        # 逻辑说明：如果通过卖出今日股票获得了现金，买入时优先消耗这部分"未结算资金"。
         # withdrawable_cash 只有在消耗完今日收益并开始侵蚀老本时才会减少。
         # 公式：可取资金 = min(新的可用资金, 原可取资金)
         self.withdrawable_cash = min(self.withdrawable_cash, self.available_cash)
@@ -128,7 +127,7 @@ class Portfolio:
         if qty > sellable:
             raise ValueError(f"可卖股数不足 (T+1限制): 申请 {qty}, 可卖 {sellable}")
 
-        # 1. FIFO 扣减持仓
+        # 1. 先进先出 扣减持仓
         remaining_qty_to_sell = qty
         kept_batches = []
         
@@ -140,7 +139,7 @@ class Portfolio:
                 kept_batches.append(batch)
                 continue
             
-            # 只有老仓位能被卖出 (Double Check)
+            # 只有老仓位能被卖出
             is_sellable_batch = True
             if GLOBAL_CONFIG.T_PLUS_1:
                 is_sellable_batch = batch.acquired_date < pd.Timestamp(time).normalize()

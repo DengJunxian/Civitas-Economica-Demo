@@ -1,4 +1,3 @@
-# file: data_flywheel/seed_store.py
 import json
 import os
 import logging

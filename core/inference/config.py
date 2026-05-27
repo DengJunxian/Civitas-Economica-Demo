@@ -1,4 +1,3 @@
-# file: core/inference/config.py
 """
 推理配置模块
 
@@ -56,7 +55,7 @@ class InferenceConfig:
     """
     mode: InferenceMode = InferenceMode.LITE
     
-    # API 配置
+    # 接口 配置
     api_key: Optional[str] = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY") or DEFAULT_DEEPSEEK_API_KEY)
     api_base_url: str = "https://api.deepseek.com/v1"
     
@@ -65,11 +64,11 @@ class InferenceConfig:
     n_ctx: int = 2048  # 上下文长度
     n_gpu_layers: int = -1  # -1 = 全部 offload 到 GPU
     
-    # vLLM 配置 (Enterprise 模式)
+    # vLLM 配置，企业模式使用
     vllm_model_name: str = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
     vllm_tensor_parallel: int = 1
     vllm_gpu_memory_utilization: float = 0.9
-    vllm_quantization: Optional[str] = "awq"  # awq, gptq, or None
+    vllm_quantization: Optional[str] = "awq"
     
     # 生成参数
     max_tokens: int = 512
@@ -77,8 +76,8 @@ class InferenceConfig:
     top_p: float = 0.9
     
     # 路由策略
-    tier_2_threshold: float = 0.8  # panic_level > 0.8 触发 Tier 2
-    institutional_always_tier_2: bool = True  # 机构始终用 Tier 2
+    tier_2_threshold: float = 0.8  # panic_level > 0.8 触发 第二层
+    institutional_always_tier_2: bool = True  # 机构始终用 第二层
     
     def to_dict(self) -> Dict[str, Any]:
         return {

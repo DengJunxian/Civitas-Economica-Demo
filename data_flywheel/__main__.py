@@ -1,4 +1,3 @@
-# file: data_flywheel/__main__.py
 """
 BettaFish 数据飞轮 CLI 入口
 

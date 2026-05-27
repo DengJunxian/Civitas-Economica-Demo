@@ -19,12 +19,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-try:  # Optional runtime dependency in the project.
+try:
     import numpy as np
 except Exception:  # pragma: no cover - numpy is present in normal installs
     np = None  # type: ignore[assignment]
 
-try:  # Optional; imported lazily by most code paths.
+try:
     import pandas as pd
 except Exception:  # pragma: no cover - pandas is present in normal installs
     pd = None  # type: ignore[assignment]

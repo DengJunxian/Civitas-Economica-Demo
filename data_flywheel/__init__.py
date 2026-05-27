@@ -1,4 +1,3 @@
-# file: data_flywheel/__init__.py
 """
 BettaFish 数据飞轮 — 分布式情报摄入模块
 

@@ -1,4 +1,3 @@
-# file: core/mesa/civitas_model.py
 """
 Mesa Model 编排器
 
@@ -118,7 +117,7 @@ class CivitasModel(Model):
         self.last_step_trades_count = 0
         self.last_smart_sentiment = 0.0
 
-        # 初始化数据收集器 (Mesa)
+        # 初始化数据收集器
         self.datacollector = DataCollector(
             model_reporters={
                 "Price": "current_price",
@@ -138,13 +137,13 @@ class CivitasModel(Model):
             }
         )
         
-        # 1. 创建异质 Agent 群体 (Tier 1)
+        # 1. 创建异质 智能体 群体
         self._create_agents(panic_ratio, quant_ratio)
         
-        # 2. 初始化 Tier 2 (Vectorized Population)
+        # 2. 初始化 第二层
         from agents.population import StratifiedPopulation
         self.population = StratifiedPopulation(
-            n_smart=0,  # Tier 1 由 Mesa 管理
+            n_smart=0,  # 第一层 由 Mesa 管理
             n_vectorized=5000, # 默认 5000 散户
             smart_agents=list(self.agents)
         )
@@ -167,7 +166,7 @@ class CivitasModel(Model):
         # 获取基于模式的模型优先级
         priority = self.shared_router.get_model_priority(mode) if self.shared_router else None
 
-        # 仅让前 N 个 Agent 走真实模型，兼顾开销与可复现性。
+        # 仅让前 N 个 智能体 走真实模型，兼顾开销与可复现性。
         max_real_agents = min(5, self.n_agents)
         for i in range(max_real_agents):
             use_llm_mask[i] = True

@@ -1,4 +1,3 @@
-# file: core/ipc/message_types.py
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 
@@ -21,7 +20,7 @@ class OrderPayload(BaseModel):
     symbol: str = "000001"
     price: float
     quantity: int
-    side: str  # "buy" or "sell"
+    side: str
     order_type: str = "LIMIT"
 
 class AgentActionPacket(BaseModel):

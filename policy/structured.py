@@ -228,7 +228,7 @@ class StructuredPolicyParser:
             fallback_used = True
 
         if len(matches) > 1 and policy_type != "unclassified":
-            # Keep the first match, but lower confidence when multiple families fire.
+
             ambiguous = True
         else:
             ambiguous = False
@@ -574,7 +574,7 @@ class StructuredPolicyParser:
         tokens: List[str] = []
         for _, _, keywords, _ in self._PATTERNS:
             tokens.extend([token for token in keywords if token in text or token in text.lower()])
-        # Preserve order while removing duplicates.
+
         seen: set[str] = set()
         unique: List[str] = []
         for token in tokens:
@@ -768,7 +768,7 @@ class StructuredPolicyParser:
             if coarse in agent_class_effects:
                 agent_class_effects[alias] = float(agent_class_effects[coarse])
 
-        # Small regime adjustments so the UI can show a distinct story by backdrop.
+
         regime_bias = {
             "risk_off": -0.10,
             "risk_on": 0.10,

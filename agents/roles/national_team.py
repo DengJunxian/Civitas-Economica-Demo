@@ -1,4 +1,3 @@
-# file: agents/roles/national_team.py
 """
 国家队 (National Team) / 平准基金 Agent
 
@@ -115,7 +114,7 @@ class NationalTeamAgent(BaseAgent):
             self.is_intervening = False
             return None
 
-    # --- Abstract Methods Implementation (Not used because act is overridden) ---
+
     async def perceive(self, market_snapshot: MarketSnapshot, public_news: List[str]) -> Dict[str, Any]:
         return {}
         

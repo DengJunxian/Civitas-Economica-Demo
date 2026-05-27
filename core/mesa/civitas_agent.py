@@ -1,4 +1,3 @@
-# file: core/mesa/civitas_agent.py
 """
 Mesa Agent 适配器
 
@@ -60,10 +59,10 @@ class CivitasAgent(Agent):
         if core_agent:
             self.core = core_agent
         else:
-            # 根据投资者类型生成心理画像 (Legacy compatibility)
+            # 根据投资者类型生成心理画像
             profile = self._get_profile_by_type(investor_type)
             
-            # 初始化内核 Agent
+            # 初始化内核 智能体
             # Mesa 的 unique_id 可能是 int
             self.core: TraderAgent = TraderAgent(
                 agent_id=str(self.unique_id),
@@ -99,7 +98,7 @@ class CivitasAgent(Agent):
                 "attention_span": 10.0,
                 "loss_sensitivity": 1.0
             }
-        else: # NORMAL
+        else:
             return {
                 "risk_aversion": 0.5,
                 "confidence_level": 0.5,
@@ -153,7 +152,7 @@ class CivitasAgent(Agent):
 
     @property
     def wealth(self) -> float:
-        # wealth = cash + market_value
+
         price = self.model.current_price if hasattr(self.model, "current_price") else 3000.0
         return self.core.cash_balance + (self.position * price)
         
@@ -170,7 +169,7 @@ class CivitasAgent(Agent):
     def id(self) -> str:
         return self.core.agent_id
 
-    # --- New Async API ---
+
 
     async def async_act(self, market_snapshot: MarketSnapshot, news: List[str]) -> Optional[Order]:
         """
@@ -190,7 +189,7 @@ class CivitasAgent(Agent):
             
         return order
 
-    # --- Compatibility API (Deprecated) ---
+
 
     async def prepare_decision(self, market_state: Dict) -> Tuple[Optional[List[Dict]], Dict]:
         account_state = self._build_account_state(market_state)
@@ -246,14 +245,14 @@ class CivitasAgent(Agent):
             price = trade.price
             
             # 检查 Trade 对象属性 (使用 vars() 或 dir() 确认，这里基于 logs 修正)
-            # Log mentions: 'buy_agent_id' (from core.types.Trade definition usually)
+
             
             # 使用 getattr 安全获取，防止 AttributeError
             buyer = getattr(trade, 'buyer_agent_id', getattr(trade, 'buy_agent_id', None))
             seller = getattr(trade, 'seller_agent_id', getattr(trade, 'sell_agent_id', None))
             
             if buyer == self.id:
-                 # I bought
+
                  cost = price * qty * (1 + GLOBAL_CONFIG.TAX_RATE_COMMISSION)
                  
                  # 更新成本价 (加权平均)
@@ -267,7 +266,7 @@ class CivitasAgent(Agent):
                  self.core.portfolio[symbol] = new_pos
                  
             elif seller == self.id:
-                 # I sold
+
                  revenue = price * qty * (1 - (GLOBAL_CONFIG.TAX_RATE_COMMISSION + GLOBAL_CONFIG.TAX_RATE_STAMP))
                  
                  # 卖出不影响平均成本，只减少持仓
@@ -283,7 +282,7 @@ class CivitasAgent(Agent):
             # 记录记忆 (简单模拟 outcomes)
             outcome = {"status": "FILLED", "price": price, "qty": qty}
             self.core.memory.append({
-                "timestamp": 0, # Should get from model
+                "timestamp": 0,
                 "decision": "EXECUTED",
                 "outcome": outcome
             })

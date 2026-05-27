@@ -1,4 +1,3 @@
-# file: core/inference/__init__.py
 """
 推理引擎模块
 

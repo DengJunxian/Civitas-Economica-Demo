@@ -1,4 +1,3 @@
-# file: core/system/runner.py
 """
 分布式模拟运行器
 
@@ -48,7 +47,7 @@ class AgentType(str, Enum):
 
 class ModelType(str, Enum):
     """模型类型"""
-    DEEPSEEK_R1 = "deepseek-r1"           # 高端 API
+    DEEPSEEK_R1 = "deepseek-r1"           # 高端 接口
     DEEPSEEK_7B = "deepseek-r1-distill-7b" # 本地蒸馏模型
     LOCAL_RULES = "local-rules"            # 纯规则引擎
 
@@ -178,7 +177,7 @@ class ModelRouter:
 
 
 # ==========================================
-# Agent Actor (Ray)
+
 # ==========================================
 
 def create_agent_actor_class():
@@ -298,11 +297,11 @@ def create_agent_actor_class():
             """使用 DeepSeek R1 API 决策"""
             start = time.time()
             
-            # 模拟 API 调用 (实际应调用 DeepSeekReasoner)
+            # 模拟接口调用，实际应调用 DeepSeek 推理模型
             # 这里使用规则作为占位
             decision = self._decide_with_rules(config, market_state)
             decision.model_used = ModelType.DEEPSEEK_R1.value
-            decision.inference_time_ms = (time.time() - start) * 1000 + 100  # 模拟 API 延迟
+            decision.inference_time_ms = (time.time() - start) * 1000 + 100  # 模拟 接口 延迟
             
             return decision
         
@@ -310,7 +309,7 @@ def create_agent_actor_class():
             """使用本地 7B 模型决策"""
             start = time.time()
             
-            # 模拟本地推理 (实际应调用 vLLM)
+            # 模拟本地推理，实际应调用本地推理后端
             decision = self._decide_with_rules(config, market_state)
             decision.model_used = ModelType.DEEPSEEK_7B.value
             decision.inference_time_ms = (time.time() - start) * 1000 + 20  # 模拟本地延迟
@@ -336,7 +335,7 @@ def create_agent_actor_class():
                 action = 'HOLD'
                 confidence = 0.5
             
-            # 根据 Agent 类型调整
+            # 根据 智能体 类型调整
             if config.agent_type == AgentType.INSTITUTIONAL:
                 # 机构更理性
                 if panic > 0.8 and action == 'SELL':
@@ -402,7 +401,7 @@ class SimulationRunner:
         if RAY_AVAILABLE and not ray.is_initialized():
             ray.init(ignore_reinit_error=True)
         
-        # 创建 Agent 配置
+        # 创建 智能体 配置
         configs = self._generate_agent_configs()
         
         # 分批创建 Actors

@@ -438,7 +438,7 @@ ul[role="listbox"] li {
   color: #ffffff !important;
 }
 
-/* Sidebar dark theme override */
+/* 侧边栏深色主题覆盖 */
 [data-testid="stSidebar"] {
   background-color: #030811 !important;
   border-right: 1px solid rgba(24, 144, 255, 0.15) !important;
@@ -460,7 +460,7 @@ ul[role="listbox"] li {
   background-color: transparent !important;
 }
 
-/* Button & Download Button Overrides */
+/* 按钮与下载按钮覆盖 */
 .stButton button,
 .stDownloadButton button {
   background-color: #0a1931 !important;
@@ -485,7 +485,7 @@ ul[role="listbox"] li {
   opacity: 0.6 !important;
 }
 
-/* JSON Viewer / Evidence Flow Overrides */
+/* JSON 查看器与证据流覆盖 */
 .stJson {
   background-color: #030811 !important;
   border: 1px solid #1f365c !important;
@@ -510,7 +510,7 @@ ul[role="listbox"] li {
 }
 
 
-/* Expander & JSON Background Overrides for Advanced Analysis */
+/* 高级分析折叠面板与 JSON 背景覆盖 */
 div[data-testid="stExpander"] div[role="button"] {
   background-color: #0a1931 !important;
   color: #e2e8f0 !important;

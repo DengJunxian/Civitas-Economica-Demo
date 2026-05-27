@@ -1,4 +1,3 @@
-# file: agents/brain.py
 
 import hashlib
 import json
@@ -90,7 +89,7 @@ def build_runtime_metadata(
         "feature_flags": feature_payload,
     }
 
-# --- 1. 向量记忆模块 (Vector Memory) ---
+# --- 1. 向量记忆模块 ---
 
 @dataclass
 class MemoryFragment:
@@ -150,7 +149,7 @@ class VectorMemory:
         return [item[1] for item in scores[:top_k]]
 
 
-# --- 2. 智能体状态 (Agent State) ---
+# --- 2. 智能体状态 ---
 
 @dataclass
 class AgentState:
@@ -251,15 +250,15 @@ class AgentState:
         # 信心低 -> 易感性高
         return max(0.0, min(1.0, (100 - self.confidence) / 80))
 
-# --- 2. 思维链记录 (Thought Record) ---
+# --- 2. 思维链记录 ---
 
 @dataclass
 class ThoughtRecord:
     """单次思考的完整记录，用于fMRI可视化"""
     agent_id: str
     timestamp: float
-    reasoning_content: str  # 完整思维链(CoT)
-    emotion_score: float  # -1(恐惧) ~ 1(贪婪)
+    reasoning_content: str  # 完整思维链
+    emotion_score: float
     decision: Dict
     market_context: Dict = field(default_factory=dict)
 
@@ -284,11 +283,11 @@ class DeepSeekBrain:
     """
     
     # 类级别的思维链历史存储（用于fMRI可视化）
-    # 使用 defaultdict 和 deque 自动管理内存，限制每个 Agent 保留最近 20 条记录
+    # 使用 defaultdict 和 deque 自动管理内存，限制每个 智能体 保留最近 20 条记录
     thought_history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=20))
     
     # 类级别的决策缓存（相似市场状态复用决策）
-    # 使用 OrderedDict 实现 LRU 缓存
+    # 使用 OrderedDict 实现 最近最少使用 缓存
     decision_cache: OrderedDict = OrderedDict()
     CACHE_MAX_SIZE = 100  # 最大缓存条目
     CACHE_TTL_STEPS = 5   # 缓存有效步数
@@ -315,7 +314,7 @@ class DeepSeekBrain:
         self._api_healthy = False
         self._last_error = None
         
-        # Agent重要性等级（用于混合调度）
+        # 智能体重要性等级（用于混合调度）
         # 0=普通, 1=重要（资金大/粉丝多）, 2=核心（意见领袖）
         self.importance_level = 0
         
@@ -326,7 +325,7 @@ class DeepSeekBrain:
         if agent_id not in DeepSeekBrain.thought_history:
             DeepSeekBrain.thought_history[agent_id] = []
             
-        self.model_priority = None # Initialize attribute
+        self.model_priority = None
         
         self._api_key = api_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY
         if self.model_router is None:
@@ -423,7 +422,7 @@ class DeepSeekBrain:
     
     def _update_cache(self, cache_key: str, decision: Dict, current_step: int):
         """更新缓存"""
-        # 如果 key 已存在，移动到末尾 (最近使用)
+        # 如果 键 已存在，移动到末尾 (最近使用)
         if cache_key in DeepSeekBrain.decision_cache:
             DeepSeekBrain.decision_cache.move_to_end(cache_key)
         
@@ -434,7 +433,7 @@ class DeepSeekBrain:
         
         # 缓存大小控制
         if len(DeepSeekBrain.decision_cache) > self.CACHE_MAX_SIZE:
-            # 移除最老的条目 (FIFO)
+            # 移除最老的条目
             DeepSeekBrain.decision_cache.popitem(last=False)
     
     def _init_client(self):
@@ -497,7 +496,7 @@ class DeepSeekBrain:
                 beliefs_block = ""
         
         if agent_type == "institution":
-            # ===== 机构投资者 Prompt: 强调逻辑、理性、结构化 CoT =====
+            # ===== 机构投资者 提示词: 强调逻辑、理性、结构化 CoT =====
             return f"""你现在是A股市场中的一名【机构投资者】，ID为 {self.agent_id}。
 
 【角色设定】
@@ -526,7 +525,7 @@ class DeepSeekBrain:
 }}
 """ + beliefs_block
         
-        # ===== 散户投资者 Prompt: 强调情绪、前景理论、非理性 =====
+        # ===== 散户投资者 提示词: 强调情绪、前景理论、非理性 =====
         loss_aversion = self.persona.get('loss_aversion', 2.25)
         risk_preference = self.state.evolved_risk_preference or self.persona.get('risk_preference', '保守')
         
@@ -576,7 +575,7 @@ JSON 格式示例：
         Returns:
             float: -1.0(极度恐惧) ~ 1.0(极度贪婪)
         """
-        # 恐惧关键词
+
         fear_keywords = ['恐慌', '担心', '风险', '亏损', '下跌', '危险', '割肉', '止损', '逃离', '害怕']
         # 贪婪关键词
         greed_keywords = ['机会', '抄底', '上涨', '盈利', '加仓', '牛市', '暴涨', '翻倍', '贪婪', '冲']
@@ -602,7 +601,7 @@ JSON 格式示例：
         Returns:
             Dict: 包含 'decision' (JSON)、'reasoning' (Str) 和 'emotion_score' (Float)
         """
-        # 1. 检索记忆 (RAG)
+        # 1. 检索记忆
         context_query = f"当前行情:{market_state['trend']}, 盈亏:{account_state['pnl_pct']:.2%}"
         past_lessons = self.memory.retrieve(context_query)
         lessons_text = "\n".join([f"- {lesson}" for lesson in past_lessons]) if past_lessons else "无相关记忆。"
@@ -638,7 +637,7 @@ JSON 格式示例：
         请基于你的人设和当前政策环境做出交易决策。
         """
 
-        # 3. 调用多模型路由器的同步 fallback 处理机制 (内置重试与降级，绝不崩溃)
+        # 3. 调用多模型路由器的同步 回退 处理机制 (内置重试与降级，绝不崩溃)
         messages = [
             {"role": "system", "content": self._build_system_prompt()},
             {"role": "user", "content": user_prompt}
@@ -965,7 +964,7 @@ JSON 格式示例：
         social_signal: str = "Neutral"
     ) -> str:
         """构建用户提示词 (增强版)"""
-        # 检索记忆 (RAG)
+        # 检索记忆
         context_query = f"当前行情:{market_state.get('trend', '未知')}, 盈亏:{account_state.get('pnl_pct', 0):.2%}"
         past_lessons = self.memory.retrieve(context_query)
         lessons_text = "\n".join([f"- {lesson}" for lesson in past_lessons]) if past_lessons else "无相关记忆。"
@@ -1076,7 +1075,7 @@ JSON 格式示例：
         else:
             panic_signal = 0.0
 
-        # Rule 2.5: exogenous text factor signal
+
         if text_regime == "risk_off":
             text_signal = -0.2 - (0.2 * min(1.0, abs(text_policy_shock)))
             reasoning_parts.append(

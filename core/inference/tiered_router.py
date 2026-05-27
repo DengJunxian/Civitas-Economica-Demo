@@ -1,4 +1,3 @@
-# file: core/inference/tiered_router.py
 """
 分层推理路由器
 
@@ -16,10 +15,10 @@ from core.inference.config import InferenceConfig, InferenceMode, AgentTier
 class InferenceRequest:
     """推理请求"""
     agent_id: str
-    agent_type: str  # "retail", "institutional", "quant"
+    agent_type: str
     prompt: str
     market_state: Dict[str, Any]
-    priority: int = 0  # 0=normal, 1=high
+    priority: int = 0
 
 
 @dataclass
@@ -122,19 +121,19 @@ class TieredRouter:
         agent_type = request.agent_type.lower()
         panic_level = request.market_state.get("panic_level", 0.5)
         
-        # 量化 Agent 使用规则引擎
+        # 量化 智能体 使用规则引擎
         if agent_type == "quant":
             return AgentTier.TIER_RULE
         
-        # 机构 Agent 始终使用 Tier 2
+        # 机构 智能体 始终使用 第二层
         if agent_type == "institutional" and self.config.institutional_always_tier_2:
             return AgentTier.TIER_2
         
-        # 极端行情使用 Tier 2
+        # 极端行情使用 第二层
         if panic_level > self.config.tier_2_threshold:
             return AgentTier.TIER_2
         
-        # 其他使用 Tier 1
+        # 其他使用 第一层
         return AgentTier.TIER_1
     
     async def call_with_fallback(self, requests: List[InferenceRequest]) -> List[InferenceResult]:
@@ -157,7 +156,7 @@ class TieredRouter:
         tasks = []
         for req in requests:
             # 将每个 route 调用包装到线程池
-            # 注意: route() 内部调用 API 是同步阻塞的，所以需要线程池
+            # 注意：路由调用内部会同步访问接口，所以需要线程池
             tasks.append(loop.run_in_executor(None, self.route, req))
             
         results = await asyncio.gather(*tasks)
@@ -236,7 +235,7 @@ class TieredRouter:
             content = self._vllm_backend.generate(request.prompt)
             model_used = "vllm"
         else:
-            # Lite 模式或后端不可用，使用 API
+            # Lite 模式或后端不可用，使用 接口
             if self._api_backend is None:
                 raise RuntimeError("API 后端未初始化")
             content = self._api_backend.generate(request.prompt)

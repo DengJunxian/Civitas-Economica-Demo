@@ -1,4 +1,3 @@
-# file: core/time_manager.py
 """
 仿真时间管理器 (SimulationClock)
 
@@ -82,4 +81,3 @@ class SimulationClock:
         self._time_step = timedelta(seconds=seconds)
 
 # 全局单例 (可选，但推荐在 Model 中传递实例)
-# _global_clock = SimulationClock()

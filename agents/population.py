@@ -1,4 +1,3 @@
-﻿# file: agents/population.py
 
 import os
 import random
@@ -46,13 +45,14 @@ class PopulationEngine(Protocol):
 
     def render_market_distribution_report(self, personas: Optional[List[Persona]] = None) -> str: ...
 
-# --- Tier 1: 鏅鸿兘浣撳畾涔?---
+
 
 @dataclass
 class SmartAgent:
     """
-    Tier 1 鎰忚棰嗚 (Opinion Leader)
-    鎷ユ湁鐙珛鐨?DeepSeek 澶ц剳銆佽蹇嗗拰瀹屾暣璐︽埛鐘舵€併€?
+    第一层意见领袖智能体。
+
+    拥有独立的大模型推理、记忆与完整账户状态。
     """
     id: str
     brain: DeepSeekBrain
@@ -61,7 +61,7 @@ class SmartAgent:
     cost_basis: float
     persona: Persona = field(default_factory=Persona)
     
-    # 褰卞搷鍔涚郴鏁?(鍐冲畾鑳借鐩栧灏?Tier 2 鑺傜偣)
+
     influence_factor: float = 1.0
     reference_points: Dict[str, float] = field(default_factory=dict)
     risk_appetite: float = 0.5
@@ -71,7 +71,7 @@ class SmartAgent:
     
     @property
     def market_value(self) -> float:
-        # 娉? 闇€澶栭儴娉ㄥ叆褰撳墠浠锋牸璁＄畻锛屾澶勪粎涓哄崰浣?
+
         return 0.0
 
     @property
@@ -102,24 +102,22 @@ class SmartAgent:
             "profile_signature": self.profile_signature(),
         }
 
-# --- Tier 2: 鍚戦噺鍖栫兢浣?---
+
 
 class StratifiedPopulation:
     """
-    鍒嗗眰鏅鸿兘浣撶兢浣撶鐞嗗櫒
-    
-    鏋舵瀯璁捐:
-    - Tier 1: List[SmartAgent] -> 澶嶆潅閫昏緫锛屼綆骞跺彂
-    - Tier 2: Numpy Matrix -> 绠€鍗曢€昏緫锛岄珮骞跺彂 (SIMD)
+    分层智能体群体管理器。
+
+    第一层使用少量智能体承载复杂决策，第二层使用向量矩阵承载大规模快速仿真。
     """
     
-    # 鐘舵€佺煩闃靛垪绱㈠紩瀹氫箟
+
     IDX_CASH = 0
     IDX_HOLDINGS = 1
     IDX_COST = 2
-    IDX_SENTIMENT = 3  # -1.0 (鏋佸害鐪嬬┖) ~ 1.0 (鏋佸害鐪嬪)
-    IDX_COGNITIVE_TYPE = 4  # 璁ょ煡绫诲瀷: 0=鎶€鏈淳, 1=娑堟伅娲? 2=璺熼娲?
-    IDX_CONFIDENCE = 5  # 淇″績鎸囨暟: 0-100
+    IDX_SENTIMENT = 3  # 情绪：-1.0 表示极度看空，1.0 表示极度看多
+    IDX_COGNITIVE_TYPE = 4  # 认知类型：0=技术派，1=消息派，2=跟风派
+    IDX_CONFIDENCE = 5  # 信心指数：0-100
     
     def __init__(
         self,
@@ -145,17 +143,17 @@ class StratifiedPopulation:
         self.market_composition = PersonaGenerator.load_market_composition(self.market_composition_path)
         self._seed_rng(self.seed)
         
-        # 1. 鍒濆鍖?Tier 1 (Smart Agents)
+        # 1. 初始化第一层智能体
         self.compat_agents: List[AgentProtocol] = []
         if smart_agents is not None:
             self.smart_agents = smart_agents
             self.n_smart = len(smart_agents)
-            print(f"[*] 浣跨敤澶栭儴浼犲叆鐨?{self.n_smart} 涓?Smart Agents")
+            print(f"[*] 使用外部传入的 {self.n_smart} 个智能体")
         elif personas is not None:
             self.smart_agents = []
             self.n_smart = len(personas)
             self._init_smart_agents_from_personas(personas)
-            print(f"[*] 浣跨敤澶栭儴浼犲叆鐨?{self.n_smart} 涓?Smart Agents")
+            print(f"[*] 使用外部传入的 {self.n_smart} 个智能体")
         else:
             self.smart_agents: List[SmartAgent] = []
             self._init_smart_agents()
@@ -164,29 +162,29 @@ class StratifiedPopulation:
             for agent in agents:
                 self.register_agent(agent)
         
-        # 2. 鍒濆鍖?Tier 2 (Vectorized Matrix)
-        # Shape: (N, 6) -> [Cash, Holdings, Cost, Sentiment, CognitiveType, Confidence]
+        # 2. 初始化第二层向量化矩阵
+
         self.state = np.zeros((n_vectorized, 6), dtype=np.float32)
         self._init_vectorized_state()
-        # Reference points (purchase / recent high / peer / policy) for Tier-2 agents
+
         self.reference_points = np.zeros((n_vectorized, 4), dtype=np.float32)
         self.risk_appetite_state = np.full(n_vectorized, 0.5, dtype=np.float32)
         self.trading_intent_state = np.zeros(n_vectorized, dtype=np.float32)
         self.loss_aversion_intensity_state = np.full(n_vectorized, 2.25, dtype=np.float32)
         self._init_reference_points()
         
-        # 3. 鏋勫缓绀句細缃戠粶 (Influence Topology)
-        # 浣跨敤 Watts-Strogatz 灏忎笘鐣岀綉缁滄ā鎷?鍦堝瓙"鏁堝簲
-        # 瀹為檯涓婃垜浠瀯寤轰竴涓簩閮ㄥ浘鐨勭畝鍖栫増锛氭瘡涓?Tier 2 鑺傜偣鍏虫敞 1-3 涓?Tier 1 鑺傜偣
+
+
+
         self.influence_map = self._build_influence_network()
         
-        # 4. 鏋勫缓閭诲眳缃戠粶锛堢敤浜庢秾鐜板紡缇婄兢鏁堝簲锛?
+
         self.neighbor_network = self._build_neighbor_network()
         
-        # 5. 鏋勫缓Smart Agent涔嬮棿鐨勭ぞ浜ょ綉缁滐紙澶涔嬮棿浜掔浉褰卞搷锛?
+
         self.smart_social_network = self._build_smart_social_network()
         
-        # 6. 涓婁竴杞甋mart Agent鍐崇瓥璁板綍锛堢敤浜庡奖鍝嶄紶閫掞級
+
         self.last_smart_actions: Dict[str, Dict] = {}
         self.evolution_ops = EvolutionOperators(mutation_rate=0.20, mutation_scale=0.12)
         self.smart_genomes: Dict[str, StrategyGenome] = {}
@@ -238,20 +236,20 @@ class StratifiedPopulation:
         }
         
     def _init_smart_agents(self):
-        """Initialize Tier-1 smart agents."""
+        """初始化第一层智能体。"""
         if self.n_smart <= 0:
             self.smart_agents = []
             return
-        print(f"[*] 鍒濆鍖?{self.n_smart} 浣?DeepSeek 鏅鸿兘浣?..")
+        print(f"[*] 初始化 {self.n_smart} 个 DeepSeek 智能体...")
         for i in range(self.n_smart):
             persona = self._random_persona_template(i)
-            # 鍓?涓狝gent榛樿浣跨敤DebateBrain锛堝惎鐢ㄨ京璁哄姛鑳斤級
+
             if i < 5:
                 brain = DebateBrain(agent_id=f"Debate_{i}", persona=persona, api_key=self._api_key)
                 agent = SmartAgent(
                     id=f"Debate_{i}",
                     brain=brain,
-                    cash=GLOBAL_CONFIG.DEFAULT_CASH * random.uniform(10, 30),  # 杈╄澶璧勯噾鏇村
+                    cash=GLOBAL_CONFIG.DEFAULT_CASH * random.uniform(10, 30),  # 辩论智能体资金更多
                     holdings=int(random.uniform(5000, 80000)),
                     cost_basis=3000.0
                 )
@@ -264,14 +262,14 @@ class StratifiedPopulation:
                     cost_basis=3000.0
                 )
             
-            # 璁剧疆閲嶈鎬х瓑绾э紙鐢ㄤ簬娣峰悎璋冨害锛?
-            # 鍓?0%涓烘牳蹇?2)锛?0-30%涓洪噸瑕?1)锛屽叾浣欎负鏅€?0)
+
+
             if i < self.n_smart * 0.1:
-                agent.brain.importance_level = 2  # 鏍稿績Agent
+                agent.brain.importance_level = 2  # 核心智能体
             elif i < self.n_smart * 0.3:
-                agent.brain.importance_level = 1  # 閲嶈Agent
+                agent.brain.importance_level = 1  # 重要智能体
             else:
-                agent.brain.importance_level = 0  # 鏅€欰gent
+                agent.brain.importance_level = 0
             anchor = float(agent.cost_basis if agent.cost_basis > 0 else 3000.0)
             agent.reference_points = {
                 "purchase_anchor": anchor,
@@ -282,7 +280,7 @@ class StratifiedPopulation:
             self.smart_agents.append(agent)
 
     def _random_persona_template(self, index: int) -> Persona:
-        """Build a deterministic persona template for synthetic agents."""
+        """为合成智能体构建确定性画像模板。"""
         if not self.feature_flags.get("population_protocol_v1", True):
             from agents.persona import InvestmentHorizon, RiskAppetite
 
@@ -367,7 +365,7 @@ class StratifiedPopulation:
         adjacency = {aid: self.smart_social_network.get(aid, []) for aid in self.smart_genomes.keys()}
         diffused = self.evolution_ops.local_diffusion(self.smart_genomes, adjacency, strength=0.06)
 
-        # Keep Tier-1 population size unchanged: only refresh existing agent genomes.
+
         for agent in self.smart_agents:
             if agent.id in self.smart_genomes:
                 agent.strategy_genome = self.smart_genomes[agent.id]
@@ -380,7 +378,7 @@ class StratifiedPopulation:
         }
 
     def get_agent_by_id(self, agent_id: str) -> Optional[SmartAgent]:
-        """鏍规嵁 ID 鑾峰彇 SmartAgent"""
+        """按编号获取智能体。"""
         for agent in self.smart_agents:
             if agent.id == agent_id:
                 return agent
@@ -399,7 +397,7 @@ class StratifiedPopulation:
         yield from self.compat_agents
 
     def register_agent(self, agent: AgentProtocol) -> None:
-        """Register a trader/persona-compatible agent into the shared engine."""
+        """把兼容交易或画像协议的智能体注册到共享引擎。"""
         if isinstance(agent, SmartAgent):
             self.smart_agents.append(agent)
             return
@@ -467,34 +465,34 @@ class StratifiedPopulation:
         return payload
 
     def _init_vectorized_state(self):
-        """Initialize Tier-2 vectorized state matrix."""
-        # 璧勯噾: 瀵规暟姝ｆ€佸垎甯?(璐瘜宸窛)
-        # 淇: 鎻愰珮鍒濆鐜伴噾浣夸箣涓庢寔浠撲环鍊煎尮閰嶏紝閬垮厤缁撴瀯鎬у崠鍘?
+        """初始化第二层向量化状态矩阵。"""
+
+
         self.state[:, self.IDX_CASH] = np.random.lognormal(11.5, 0.8, self.n_vectorized)
         
-        # 鎸佷粨: 闅忔満鍒嗗竷 (闄嶄綆鍒濆鎸佷粨锛岄伩鍏嶅崠鍘嬭繃澶?
+
         self.state[:, self.IDX_HOLDINGS] = np.random.randint(0, 1000, self.n_vectorized)
         
-        # 鎴愭湰: 鍥寸粫 3000 鐐规尝鍔?
+        # 成本价围绕 3000 点波动
         self.state[:, self.IDX_COST] = np.random.normal(3000, 200, self.n_vectorized)
         
-        # 鎯呯华: 鍒濆寰鍋忓ソ (姝ｅ父甯傚満鏁ｆ埛閫氬父鐣ュ亸涔愯)
-        # Beta(3,2) 鍧囧€?0.6, 鏄犲皠鍒?[-1,1] 鍚庡潎鍊?0.2, 閫傚害鍋忓
+
+
         self.state[:, self.IDX_SENTIMENT] = np.random.beta(3, 2, self.n_vectorized) * 2 - 1
         
-        # 璁ょ煡绫诲瀷: 0=鎶€鏈淳(20%), 1=娑堟伅娲?30%), 2=璺熼娲?50%)
+        # 认知类型：技术派 20%，消息派 30%，跟风派 50%
         type_probs = np.random.random(self.n_vectorized)
         self.state[:, self.IDX_COGNITIVE_TYPE] = np.where(
             type_probs < 0.2, 0, np.where(type_probs < 0.5, 1, 2)
         )
         
-        # 淇″績鎸囨暟: 姝ｆ€佸垎甯冿紝鍧囧€?5 (鐣ュ亸淇″績鍏呰冻)
+        # 信心指数采用均值 55 的正态分布，略偏信心充足
         self.state[:, self.IDX_CONFIDENCE] = np.clip(
             np.random.normal(55, 15, self.n_vectorized), 0, 100
         )
     
     def _init_reference_points(self) -> None:
-        """Initialize reference points for vectorized Tier-2 agents."""
+        """初始化第二层智能体的参考点。"""
         purchase = np.clip(self.state[:, self.IDX_COST], 1.0, None)
         self.reference_points[:, 0] = purchase
         self.reference_points[:, 1] = purchase
@@ -513,8 +511,7 @@ class StratifiedPopulation:
         policy_shock: float = 0.0,
     ) -> None:
         """
-        Vectorized behavioral pipeline:
-        sentiment -> reference shift -> risk appetite -> trading intent
+        向量化行为管线：情绪、参考点迁移、风险偏好、交易意图。
         """
         price = float(max(current_price, 1e-6))
         sentiment = np.clip(self.state[:, self.IDX_SENTIMENT], -1.0, 1.0)
@@ -579,21 +576,17 @@ class StratifiedPopulation:
 
     def _build_neighbor_network(self, n_neighbors: int = 5) -> np.ndarray:
         """
-        鏋勫缓閭诲眳缃戠粶锛堢敤浜庢秾鐜板紡缇婄兢鏁堝簲锛?
-        
-        姣忎釜鏁ｆ埛涓庡懆鍥磋嫢骞茶妭鐐瑰舰鎴愰偦灞呭叧绯伙紝
-        妯℃嫙绀句氦鍦堝瓙鍐呯殑鎯呯华浼犳煋銆?
-        
-        Returns:
-            閭诲眳绱㈠紩鐭╅樀 (N, n_neighbors)
+        构建邻居网络，用于模拟情绪在社交圈内传播。
+
+        返回值为邻居索引矩阵。
         """
         neighbors = np.zeros((self.n_vectorized, n_neighbors), dtype=np.int32)
         for i in range(self.n_vectorized):
-            # 闅忔満閫夋嫨閭诲眳锛堝彲閲嶅閫夋嫨鍚屼竴鑺傜偣琛ㄧず鏇寸揣瀵嗙殑鑱旂郴锛?
+
             candidates = np.random.randint(0, self.n_vectorized, n_neighbors * 2)
-            # 鎺掗櫎鑷繁
+            # 排除自己
             candidates = candidates[candidates != i][:n_neighbors]
-            # 琛ラ綈涓嶈冻鐨?
+
             while len(candidates) < n_neighbors:
                 new_neighbor = np.random.randint(0, self.n_vectorized)
                 if new_neighbor != i:
@@ -603,21 +596,20 @@ class StratifiedPopulation:
 
     def _build_influence_network(self) -> np.ndarray:
         """
-        鏋勫缓褰卞搷鍥捐氨
-        Returns:
-            adjacency matrix (N_vec, N_smart) 鐨勭瀵嗚〃绀烘垨绱㈠紩鍒楄〃
-            杩欓噷绠€鍖栦负: 姣忎釜 Tier 2 鍙湁涓€涓富瑕佸叧娉ㄧ殑 Tier 1 (Guru)
+        构建影响图。
+
+        这里简化为每个第二层智能体只关注一个主要第一层意见领袖。
         """
         if self.n_smart <= 0:
             return np.zeros(self.n_vectorized, dtype=np.int32)
-        # 甯曠疮鎵樺垎甯冿細灏戞暟澶鎷ユ湁缁濆ぇ澶氭暟绮変笣
+
         weights = np.random.pareto(a=2.0, size=self.n_smart)
         total = float(weights.sum())
         if total <= 0:
             return np.zeros(self.n_vectorized, dtype=np.int32)
         weights /= total
         
-        # 涓烘瘡涓暎鎴峰垎閰嶄竴涓?甯﹀ご澶у摜"
+
         guru_indices = np.random.choice(
             self.n_smart, 
             size=self.n_vectorized, 
@@ -627,13 +619,9 @@ class StratifiedPopulation:
     
     def _build_smart_social_network(self) -> Dict[str, List[str]]:
         """
-        鏋勫缓Smart Agent涔嬮棿鐨勭ぞ浜ょ綉缁滐紙灏忎笘鐣岀綉缁滐級
-        
-        姣忎釜澶鍏虫敞2-4涓叾浠栧ぇV锛屽舰鎴愪俊鎭紶閫掔幆璺€?
-        浣跨敤闅忔満鍥炬ā鎷熺ぞ浜ゅ獟浣撲笂鐨勪簰鍏冲叧绯汇€?
-        
-        Returns:
-            Dict[agent_id, List[鍏虫敞鐨刟gent_id]]
+        构建第一层智能体之间的小世界社交网络。
+
+        每个意见领袖关注若干其他意见领袖，形成信息传递链路。
         """
         if self.n_smart <= 0 or not self.smart_agents:
             return {}
@@ -641,7 +629,7 @@ class StratifiedPopulation:
         agent_ids = [a.id for a in self.smart_agents]
         
         for i, agent_id in enumerate(agent_ids):
-            # 姣忎釜Agent鍏虫敞2-4涓叾浠朅gent
+
             max_follow = max(1, min(4, self.n_smart - 1))
             n_follow = random.randint(1, max_follow)
             others = [aid for aid in agent_ids if aid != agent_id]
@@ -649,28 +637,21 @@ class StratifiedPopulation:
                 network[agent_id] = []
                 continue
             
-            # 鏉冮噸锛氬€惧悜浜庡叧娉ㄧ紪鍙风浉杩戠殑锛堟ā鎷熷湀瀛愭晥搴旓級
+
             weights = [1.0 / (1 + abs(j - i)) for j in range(len(others))]
             weights = [w / sum(weights) for w in weights]
             
             follows = random.choices(others, weights=weights, k=n_follow)
             network[agent_id] = list(set(follows))
         
-        print(f"[OK] Smart Agent绀句氦缃戠粶鏋勫缓瀹屾垚锛屽钩鍧囧叧娉ㄦ暟: {sum(len(v) for v in network.values()) / len(network):.1f}")
+        print(f"[OK] 智能体社交网络构建完成，平均关注数: {sum(len(v) for v in network.values()) / len(network):.1f}")
         return network
     
     def get_social_influence_context(self, agent_id: str) -> Dict:
         """
-        鑾峰彇鏌愪釜Smart Agent鐨勭ぞ浜ゅ奖鍝嶄笂涓嬫枃
-        
-        杩斿洖璇gent鎵€鍏虫敞鐨勫叾浠朅gent鐨勬渶杩戝喅绛栦俊鎭紝
-        鐢ㄤ簬鍦╬rompt涓敞鍏ョぞ浜ゅ奖鍝嶅洜绱犮€?
-        
-        Args:
-            agent_id: 鐩爣Agent ID
-            
-        Returns:
-            Dict: 鍖呭惈绀句氦褰卞搷淇℃伅鐨勪笂涓嬫枃
+        获取某个智能体的社交影响上下文。
+
+        返回其关注对象的近期决策信息，用于向提示词注入社交影响因素。
         """
         followed = self.smart_social_network.get(agent_id, [])
         
@@ -685,7 +666,7 @@ class StratifiedPopulation:
                     "emotion": action_info.get("emotion_score", 0.0)
                 })
         
-        # 璁＄畻绀句氦鍦堟暣浣撴儏缁?
+
         if influences:
             avg_emotion = sum(i["emotion"] for i in influences) / len(influences)
             bullish_ratio = sum(1 for i in influences if i["action"] == "BUY") / len(influences)
@@ -705,7 +686,7 @@ class StratifiedPopulation:
     
     def record_smart_action(self, agent_id: str, decision: Dict):
         """
-        璁板綍Smart Agent鐨勫喅绛栵紝鐢ㄤ簬涓嬩竴杞殑绀句氦褰卞搷
+        记录第一层智能体决策，用于下一轮社交影响传播。
         """
         self.last_smart_actions[agent_id] = {
             "action": decision.get("action", "HOLD"),
@@ -716,29 +697,23 @@ class StratifiedPopulation:
 
     def calculate_csad(self) -> float:
         """
-        璁＄畻甯傚満鎯呯华鐨勪竴鑷存€?(Cross-Sectional Absolute Deviation)
-        CSAD 瓒婁綆锛岃鏄庢暎鎴锋儏缁秺瓒嬪悓锛岃秺瀹规槗鍙戠敓缇婄兢鏁堝簲銆?
+        计算市场情绪一致性。
+
+        指标越低，说明散户情绪越趋同，越容易出现羊群效应。
         """
         sentiments = self.state[:, self.IDX_SENTIMENT]
         mean_sentiment = np.mean(sentiments)
-        # 缁濆鍋忓樊鐨勫钩鍧囧€?
+
         csad = np.mean(np.abs(sentiments - mean_sentiment))
         return csad
 
     def update_tier2_sentiment(self, smart_actions: List[int], market_trend: float):
         """
-        [鍚戦噺鍖朷 娑岀幇寮忔儏缁紶鏌撴洿鏂?
-        
-        閲囩敤鍩轰簬閭诲眳缃戠粶鐨勬秾鐜版満鍒讹紝鏇夸唬纭紪鐮侀槇鍊硷細
-        - 姣忎釜鏁ｆ埛瑙傚療鍏堕偦灞呯殑鎯呯华鐘舵€?
-        - 褰撻偦灞呮亹鎱屾瘮渚嬭秴杩囬槇鍊兼椂锛岃"鎰熸煋"
-        - 涓嶅悓璁ょ煡绫诲瀷瀵逛笉鍚屼俊鍙风殑鍝嶅簲鏉冮噸涓嶅悓
-        
-        Parameters:
-            smart_actions: Tier 1 鐨勬搷浣滃垪琛?(1=Buy, -1=Sell, 0=Hold)
-            market_trend: 甯傚満瓒嬪娍淇″彿 (-1.0 ~ 1.0)
+        向量化更新第二层情绪。
+
+        基于邻居网络建模情绪传染，并按不同认知类型配置不同信号权重。
         """
-        # 1. 鑾峰彇鏉ヨ嚜澶鐨勪俊鍙?(Local Signal)
+
         # 维度防御：部分场景下 influence_map 可能与 state 行数不一致，这里统一对齐
         vector_size = int(self.state.shape[0])
         self.n_vectorized = vector_size
@@ -756,18 +731,18 @@ class StratifiedPopulation:
         
         # 2. 璁＄畻閭诲眳鎯呯华鐘舵€侊紙娑岀幇寮忕緤缇ゆ晥搴旀牳蹇冿級
         current_sentiment = self.state[:, self.IDX_SENTIMENT]
-        neighbor_indices = self.neighbor_network  # (N, n_neighbors)
+        neighbor_indices = self.neighbor_network
         
-        # 鑾峰彇姣忎釜鑺傜偣鐨勯偦灞呮儏缁?
-        neighbor_sentiments = current_sentiment[neighbor_indices]  # (N, n_neighbors)
+
+        neighbor_sentiments = current_sentiment[neighbor_indices]
         
-        # 璁＄畻閭诲眳鎭愭厡姣斾緥锛堟儏缁?< -0.3 瑙嗕负鎭愭厡锛?
-        neighbor_panic_ratio = np.mean(neighbor_sentiments < -0.3, axis=1)  # (N,)
+
+        neighbor_panic_ratio = np.mean(neighbor_sentiments < -0.3, axis=1)
         
-        # 璁＄畻閭诲眳骞冲潎鎯呯华锛堢敤浜庝俊鍙蜂紶閫掞級
+
         neighbor_avg_sentiment = np.mean(neighbor_sentiments, axis=1)
         
-        # 3. 鍩轰簬璁ょ煡绫诲瀷鐨勬潈閲嶅垎閰?
+
         cognitive_types = self.state[:, self.IDX_COGNITIVE_TYPE]
         confidence = self.state[:, self.IDX_CONFIDENCE] / 100.0  # 褰掍竴鍖栧埌 0-1
         
@@ -777,21 +752,21 @@ class StratifiedPopulation:
         w_neighbor = np.full(vector_size, 0.2)
         w_market = np.full(vector_size, 0.2)
         
-        # 鎶€鏈淳 (type=0): 鏇翠緷璧栧競鍦鸿秼鍔匡紝杈冨皯鍙楅偦灞呭奖鍝?
+        # 技术派更依赖市场趋势，较少受邻居影响
         tech_mask = cognitive_types == 0
         w_personal[tech_mask] = 0.3
         w_market[tech_mask] = 0.4
         w_neighbor[tech_mask] = 0.1
         w_guru[tech_mask] = 0.2
         
-        # 娑堟伅娲?(type=1): 鏇翠緷璧栧ぇV淇″彿
+        # 消息派更依赖意见领袖信号
         news_mask = cognitive_types == 1
         w_personal[news_mask] = 0.2
         w_guru[news_mask] = 0.4
         w_neighbor[news_mask] = 0.2
         w_market[news_mask] = 0.2
         
-        # 璺熼娲?(type=2): 鏇村鏄撳彈閭诲眳褰卞搷
+
         herd_mask = cognitive_types == 2
         w_personal[herd_mask] = 0.1
         w_neighbor[herd_mask] = 0.5
@@ -799,11 +774,11 @@ class StratifiedPopulation:
         w_market[herd_mask] = 0.2
         
         # 4. 娑岀幇寮忕緤缇ゆ晥搴旓細閭诲眳鎭愭厡鏃讹紝鏉冮噸鍔ㄦ€佽皟鏁?
-        # 褰撹秴杩?0%鐨勯偦灞呮亹鎱屾椂锛屼釜浜哄垽鏂澶у箙鍓婂急
+
         panic_threshold = 0.6
         panic_mask = neighbor_panic_ratio > panic_threshold
         
-        # 鎭愭厡浼犳煋绯绘暟锛堜俊蹇冧綆鐨勬洿瀹规槗琚紶鏌擄級
+
         susceptibility = (1.0 - confidence) * 0.8 + 0.2  # 0.2 ~ 1.0
         
         # 璋冩暣鏉冮噸
@@ -817,7 +792,7 @@ class StratifiedPopulation:
         w_neighbor /= total_w
         w_market /= total_w
         
-        # 5. 鎵归噺鏇存柊鎯呯华 (Matrix Operation)
+        # 5. 批量更新情绪
         noise = np.random.normal(0, 0.05, vector_size)
         
         new_sentiment = (
@@ -831,10 +806,10 @@ class StratifiedPopulation:
         # 鎴柇鍒?[-1, 1]
         self.state[:, self.IDX_SENTIMENT] = np.clip(new_sentiment, -1.0, 1.0)
         
-        # 6. 鏇存柊淇″績鎸囨暟锛堢粡鍘嗘亹鎱屽悗淇″績涓嬮檷锛?
+
         confidence_change = np.where(
             panic_mask,
-            -5 * susceptibility,  # 鎭愭厡涓俊蹇冨揩閫熶笅闄?
+            -5 * susceptibility,
             0.5  # 姝ｅ父鎯呭喌缂撴參鎭㈠
         )
         self.state[:, self.IDX_CONFIDENCE] = np.clip(
@@ -843,27 +818,23 @@ class StratifiedPopulation:
 
     def generate_tier2_decisions(self, current_price: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        [鍚戦噺鍖朷 鐢熸垚鏁ｆ埛浜ゆ槗鍐崇瓥
-        閬垮厤 10,000 娆?if-else锛岀洿鎺ョ敤姒傜巼鐭╅樀鐢熸垚 mask銆?
-        
-        Returns:
-            actions: (N,) {-1, 0, 1}
-            quantities: (N,)
-            prices: (N,) 鎸傚崟浠锋牸
+        向量化生成散户交易决策。
+
+        直接使用概率矩阵生成动作、数量和挂单价格，避免逐个智能体分支判断。
         """
         self.update_behavioral_layer(current_price)
         intent = self.trading_intent_state
         risk_appetite = self.risk_appetite_state
         
-        # 1. 鐢熸垚涔板崠姒傜巼
-        # 鎯呯华 > 0.6 -> 楂樻鐜囦拱鍏? 鎯呯华 < -0.6 -> 楂樻鐜囧崠鍑?
-        prob_buy = 1 / (1 + np.exp(-5 * (intent - 0.15))) # Sigmoid shift
+
+
+        prob_buy = 1 / (1 + np.exp(-5 * (intent - 0.15)))
         prob_sell = 1 / (1 + np.exp(5 * (intent + 0.15)))
         
-        # 闅忔満楠板瓙
+        # 随机骰子
         rng = np.random.random(self.n_vectorized)
         
-        # 鐢熸垚鍔ㄤ綔 Mask
+
         buy_mask = rng < prob_buy
         sell_mask = (rng > (1 - prob_sell)) & (~buy_mask) # 浜掓枼
         
@@ -874,26 +845,26 @@ class StratifiedPopulation:
         # 2. 璁＄畻鏁伴噺 (绠€鍗曠殑璧勯噾姣斾緥娉?
         quantities = np.zeros(self.n_vectorized, dtype=int)
         
-        # 涔板叆: 浣跨敤 20%~50% 鍙敤璧勯噾
+
         buy_ratio = np.random.uniform(0.15, 0.45, size=self.n_vectorized) * (0.7 + 0.6 * risk_appetite)
         avail_cash = self.state[:, self.IDX_CASH]
-        # 鍚戦噺鍖栬绠? 璧勯噾 * 姣斾緥 / 鍗曚环 (鍚戜笅鍙栨暣)
+
         raw_buy_qty = (avail_cash * buy_ratio / current_price).astype(int)
         quantities[buy_mask] = raw_buy_qty[buy_mask]
         
-        # 鍗栧嚭: 浣跨敤 50%~100% 鎸佷粨
+
         sell_ratio = np.random.uniform(0.4, 1.0, size=self.n_vectorized) * (0.8 + 0.4 * np.abs(np.minimum(intent, 0.0)))
         avail_holdings = self.state[:, self.IDX_HOLDINGS]
         raw_sell_qty = (avail_holdings * sell_ratio).astype(int)
         quantities[sell_mask] = raw_sell_qty[sell_mask]
         
-        # 3. 杩囨护鏃犳晥鍗?(鏁伴噺涓?)
+
         valid_mask = quantities > 0
         actions[~valid_mask] = 0
         quantities[~valid_mask] = 0
         
-        # 4. 鐢熸垚鎸傚崟浠锋牸 (鍦ㄧ幇浠烽檮杩戞尝鍔?
-        # 鏁ｆ埛閫氬父鎸傚競浠锋垨鐣ュソ鐨勪环鏍?
+
+
         price_noise = np.random.normal(0, 0.002, self.n_vectorized)
         order_prices = current_price * (1 + price_noise)
         
@@ -902,40 +873,41 @@ class StratifiedPopulation:
     def sync_tier2_execution(self, executed_indices: np.ndarray, executed_prices: np.ndarray, 
                              executed_qtys: np.ndarray, directions: np.ndarray):
         """
-        [鍚戦噺鍖朷 鎴愪氦鍥炴墽澶勭悊
-        褰撴挳鍚堝紩鎿庢垚浜ゅ悗锛屾壒閲忔洿鏂扮姸鎬佺煩闃点€?
+        向量化处理成交回执。
+
+        撮合引擎产生成交后，批量更新第二层状态矩阵。
         """
         if len(executed_indices) == 0:
             return
             
         cost_val = executed_prices * executed_qtys
         
-        # 鏇存柊璧勯噾 (涔板叆鍑忥紝鍗栧嚭鍔?
+
         delta_cash = -1 * directions * cost_val
-        # FIX: 浣跨敤 add.at 澶勭悊閲嶅绱㈠紩 (鍚屼竴Agent澶氱瑪鎴愪氦)
+
         np.add.at(self.state[:, self.IDX_CASH], executed_indices, delta_cash)
         
         # 鏇存柊鎸佷粨
         delta_stock = directions * executed_qtys
         np.add.at(self.state[:, self.IDX_HOLDINGS], executed_indices, delta_stock)
         
-        # 鏇存柊鎴愭湰浠?(浠呬拱鍏ユ椂鏇存柊鍔犳潈骞冲潎)
+
         buy_indices_local = (directions == 1)
         if np.any(buy_indices_local):
-            # 鑾峰彇鍏ㄥ眬绱㈠紩
+
             g_idx = executed_indices[buy_indices_local]
             b_qty = executed_qtys[buy_indices_local]
             b_prc = executed_prices[buy_indices_local]
             
-            # 鍘熷鎸佷粨鍜屾垚鏈?
-            # 淇: 搴旇鐢ㄦ洿鏂板墠鐨勬暟閲忋€傜敱浜庝笂闈㈠凡缁忓姞浜嗭紝杩欓噷瑕佸噺鍥炲幓绠楁棫鐨?
+
+
             cur_qty = self.state[g_idx, self.IDX_HOLDINGS]
             prev_qty = cur_qty - b_qty
             prev_cost = self.state[g_idx, self.IDX_COST]
             
-            # 鍔犳潈骞冲潎鍏紡
-            # (OldQty * OldCost + BuyQty * BuyPrice) / NewQty
-            # 閬垮厤闄や互闆?
+
+
+            # 避免除以零
             denom = np.where(cur_qty > 0, cur_qty, 1.0)
             new_cost_basis = ((prev_qty * prev_cost) + (b_qty * b_prc)) / denom
             

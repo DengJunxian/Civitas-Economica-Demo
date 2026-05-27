@@ -1,4 +1,3 @@
-# file: data_flywheel/betta_spider.py
 import logging
 import os
 import time

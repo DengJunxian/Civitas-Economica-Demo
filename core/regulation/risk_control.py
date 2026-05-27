@@ -1,4 +1,3 @@
-# file: core/regulation/risk_control.py
 """
 风险控制引擎
 
@@ -215,7 +214,7 @@ class HighFrequencyMonitor:
 
 
 # ==========================================
-# 杠杆账户 (MarginAccount)
+# 杠杆账户
 # ==========================================
 
 class MarginAccount(Portfolio):

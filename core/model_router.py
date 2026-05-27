@@ -1,4 +1,3 @@
-# file: core/model_router.py
 """Unified model router with fallback, local cache, and deterministic stub."""
 
 from __future__ import annotations

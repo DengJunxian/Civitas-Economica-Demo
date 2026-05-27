@@ -1,4 +1,3 @@
-# file: agents/cognition/financial_tools.py
 """
 金融工具模块 - FinRobot 集成
 
@@ -37,7 +36,7 @@ except ImportError:
 class NewsSentiment:
     """新闻情绪分析结果"""
     headline: str
-    sentiment: str  # "positive", "negative", "neutral"
+    sentiment: str
     confidence: float
     entities: List[str]  # 提及的公司/概念
 
@@ -49,7 +48,7 @@ class EarningsAnalysis:
     quarter: str
     revenue_surprise: float  # 收入超预期比例
     eps_surprise: float      # EPS 超预期比例
-    guidance: str            # "raised", "lowered", "maintained"
+    guidance: str
     key_insights: List[str]
 
 
@@ -252,7 +251,7 @@ class FinancialTools:
             except Exception:
                 pass
         
-        # Fallback: 简单关键词分析
+        # 回退: 简单关键词分析
         return self._fallback_news_analysis(news_text)
     
     def _fallback_news_analysis(self, news_text: str) -> NewsSentiment:

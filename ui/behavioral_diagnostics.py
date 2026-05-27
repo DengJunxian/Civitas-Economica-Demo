@@ -1,4 +1,4 @@
-﻿"""Behavioral-finance diagnostics view for stylized facts report."""
+"""Behavioral-finance diagnostics view for stylized facts report."""
 
 from __future__ import annotations
 
@@ -291,7 +291,7 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
         use_container_width=True,
     )
 
-    # Sensitivity scan panel
+
     sensitivity_path = Path("outputs") / "parameter_sensitivity.csv"
     st.markdown("### 参数敏感性（损失厌恶 / 参考适应 / 边权重）")
     if sensitivity_path.exists():
@@ -318,7 +318,7 @@ def render_behavioral_diagnostics(report_path: Path | None = None) -> None:
     else:
         st.info("未发现 outputs/parameter_sensitivity.csv，可先运行参数敏感性脚本。")
 
-    # Intervention A/B panel
+
     ab_path = Path("outputs") / "intervention_effect_report.json"
     st.markdown("### 干预前后甲乙对照")
     if ab_path.exists():

@@ -28,7 +28,7 @@ def calculate_new_price(buy_volume: float, sell_volume: float, current_price: fl
     # 不平衡度: [-1.0, 1.0]
     imbalance = (buy_volume - sell_volume) / total_volume
     
-    # 价格冲击系数 (Config Driven)
+    # 价格冲击系数
     impact_factor = GLOBAL_CONFIG.get("price_impact_factor", 0.05)
     
     # 根据不平衡度和冲击系数计算价格变化率

@@ -1,4 +1,3 @@
-# file: agents/crews/investment_firm.py
 """
 投资团队编排模块
 
@@ -59,7 +58,7 @@ class RiskConstraints:
 class Order:
     """交易订单"""
     symbol: str
-    action: str        # "BUY" | "SELL"
+    action: str
     quantity: int
     price: float
     order_type: str = "LIMIT"
@@ -118,7 +117,7 @@ class TeamDecision:
 
 
 # ==========================================
-# 风险管理 Agent
+# 风险管理 智能体
 # ==========================================
 
 class RiskManager:
@@ -221,7 +220,7 @@ class RiskManager:
                 suggested_qty
             )
         
-        # HOLD
+
         return (
             RiskCheckResult.APPROVED,
             "观望，无需交易",
@@ -230,7 +229,7 @@ class RiskManager:
 
 
 # ==========================================
-# 交易执行 Agent
+# 交易执行 智能体
 # ==========================================
 
 class Trader:
@@ -375,7 +374,7 @@ class InvestmentTeam:
         consensus_signal = Signal(
             action=decision.consensus_action,
             confidence=decision.consensus_confidence,
-            analyst_type=AnalystType.FUNDAMENTAL,  # placeholder
+            analyst_type=AnalystType.FUNDAMENTAL,
             symbol=symbol
         )
         
@@ -404,7 +403,7 @@ class InvestmentTeam:
         buy_count = sum(1 for a in actions if a == SignalType.BUY)
         sell_count = sum(1 for a in actions if a == SignalType.SELL)
         
-        # BUY 和 SELL 同时存在 = 冲突
+        # 买入 和 卖出 同时存在 = 冲突
         return buy_count > 0 and sell_count > 0
     
     def _majority_vote(self, actions: List[SignalType]) -> SignalType:

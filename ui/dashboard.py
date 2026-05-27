@@ -596,7 +596,7 @@ def export_plot_bundle(
     with c3:
         payload = fig_json if fig_json is not None else fig.to_dict()
         try:
-            # Prefer Plotly's encoder for figure payloads that include typed arrays/internal wrappers.
+
             json_text = json.dumps(payload, ensure_ascii=False, indent=2, cls=PlotlyJSONEncoder)
         except Exception:
             try:

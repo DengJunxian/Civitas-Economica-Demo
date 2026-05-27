@@ -44,7 +44,7 @@ class TopicSignal:
 class TextFactorPipeline:
     """Build topic/sentiment/financial factors from a single text item."""
 
-    # Topic vocab inspired by policy/news use cases in A-share context.
+
     TOPIC_KEYWORDS: Dict[str, Tuple[str, ...]] = {
         "monetary_policy": ("降准", "降息", "mlf", "lpr", "央行", "liquidity", "rate cut"),
         "fiscal_policy": ("财政", "专项债", "国债", "刺激", "基建", "subsidy"),
@@ -142,7 +142,7 @@ class TextFactorPipeline:
                 topic = f"{etype}:{name}" if etype else name
                 signals.append(TopicSignal(topic=topic, score=max(0.45, conf), source="llm_entities"))
 
-        # de-duplicate by topic, keeping max score
+
         merged: Dict[str, TopicSignal] = {}
         for s in signals:
             prev = merged.get(s.topic)
@@ -163,7 +163,7 @@ class TextFactorPipeline:
         if len(self._docs) < self.min_docs_for_topic_model:
             return []
 
-        # Run BERTopic only when enough corpus exists.
+
         try:
             from bertopic import BERTopic  # type: ignore
         except Exception:
@@ -199,7 +199,7 @@ class TextFactorPipeline:
                 if kw.lower() in lowered:
                     hits += 1
             if hits > 0:
-                # Saturating score: 1 keyword ~= 0.45, 2 ~= 0.65, 3+ ~= 0.80
+
                 score = 1.0 - math.exp(-0.6 * hits)
                 scored.append(TopicSignal(topic=topic, score=score, source="keyword"))
 
@@ -225,7 +225,7 @@ class TextFactorPipeline:
         if finbert_score is not None:
             components["finbert"] = finbert_score
 
-        # Weighted merge. Prefer model output when available.
+
         weighted_sum = 0.0
         total_weight = 0.0
         weights = {"llm": 0.45, "keyword": 0.25, "finbert": 0.30}

@@ -62,8 +62,8 @@ class ExecutionAdapter:
         for idx, qty in enumerate(schedule):
             if int(qty) <= 0:
                 continue
-            # Preserve explicit limit-price semantics: if plan already has a concrete
-            # limit price, keep it stable instead of shifting by slippage.
+
+
             if order_type == OrderType.LIMIT and float(plan.price or 0.0) > 0:
                 child_price = float(plan.price)
             else:

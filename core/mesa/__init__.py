@@ -1,4 +1,3 @@
-# file: core/mesa/__init__.py
 """
 Mesa ABM 集成模块
 

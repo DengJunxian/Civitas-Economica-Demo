@@ -1,4 +1,3 @@
-# file: core/ipc/agent_node.py
 import asyncio
 import logging
 import json
@@ -36,7 +35,7 @@ class IPCAgentNode:
     ):
         self.agent_id = agent_id
         
-        # 本地初始化 Core Agent
+        # 本地初始化 Core 智能体
         self.trader = TraderAgent(
             agent_id=self.agent_id,
             cash_balance=100_000,

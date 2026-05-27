@@ -51,7 +51,7 @@ def _run_coro_blocking(coro: Any, *, timeout: float) -> Any:
     3. 通过 timeout 对桥接线程做硬约束，避免策略训练在异常协程上无限等待。
     """
     try:
-        # 仅用于探测“当前线程是否已有运行中的 loop”
+        # 仅用于探测“当前线程是否已有运行中的 事件循环”
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
@@ -770,7 +770,7 @@ class SimulationControllerEnvAdapter(RegulatoryEnvironment):
 
 
 # ==========================================================
-# 5) Regulator RL Agent（Q-Learning 基础版）
+# 5) Regulator RL 智能体（Q-Learning 基础版）
 # ==========================================================
 
 

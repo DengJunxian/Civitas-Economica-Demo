@@ -1,4 +1,3 @@
-# file: agents/cognition/cognitive_agent.py
 """
 认知 Agent 整合模块
 
@@ -38,11 +37,11 @@ class CognitiveDecision:
     包含原始 LLM 决策、前景理论分析、覆盖逻辑和最终动作。
     """
     # 最终决策
-    final_action: str          # "BUY" | "SELL" | "HOLD"
+    final_action: str
     final_quantity: int = 0
     final_confidence: float = 0.5
     
-    # LLM 原始决策
+    # 大模型 原始决策
     llm_action: str = ""
     llm_reasoning: str = ""
     
@@ -82,7 +81,7 @@ class CognitiveDecision:
 
 
 # ==========================================
-# 认知 Agent
+# 认知 智能体
 # ==========================================
 
 class CognitiveAgent:
@@ -156,7 +155,7 @@ class CognitiveAgent:
         self.decision_history: List[CognitiveDecision] = []
         
         # 覆盖阈值配置
-        self.fear_threshold = -0.5    # 恐惧覆盖阈值
+        self.fear_threshold = -0.5
         self.greed_threshold = 0.3    # 贪婪覆盖阈值
     
     def calculate_psychological_value(self, current_price: float) -> float:
@@ -188,7 +187,7 @@ class CognitiveAgent:
         if hasattr(self.reasoner, "build_messages"):
             # 异步检索记忆上下文
             memory_context = await self.memory.get_context_for_decision_async(market_state)
-            # 构建 Prompt
+            # 构建 提示词
             return self.reasoner.build_messages(market_state, account_state, memory_context)
             
         return None
@@ -216,36 +215,36 @@ class CognitiveAgent:
         """
         [并行化支持] 阶段2: 根据 LLM 结果生成最终决策
         """
-        # 1. 获取 LLM 建议
+        # 1. 获取 大模型 建议
         # result 已经是 ReasoningResult 对象
         raw_decision = result.decision
         
-        # 2. 前景理论效用计算 (Cognitive Flow)
-        # Calculate utility of current state to adjust fear/greed?
-        # Or calculate utility of the PROPOSED action?
-        # Usually we evaluate the status quo pnl.
+        # 2. 前景理论效用计算
+
+
+
         pnl = account_state.get("pnl_pct", 0)
         utility = self.prospect.calculate_utility(pnl)
         
         # 3. 覆盖逻辑
         final_action = raw_decision.action
         
-        # 简单覆盖示例: 极度恐惧时强制卖出
-        # (Simplified logic from original make_decision)
-        if utility < -150: # Pain threshold
-            # Panic Sell
+
+
+        if utility < -150:
+
             if final_action != "SELL":
                 final_action = "SELL"
         
-        # Convert back to internal CognitiveDecision or similar?
-        # For now, return a named tuple or object expected by CivitasAgent
-        # CivitasAgent expects an object with .final_action, .final_quantity, .greed_level...
+
+
+
         
-        # Reuse Decision dataclass from llm_brain? 
-        # But step() code expects .final_action etc. 
-        # LLMDecision has these properties.
+
+
+
         
-        # We need to ensure we return something compatible
+
         return raw_decision
 
     def make_decision(
@@ -276,13 +275,13 @@ class CognitiveAgent:
         # ========== 阶段 1: 记忆检索 ==========
         memory_context = self.memory.get_context_for_decision(market_state)
         
-        # ========== 阶段 2: LLM 推理 ==========
+        # ========== 阶段 2: 大模型 推理 ==========
         # 更新参考点并计算心理效用
         if avg_cost > 0:
             self.reference_point = avg_cost
         psychological_value = self.calculate_psychological_value(current_price)
         
-        # 注入心理状态到 market_state (供 Brain Prompt 使用)
+        # 注入心理状态到 market_state (供 Brain 提示词 使用)
         market_state["_psychological_value"] = psychological_value
         market_state["_risk_aversion"] = self.prospect.lambda_coeff
         
@@ -321,7 +320,7 @@ class CognitiveAgent:
         
         was_overridden = (final_action != llm_action)
         
-        # 如果被覆盖为 HOLD，数量设为 0
+        # 如果被覆盖为 持有，数量设为 0
         if was_overridden and final_action == "HOLD":
             final_quantity = 0
         else:

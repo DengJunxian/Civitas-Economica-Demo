@@ -1,4 +1,3 @@
-# file: agents/roles/news_analyst.py
 """
 NewsAnalyst —— 新闻情报分析师。
 

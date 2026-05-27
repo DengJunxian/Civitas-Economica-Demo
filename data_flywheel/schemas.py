@@ -1,4 +1,3 @@
-# file: data_flywheel/schemas.py
 """
 BettaFish 数据飞轮 — 统一数据模型
 
@@ -53,7 +52,7 @@ class ExtractedEntity:
         confidence: LLM 给出的置信度 (0.0 ~ 1.0)
     """
     name: str
-    entity_type: str   # company / sector / indicator / policy / person
+    entity_type: str
     confidence: float = 0.8
 
     def to_dict(self) -> Dict[str, Any]:
@@ -96,8 +95,8 @@ class SeedEvent:
     raw_text: str = ""
     created_at: str = ""
     processed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    # Structured text factors for backtesting/simulation:
-    # topic_signals, sentiment components, financial_factors, impact_paths, etc.
+
+
     text_factors: Dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------

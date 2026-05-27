@@ -1,4 +1,3 @@
-# file: data_flywheel/sources/rss_source.py
 import time
 import logging
 from typing import List, Set
@@ -47,7 +46,7 @@ class RssSource(BaseSource):
             try:
                 feed = feedparser.parse(url)
                 
-                # Check for parsing errors
+
                 if feed.bozo and hasattr(feed, 'bozo_exception'):
                     logger.warning(f"Error parsing feed {url}: {feed.bozo_exception}")
                     continue
@@ -57,18 +56,18 @@ class RssSource(BaseSource):
                 for entry in feed.entries:
                     link = entry.get('link', '')
                     
-                    # Deduplication
+
                     if link in self.seen_urls:
                         continue
                         
                     title = entry.get('title', '')
-                    # Use description or summary as content
+
                     content = entry.get('description', entry.get('summary', ''))
                     
-                    # Extract published date if available
+
                     published_at = ""
                     if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                        # Convert struct_time to ISO format
+
                         dt = datetime.fromtimestamp(time.mktime(entry.published_parsed), tz=timezone.utc)
                         published_at = dt.isoformat()
                     else:
@@ -94,9 +93,9 @@ class RssSource(BaseSource):
             if len(articles) >= max_items:
                 break
                 
-        # Keep seen_urls from growing infinitely
+
         if len(self.seen_urls) > 5000:
-            # Not a perfect LRU, but simple and prevents memory leaks
+
             self.seen_urls = set(list(self.seen_urls)[-2000:])
             
         return articles

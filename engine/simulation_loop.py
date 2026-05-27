@@ -1239,7 +1239,7 @@ class MarketEnvironment:
         self.last_stage_order = []
         logger.info("--- Start simulation tick %s ---", self.simulation_time)
 
-        # 1) policy
+
         self.last_stage_order.append("policy")
         scheduled_policy = self._policy_shocks.pop(0) if self._policy_shocks else None
         if scheduled_policy is None:
@@ -1334,7 +1334,7 @@ class MarketEnvironment:
             policy_id=policy_id if policy_id is not None else None,
         )
 
-        # 2) macro update
+
         self.last_stage_order.append("macro update")
         household_signals, firm_signals, bank_signal = self._update_macro(
             policy_shock,
@@ -1342,11 +1342,11 @@ class MarketEnvironment:
             event_digest=self._last_event_digest,
         )
 
-        # 3) social contagion
+
         self.last_stage_order.append("social contagion")
         contagion = self._run_social_contagion(policy_shock, event_digest=self._last_event_digest)
 
-        # 4) agent cognition
+
         self.last_stage_order.append("agent cognition")
         macro_context = self._build_macro_context(policy_text, household_signals, firm_signals, contagion)
         market_data = {
@@ -1453,7 +1453,7 @@ class MarketEnvironment:
             event_digest=self._last_event_digest,
         )
 
-        # 5) trading intent
+
         self.last_stage_order.append("trading intent")
         malicious_intents, rumor_shock = self._generate_malicious_intents(self.simulation_time)
         self._inject_rumor_sentiment(rumor_shock)
@@ -1476,7 +1476,7 @@ class MarketEnvironment:
             elif side == "SELL":
                 sell_volume += float(intent.quantity)
 
-        # 6) IPC matching
+
         self.last_stage_order.append("IPC matching")
         old_price = self.current_price
         cross_returns = self._cross_sectional_action_returns(agent_actions, old_price)
@@ -1659,7 +1659,7 @@ class MarketEnvironment:
             role_flows=role_order_flows,
         )
 
-        # 7) metrics update
+
         self.last_stage_order.append("metrics update")
         self._update_disposition_book(agent_actions, old_price)
 
@@ -1956,7 +1956,7 @@ class MarketEnvironment:
                 "policy_committee_review": dict(self._last_policy_committee_review),
             },
         )
-        # Optional memory broadcast for agents with memory banks.
+
         for agent in self.agents:
             if not hasattr(agent, "memory_bank"):
                 continue
@@ -2333,11 +2333,11 @@ class MarketEnvironment:
             cid for cid, deficit in sorted(cohort_deficits.items(), key=lambda item: item[1], reverse=True) if deficit > 0
         ]
 
-        # Local diffusion over existing topology
+
         adjacency = {node_id: list(nei) for node_id, nei in self.social_graph.adjacency.items()}
         diffused = self._evolution_ops.local_diffusion(self._agent_genomes, adjacency, strength=0.06)
 
-        # Mutate selected survivors
+
         mutated_ids: List[str] = []
         for aid in selected_ids:
             genome = self._agent_genomes.get(aid)
@@ -2346,7 +2346,7 @@ class MarketEnvironment:
             self._agent_genomes[aid] = self._evolution_ops.mutation(genome)
             mutated_ids.append(aid)
 
-        # Crossover + mutation to spawn replacements
+
         offspring: List[TradingAgent] = []
         if to_remove and selected_ids:
             n_offspring = max(1, len(to_remove))
@@ -2397,7 +2397,7 @@ class MarketEnvironment:
                     peer = random.choice(existing)
                     self.social_graph.add_edge(child.agent_id, peer, bidirectional=True)
 
-        # Selection pressure capital redistribution
+
         top_agents = sorted(self.agents, key=lambda a: returns.get(str(a.agent_id), 0.0), reverse=True)
         if freed_capital > 0 and top_agents:
             scores = [max(returns.get(str(a.agent_id), 0.0), -0.5) for a in top_agents]

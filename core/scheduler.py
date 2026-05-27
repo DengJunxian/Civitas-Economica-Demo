@@ -1,4 +1,3 @@
-# file: core/scheduler.py
 
 import asyncio
 import random
@@ -55,7 +54,7 @@ class SimulationController:
             quant_manager: 量化群体管理器 (可选)
             regulatory_module: 监管模块 (可选)
         """
-        # API密钥
+        # 接口密钥
         self.deepseek_key = deepseek_key
         self.zhipu_key = zhipu_key
         
@@ -66,9 +65,9 @@ class SimulationController:
         self.model_router = ModelRouter(deepseek_key, zhipu_key)
         
         # 初始化核心组件
-        # 使用 CivitasModel 接管 Market 和 Agent
+        # 使用 CivitasModel 接管 Market 和 智能体
         self.model = CivitasModel(
-            n_agents=100, # 默认 100 个 Agents
+            n_agents=100, # 默认 100 个 智能体
             model_router=self.model_router,
             initial_price=3000.0,
             quant_manager=quant_manager,
@@ -81,15 +80,15 @@ class SimulationController:
         self.matcher = self.market.engine
         
         # 移除旧的 StratifiedPopulation 直接引用
-        # self.population 由 self.model.population 接管 (对于 Tier 2)
+        # self.population 由 self.model.population 接管 (对于 第二层)
         
         # 量化群体管理器 (可选注入)
         self.quant_manager = quant_manager
         
-        # 智能体账户映射 (不再需要单独维护，Agent 自带 Portfolio)
+        # 智能体账户映射 (不再需要单独维护，智能体 自带 Portfolio)
         # 兼容旧代码访问 self.population.smart_agents
-        # 但 CivitasModel.agents 是 AgentSet. 
-        # 我们暂时保留 self.population 指向 Tier 2 Population 方便访问?
+        # 但 CivitasModel.agents 是智能体集合。
+        # 我们暂时保留 self.population 指向 第二层 Population 方便访问?
         # CivitasModel.population 是 StratifiedPopulation 实例
         # 我们可以 expose 它
         

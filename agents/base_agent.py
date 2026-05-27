@@ -1,4 +1,3 @@
-# file: agents/base_agent.py
 """
 Agent 抽象基类 — Agentic Architecture 核心契约
 
@@ -63,7 +62,7 @@ class MarketSnapshot:
     policy_description: str = ""
     policy_tax_rate: float = 0.0
     policy_news: str = ""
-    # Text factor fields from data flywheel (topic/sentiment/financial shocks)
+
     text_dominant_topic: str = "uncategorized"
     text_sentiment_score: float = 0.0
     text_panic_score: float = 0.0
@@ -100,7 +99,7 @@ class MarketSnapshot:
 
 
 # ==========================================
-# Agent 抽象基类
+# 智能体 抽象基类
 # ==========================================
 
 class BaseAgent(ABC):
@@ -184,7 +183,7 @@ class BaseAgent(ABC):
         self._initialized = False
 
     # ------------------------------------------
-    # 认知闭环 (Cognitive Loop) — 子类必须实现
+    # 认知闭环 — 子类必须实现
     # ------------------------------------------
 
     @abstractmethod
@@ -288,13 +287,13 @@ class BaseAgent(ABC):
         """
         self._step_count += 1
 
-        # Phase 1: 感知
+        # 阶段 1: 感知
         perceived = await self.perceive(market_snapshot, public_news)
 
-        # Phase 2: 推理
+        # 阶段 2: 推理
         reasoning = await self.reason(perceived)
 
-        # Phase 3: 决策
+        # 阶段 3: 决策
         order = await self.decide(reasoning)
 
         return order

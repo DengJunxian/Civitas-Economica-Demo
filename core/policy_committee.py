@@ -1,4 +1,3 @@
-# file: core/policy_committee.py
 """
 SOP 政策委员会
 
@@ -34,9 +33,9 @@ class CommitteeRole(Enum):
 class PolicyGoal:
     """政策目标"""
     target: str          # 目标对象（如"融资成本"）
-    direction: str       # 方向（increase/decrease/stabilize）
-    magnitude: str       # 幅度（mild/moderate/significant）
-    timeframe: str       # 时间框架（immediate/short-term/long-term）
+    direction: str       # 方向
+    magnitude: str       # 幅度
+    timeframe: str       # 时间框架
     confidence: float    # 置信度 0-1
 
 
@@ -77,7 +76,7 @@ class PolicyCommittee:
     确保参数生成的准确性和合规性
     """
     
-    # 系统角色 Prompt
+    # 系统角色 提示词
     ROLE_PROMPTS = {
         CommitteeRole.MACRO_ANALYST: """你是一位资深宏观经济分析师，专注于解读中国政策。
 

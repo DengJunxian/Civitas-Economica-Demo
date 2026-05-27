@@ -50,8 +50,8 @@ def _counterfactual_world(metrics: pd.DataFrame) -> pd.DataFrame:
     if b.empty:
         return b
 
-    # Pandas 2.2+ raises on float assignment into integer columns, so we coerce
-    # close/panic inputs to numeric float before generating the B-world series.
+
+
     close_series = pd.to_numeric(b["close"], errors="coerce").ffill().bfill().fillna(0.0).astype(float)
     panic_source = b["panic_level"] if "panic_level" in b.columns else pd.Series(0.0, index=b.index)
     panic_series = pd.to_numeric(panic_source, errors="coerce").fillna(0.0).astype(float)
@@ -291,10 +291,10 @@ def render_demo_tab(ctrl: Optional[Any] = None) -> None:
     regulation_hint = "干预中" if upto.iloc[-1]["panic_level"] > 0.45 else "观察"
     kpi = dashboard_ui.build_kpi_snapshot(metrics, current_step, regulation_hint=regulation_hint)
     
-    # --- UI Component Integration ---
+
     dashboard_ui.render_kpi_cards(kpi)
     
-    # Generate snapshot dict for charts and LLM
+
     last_row = upto.iloc[-1]
     metrics_snapshot = {
         "panic_level": float(last_row.get("panic_level", 0.0)),
@@ -302,10 +302,10 @@ def render_demo_tab(ctrl: Optional[Any] = None) -> None:
         "depth_imbalance": float(last_row.get("depth_imbalance", -0.5 * float(last_row.get("panic_level", 0.0))))
     }
     
-    # Financial Health Gauges
+
     dashboard_ui.render_financial_health_dashboard(metrics_snapshot, key_prefix="defense")
     
-    # LLM daily insights
+
     if st.session_state.is_running or current_step > 0:
         insight_cache_key = f"demo_insight_step_{current_step}"
         if insight_cache_key not in st.session_state:

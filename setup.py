@@ -15,7 +15,7 @@ ext_modules = [
         "_civitas_lob",
         ["core/exchange/c_core/bindings.cpp", "core/exchange/c_core/lob.cpp"],
         include_dirs=[
-            # Path to pybind11 headers
+
             get_pybind_include(),
             "core/exchange/c_core"
         ],

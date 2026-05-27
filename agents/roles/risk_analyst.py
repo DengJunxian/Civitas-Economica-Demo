@@ -1,4 +1,3 @@
-# file: agents/roles/risk_analyst.py
 """
 RiskAnalyst —— 风险分析师。
 

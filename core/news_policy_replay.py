@@ -138,7 +138,7 @@ class NewsDrivenPolicyReplayEngine(FactorBacktestEngine):
 
         trace: List[Dict[str, Any]] = [{"type": "strict_base", "value": strict}]
         demo = strict
-        # Keep demo score close to strict score to avoid optimistic frontend inflation.
+
         max_add = 0.05
         add_used = 0.0
         coverage = float(news_bundle.coverage.get("coverage_rate", 0.0) or 0.0)
@@ -261,8 +261,8 @@ class NewsDrivenPolicyReplayEngine(FactorBacktestEngine):
                 calibration_alpha = 0.0
                 demo_adjustment = 0.0
             else:
-                # Demo-only display calibration: keeps the defense chart readable while
-                # preserving raw_session_close in metadata for strict evaluation.
+
+
                 calibration_alpha = 0.45
                 day_sim_close = raw_session_close * (1.0 - calibration_alpha) + day_real_close * calibration_alpha
                 day_sim_close *= (1.0 + news_shock_effect)

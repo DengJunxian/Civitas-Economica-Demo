@@ -119,7 +119,7 @@ class EventGraphStore:
         try:
             nx.write_graphml(self.graph, self.graph_path)
         except Exception:
-            # Keep pipeline resilient; graph persistence failure must not break ingestion.
+
             pass
 
     @staticmethod

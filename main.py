@@ -13,7 +13,7 @@ def check_environment():
     cfg = config.GLOBAL_CONFIG
     print(f"[*] 初始化 {cfg.PROJECT_NAME} (v{cfg.VERSION})")
     
-    # 检查 API Key
+        # 检查接口密钥
     if not cfg.DEEPSEEK_API_KEY:
         print("\n[!] 警告: 未检测到 DEEPSEEK_API_KEY 环境变量。")
         non_interactive = (not sys.stdin) or (not sys.stdin.isatty())
@@ -26,7 +26,7 @@ def check_environment():
             # 设置环境变量
             os.environ["DEEPSEEK_API_KEY"] = key
             
-            # 重新加载 Config
+            # 重新加载 配置
             importlib.reload(config)
             cfg = config.GLOBAL_CONFIG
             print("[*] API Key 已配置并重新加载 GLOBAL_CONFIG")

@@ -1,4 +1,3 @@
-# file: agents/report/report_agent.py
 import json
 import logging
 from typing import Dict, Any, List, Optional

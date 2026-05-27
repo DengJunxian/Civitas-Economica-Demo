@@ -52,7 +52,7 @@ class EbbinghausMemoryBank:
 
         self._memory_counter = 0
         
-        # 性能瓶颈优化方案 (Performance Optimization)
+        # 性能瓶颈优化方案
         # 缓存同一智能体在记忆总数未变时的查询结果，避免每 Ticks 都要进行数百次高消耗的 ChromaDB/SQLite 查询
         self._chroma_query_cache: Dict[Tuple[str, int], Any] = {}
 
@@ -74,8 +74,8 @@ class EbbinghausMemoryBank:
         s_base = GLOBAL_CONFIG.get("ebbinghaus_base_decay_rate", 0.1)
         alpha = GLOBAL_CONFIG.get("ebbinghaus_alpha", 0.5)
 
-        # 这里使用一个 mock 的语义检查来估算 relevance_score
-        # 在真实应用中，可以是对 embedding 向量或 LLM 进行短问答
+        # 这里使用一个模拟语义检查来估算相关性分数
+        # 在真实应用中，可以是对 embedding 向量或 大模型 进行短问答
         relevance_score = 0.5  # 基础相关性
 
         content_lower = policy_content.lower()
@@ -104,7 +104,7 @@ class EbbinghausMemoryBank:
         # policy_sensitivity 作为整体敏感性权重
         sensitivity = agent_persona.policy_sensitivity
         
-        # relevance_score 被限制在 [0.1, 1.0] 范围内防止 S 为负或无穷小
+        # 相关性分数被限制在 [0.1, 1.0] 范围内，防止 S 为负或无穷小
         relevance_score = max(0.1, min(1.0, relevance_score))
         
         S = s_base + (alpha * sensitivity * relevance_score)
@@ -171,7 +171,7 @@ class EbbinghausMemoryBank:
         # 由于可能出现有大量已被彻底遗忘的记忆，在查询时预抓取一个较大的池子。
         fetch_k = top_k * 3 
 
-        # 缓存键：查询文本与当前的记忆总数，如果记忆数量没变，直接复用 ChromaDB 候选集，极大地提升并发性能 (Performance Optimization)
+        # 缓存键：查询文本与当前的记忆总数，如果记忆数量没变，直接复用 ChromaDB 候选集，极大地提升并发性能
         cache_key = (query_text, self._memory_counter)
         if cache_key in getattr(self, "_chroma_query_cache", {}):
             results = self._chroma_query_cache[cache_key]
@@ -218,8 +218,8 @@ class EbbinghausMemoryBank:
             mem_time = meta.get("timestamp", 0)
             S = meta.get("S", 0.1)
 
-            # Chroma 的 cosine distance 范围约在 [0, 2]。 余弦相似度 = 1 - distance
-            # 其实在使用 default embedding 等情况有时候返回的其实不是标准 cosine, 这里统一当作 1 - dist。
+            # Chroma 的余弦距离范围约在 [0, 2]，这里统一按 1 - 距离计算余弦相似度。
+            # 默认向量模型有时返回的并非标准余弦距离，因此此处只做稳定近似。
             cosine_similarity = 1.0 - dist
             # 对相似度进行规范化限制
             cosine_similarity = max(0.0, min(1.0, cosine_similarity))
@@ -228,7 +228,7 @@ class EbbinghausMemoryBank:
             if time_elapsed < 0:
                 time_elapsed = 0
 
-            # 数学约束：R = math.exp(-(current_simulation_time - memory.timestamp) / memory.memory_strength)
+            # 数学约束：R = exp(-记忆年龄 / 记忆强度)
             R = math.exp(-time_elapsed / S)
 
             # 阈值拦截：如果保留分 R 跌破了界限，代理就完全忘记了这件事
@@ -253,4 +253,3 @@ class EbbinghausMemoryBank:
             context_lines.append(f"({i}) 记忆于[T={t_stamp}] (记忆清晰度: {r_score:.2f}): {doc}")
 
         return "\n".join(context_lines)
-

@@ -1,4 +1,3 @@
-# file: agents/quant_group.py
 """
 量化策略 Agent 群体模块
 
@@ -289,7 +288,7 @@ class QuantGroupManager:
             if progress_callback:
                 progress_callback(i + 1, n_agents, f"Agent_{i}")
             
-            # 为每个 Agent 生成略有差异的人格
+            # 为每个 智能体 生成略有差异的人格
             persona = {
                 'risk_preference': random.choice(['激进', '稳健', '保守']),
                 'loss_aversion': random.uniform(1.5, 3.0)

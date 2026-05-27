@@ -1,4 +1,3 @@
-# file: core/regulatory_sandbox.py
 """
 监管沙盒模块
 
@@ -46,7 +45,7 @@ class TradeRecord:
     """交易记录"""
     timestamp: float
     agent_id: str
-    order_type: str  # limit, market, cancel
+    order_type: str
     price: float
     qty: int
     executed: bool = True
@@ -245,7 +244,7 @@ class NationalStabilityFund:
         self.intervention_history: List[Dict] = []
         
         # 持仓
-        self.holdings: Dict[str, int] = {}  # symbol -> qty
+        self.holdings: Dict[str, int] = {}
     
     def should_intervene(
         self, 
@@ -669,7 +668,7 @@ class MarketAbuseSandbox:
         current_tick = int(tick)
         lower = current_tick - self.lookback_window + 1
 
-        # Sentiment manipulation burst
+
         burst_sum = sum(
             abs(delta)
             for t, _agent, delta, source in self.sentiment_flow
@@ -685,7 +684,7 @@ class MarketAbuseSandbox:
                 )
             )
 
-        # Abnormal order cancellation ratio
+
         for agent_id, submit_count in list(self.agent_submit_count.items()):
             if submit_count < 5:
                 continue

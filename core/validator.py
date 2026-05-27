@@ -1,4 +1,3 @@
-# file: core/validator.py
 """
 典型事实验证器 (Stylized Facts Validator)
 
@@ -460,7 +459,7 @@ class StylizedFactsValidator:
                 description="样本量不足（需要至少30个数据点）"
             )
         
-        kurtosis = stats.kurtosis(returns, fisher=False)  # Fisher=False 返回超额峰度+3
+        kurtosis = stats.kurtosis(returns, fisher=False)  # 关闭 Fisher 修正，返回超额峰度+3
         passed = kurtosis > threshold
         
         return ValidationResult(

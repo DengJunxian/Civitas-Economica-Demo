@@ -1,4 +1,3 @@
-# file: data_flywheel/sources/news_api_source.py
 import logging
 from typing import List
 
@@ -67,7 +66,7 @@ class NewsApiSource(BaseSource):
         """从预定义的样本中按顺序“吐出”新闻"""
         articles = []
         
-        # Determine how many items we can return in this batch
+
         remaining = len(self.MOCK_ARTICLES) - self._mock_index
         if remaining <= 0:
             logger.info(f"[{self.source_name}] No more mock articles available.")
@@ -95,7 +94,7 @@ class NewsApiSource(BaseSource):
         try:
             import akshare as ak
             logger.info(f"[{self.source_name}] Requesting real data from AkShare (Sina Global News)...")
-            # Pull global rolling news from Sina
+
             df = ak.stock_info_global_sina()
             
             if df is None or df.empty:
@@ -113,7 +112,7 @@ class NewsApiSource(BaseSource):
                 row = df.iloc[i]
                 content = str(row[content_col])
                 
-                # Title extraction: first 20 characters or up to the first punctuation
+
                 title = content[:30] + "..." if len(content) > 30 else content
                 
                 article = RawArticle(

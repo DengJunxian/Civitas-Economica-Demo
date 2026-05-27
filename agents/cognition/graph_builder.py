@@ -1,4 +1,3 @@
-# file: agents/cognition/graph_builder.py
 import json
 import re
 import logging

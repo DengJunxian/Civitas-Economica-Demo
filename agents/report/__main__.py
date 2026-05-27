@@ -1,4 +1,3 @@
-# file: agents/report/__main__.py
 import asyncio
 import time
 
@@ -14,7 +13,7 @@ async def async_main():
     print("=====================================================")
     print("正在初始化虚拟测试环境...\n")
 
-    # 构建 Mock MatchingEngine
+    # 构建模拟撮合引擎
     class MockEngine:
         def __init__(self):
             self.trades_history = []
@@ -37,7 +36,7 @@ async def async_main():
         )
     )
 
-    # 构建 Mock MarketEnv
+    # 构建模拟市场环境
     class MockMarketEnv:
         last_price = 3200.5
         trend = "震荡"
@@ -48,7 +47,7 @@ async def async_main():
 
     market_env = MockMarketEnv(engine)
 
-    # 构建 Mock Agents Map
+    # 构建模拟智能体映射
     agents_map = {}
 
     p1 = Persona(name="Retail_Loss")

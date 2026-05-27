@@ -1,4 +1,3 @@
-# file: core/backtest_robustness.py
 """回测稳健性分析：参数网格扫描 + Walk-Forward 验证。"""
 
 from __future__ import annotations
@@ -85,7 +84,7 @@ class RobustnessAnalyzer:
             return float(row.get("calmar_ratio", 0.0))
         if metric == "information_ratio":
             return float(row.get("information_ratio", 0.0))
-        # default composite score
+
         return (
             float(row.get("sharpe_ratio", 0.0))
             + 0.6 * float(row.get("total_return", 0.0))
@@ -213,7 +212,7 @@ class RobustnessAnalyzer:
                 train_bm = pd.DataFrame()
                 test_bm = pd.DataFrame()
 
-            # train: select best params
+
             train_analyzer = RobustnessAnalyzer(
                 self.base_config,
                 historical_data=train_data,
@@ -222,7 +221,7 @@ class RobustnessAnalyzer:
             grid = train_analyzer.run_grid_search(param_grid, optimize_metric=optimize_metric)
             best_params = grid.best_params
 
-            # test: evaluate selected params on forward window
+
             test_config = self._clone_config(self.base_config, best_params)
             test_bt = HistoricalBacktester(test_config)
             test_bt.historical_data = test_data.copy()

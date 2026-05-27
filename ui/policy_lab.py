@@ -2552,7 +2552,7 @@ def _persist_policy_event(
     try:
         EventStore().append_events(dataset_version="policy_lab", events=[record])
     except Exception:
-        # Event persistence is best-effort and should never block the demo flow.
+
         return
 
 

@@ -1,4 +1,3 @@
-# file: agents/cognition/utility.py
 """
 认知 Agent 工具库
 
@@ -118,15 +117,15 @@ class ProspectTheory:
              # 散户在盈利时往往厌恶风险，不愿意加仓
              return "HOLD", "处置效应覆盖：盈利时厌恶风险，拒绝加仓"
 
-        # 场景2：损失厌恶 - 亏损时死扛 (Reflex Effect)
+        # 场景2：损失厌恶 - 亏损时死扛
         # 前景理论认为在亏损区域，人倾向于风险偏好 (赌徒心理)，希望能回本
         if pnl < -0.10 and llm_action == "SELL" and self.investor_type == InvestorType.PANIC_RETAIL:
-             # 如果亏损严重，且 LLM 建议止损，散户可能因为损失厌恶而死扛
-             # 但如果效用极低(极度恐惧)，也可能崩溃卖出。这里模拟"死扛"
+             # 如果亏损严重，且 大模型 建议止损，散户可能因为损失厌恶而死扛
+
              if utility > fear_threshold * 1.5: # 还没到崩溃点
                  return "HOLD", "损失厌恶覆盖：不愿确认亏损，选择死扛"
         
-        # 场景3：极度恐惧 - 崩盘卖出
+
         # 效用值极低（如 -2.0 以下），心理防线崩溃
         if utility < fear_threshold:
              if llm_action == "BUY":

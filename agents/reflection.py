@@ -1,4 +1,3 @@
-# file: agents/reflection.py
 """
 记忆流与反思引擎
 
@@ -22,7 +21,7 @@ from config import GLOBAL_CONFIG
 class MemoryEvent:
     """记忆事件"""
     timestamp: float
-    event_type: str  # trade, observation, emotion, reflection
+    event_type: str
     content: str
     importance: float = 0.5  # 0-1 重要性评分
     embedding: Optional[List[float]] = None
@@ -132,7 +131,7 @@ class ReflectionEngine:
         self.tick_count = 0
         self.last_reflection_tick = 0
         
-        # 初始化 API 客户端路由器
+        # 初始化 接口 客户端路由器
         self._api_key = api_key or GLOBAL_CONFIG.DEEPSEEK_API_KEY
         if self._api_key:
             from core.model_router import ModelRouter
@@ -179,7 +178,7 @@ class ReflectionEngine:
         if not all_events:
             return None
         
-        # 构建反思 Prompt
+        # 构建反思 提示词
         events_text = "\n".join([
             f"- [{e.event_type}] {e.content}" 
             for e in all_events[-15:]  # 最多15条

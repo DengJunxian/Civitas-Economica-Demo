@@ -1,203 +1,59 @@
-﻿# 数治观澜：基于大模型多智能体的金融政策风洞推演沙箱
+# 数治观澜
 
-面向中国大学生计算机设计大赛人工智能应用赛道的项目作品。系统围绕“政策输入 -> 智能体决策 -> 市场撮合 -> 风险诊断 -> 材料导出”构建完整闭环，用于演示政策冲击、市场情绪传播、监管干预与历史对照回放等场景下的市场演化过程。
+基于大模型多智能体的金融政策风洞推演沙箱。项目用于演示政策输入、智能体决策、市场撮合、风险诊断、历史回放与材料导出等核心流程。
 
-项目支持离线演示。评委在没有云端 API Key 的情况下，也可以直接加载内置场景完成展示、回放、分析与材料导出。
+## 保留内容
 
-## 第八批收尾：可复现政策风洞
+本仓库已整理为答辩运行版，仅保留运行和演示所需内容：
 
-本轮补齐了复现、性能、CI、工程文档和答辩说明。推荐把项目理解为“政策文本驱动的金融市场风洞”：
+- `app.py`：Streamlit 展示入口。
+- `core/`、`agents/`、`engine/`、`policy/`、`ui/`：核心仿真、智能体、撮合、政策解释与界面代码。
+- `data/`、`demo_scenarios/`：离线演示数据和内置场景。
+- `theme/`、`static/`、`.streamlit/`：界面主题和静态资源。
+- `scripts/start_competition_demo.ps1`、`scripts/start_competition_demo.bat`：Windows 快捷启动脚本。
+- `requirements.txt`、`requirements-lock.txt`：依赖清单。
 
-- 不是普通 demo：系统不是让大模型直接画图，而是把政策文本解析成结构化政策包，驱动异质智能体生成订单，经 A 股 session-aware 撮合引擎生成 trade tape，再由 trade tape 聚合 K 线、风险指标、行为金融指标和 scorecard。
-- AI 方法：DeepSeek v4 pro 承担慢思考，DeepSeek v4 flash thinking/non-thinking 承担快思考，智谱 GLM-4-flashx 承担在线兜底；无 key 时进入 deterministic offline fallback。
-- 金融场景：以上证指数 `sh000001` 为主 benchmark，支持政策冲击、重大新闻、监管事件、谣言/辟谣和历史 replay window。
-- 工程链路：`core/reproducibility.py` 统一 random seed、config hash、dataset snapshot hash、parameter_set_id 和 LLM 调用元数据；`core/experiment_registry.py` 保存 experiment registry，报告导出包含 `experiment_id`。
-- 历史验证：统一 evaluation suite 输出上证指数路径误差、事件窗方向命中率、风险指标、微观结构指标和行为金融指标。
-- 监管优化：保留监管页面并升级为多目标政策优化入口，支持轻量 black-box search、Pareto 输出和推荐方案。
-- 可复现性：无 API Key、断网、C++ 扩展缺失时都具备 mock/cache/synthetic/Python fallback 或清晰错误提示。
+测试目录、历史输出、答辩资料、提交打包脚本、基准测试脚本和本地缓存已清理。运行后生成的 `outputs/`、`tmp/`、`artifacts/`、`data/cache/` 等目录会被 Git 忽略。
 
-关键文档：
+## 运行环境
 
-- [架构说明](docs/architecture.md)
-- [工程设计说明](docs/engineering_design.md)
-- [LLM Provider 与路由](docs/llm_provider.md)
-- [校准与历史验证](docs/calibration.md)
-- [Evaluation Suite](docs/evaluation.md)
-- [监管优化与 Pareto 输出](docs/policy_optimization.md)
-- [比赛演示 Playbook](docs/demo_playbook.md)
+- Python 3.11 及以上，推荐使用独立虚拟环境。
+- Windows 10/11、macOS 或 Linux 均可运行；答辩推荐使用 Chrome 或 Edge 访问 Streamlit 页面。
+- 在线模型 API Key 可选。未配置时系统会自动使用离线回退链路，保证可以完成现场演示。
 
-快速验收命令：
+## 安装依赖
 
 ```bash
-pytest -q tests/test_reproducibility.py tests/test_deterministic_replay.py tests/test_performance_smoke.py
-python -c "import app; assert hasattr(app, 'main')"
-python -m streamlit run app.py --server.port 8501
-```
-
-## 一、项目亮点
-
-- 多智能体政策推演：把自然语言政策转成结构化冲击，驱动市场行为变化。
-- 历史智能回测工作台：统一承载智能因子回测与历史智能体回放，既能做传统回测，也能做带成交轨迹的历史重放。
-- 行为金融诊断：自动输出 CSAD、PGR/PLR、波动聚集、回撤分布等典型事实指标。
-- 监管优化与 A/B 推演：对比不同政策/干预方案的效果差异，便于答辩展示。
-- 比赛材料导出：可生成摘要、演示脚本、图表索引和报告文件。
-
-## 二、评委快速理解路径
-
-推荐首次演示顺序：
-
-1. 进入 `总览首页`，用 1 分钟理解项目定位与页面结构。
-2. 进入 `政策试验台`，直接运行默认模板展示主功能。
-3. 进入 `历史回测`，切换查看智能因子回测与历史智能体回放，说明项目具备验证能力而非单纯演示界面。
-4. 进入 `高级分析`，回答“为什么可信”“哪里像真、哪里不像真”。
-5. 需要总结时，点击导出比赛材料。
-
-## 三、硬件环境和操作系统
-
-填写说明：除一般 PC 计算机外，本项目无额外专用硬件强制要求；如需本地大模型推理，建议增加 GPU 与存储空间。
-
-| 项目 | 最低要求 | 推荐配置 | 说明 |
-| --- | --- | --- | --- |
-| CPU | 4 核 x86_64 | Intel i5 / Ryzen 5 及以上 | 满足演示、测试与图表渲染 |
-| 内存 | 8 GB | 16 GB 及以上 | 全量测试与多页面切换更稳定 |
-| 磁盘 | 5 GB 可用空间 | 10 GB 及以上 | 用于依赖安装、缓存与导出文件 |
-| GPU | 非必需 | 8 GB+ 显存 | 仅在本地推理大模型时建议 |
-| 操作系统 | Windows 10/11 64 位 | Windows 11 64 位 | 当前仓库实测环境为 Windows |
-| 浏览器 | Edge / Chrome | 最新稳定版 | 用于访问 Streamlit 页面 |
-
-重要说明：
-
-- 仓库内包含已编译的 Windows + Python 3.14 扩展文件 `_civitas_lob.cp314-win_amd64.pyd`。
-- 若评委机器使用 `Windows + Python 3.14.x`，通常无需重新编译撮合扩展。
-- 若 Python 版本与该二进制不匹配，需要安装 Visual Studio Build Tools 后执行重新编译。
-
-## 四、开发平台（含开源/第三方工具）
-
-确保评委按本说明安装开发工具软件后能够打开工程文件。
-
-| 类别 | 名称 | 推荐版本 | 用途 |
-| --- | --- | --- | --- |
-| 编程语言 | Python | 3.14.x | 主运行环境 |
-| 包管理 | pip | 24+ | 安装依赖 |
-| 虚拟环境 | venv | Python 内置 | 隔离依赖 |
-| 前端框架 | Streamlit | 1.53.1（锁定环境） | Web 展示界面 |
-| 可视化 | Plotly、Matplotlib | 见 `requirements-lock.txt` | 图表展示与导出 |
-| 多智能体建模 | Mesa | 3.4.2（锁定环境） | 智能体建模与仿真 |
-| 数据分析 | pandas、numpy、scipy、networkx | 见 `requirements-lock.txt` | 指标计算与图结构分析 |
-| 数据模型与校验 | pydantic | 见 `requirements-lock.txt` | 严格数据模型与参数校验 |
-| 向量记忆 | chromadb | 见 `requirements-lock.txt` | 智能体记忆存储与检索 |
-| 列式存储 | pyarrow | 见 `requirements-lock.txt` | Event Store 的 Parquet 读写 |
-| 金融数据 | AkShare、yfinance | 见 `requirements-lock.txt` | 指数/市场数据支持 |
-| RSS 解析 | feedparser | 见 `requirements-lock.txt` | 新闻源抓取与本地回放 |
-| 文档导出 | python-docx、reportlab、kaleido | 见依赖文件 | 导出 Word / PDF / PNG |
-| C++ 编译 | Visual Studio Build Tools 2022 | MSVC v143 | 仅在重编译扩展时需要 |
-| 版本管理 | Git | 任意稳定版 | 获取与提交工程 |
-| 开发工具 | VS Code / PyCharm | 任意稳定版 | 查看、编辑与调试源码 |
-| 脚本环境 | PowerShell | Windows 自带 | 启动脚本与交付检查 |
-
-### 本地部署时所需 requirements
-
-基础依赖定义在 `requirements.txt` 中：
-
-```txt
-mesa>=3.0.0
-streamlit>=1.30.0
-pandas>=2.0.0
-numpy>=1.24.0
-plotly>=5.18.0
-openai>=1.0.0
-pyyaml>=6.0.0
-matplotlib>=3.7.0
-sortedcontainers>=2.4.0
-networkx>=3.0.0
-akshare>=1.18.0
-yfinance>=0.2.40
-httpx>=0.27.0
-tenacity>=8.2.0
-scipy>=1.11.0
-pydantic>=2.12.0
-pyarrow>=23.0.0
-feedparser>=6.0.11
-chromadb>=1.5.0
-pytest>=7.0.0
-pytest-asyncio>=1.0.0
-nest_asyncio>=1.5.0
-pyzmq>=26.0.0
-pybind11>=2.10.0
-setuptools>=42.0.0
-kaleido==0.2.1
-python-docx>=1.1.0
-reportlab>=4.0.0
-```
-
-比赛复现实测环境锁定在 `requirements-lock.txt` 中，推荐评委优先使用该文件安装，以减少环境差异。
-
-可选推理能力说明：
-
-- `DEEPSEEK_API_KEY`、`ZHIPU_API_KEY`：在线推理能力，可不配置。
-- `CIVITAS_LOCAL_MODEL_PATH`：本地模型路径，可不配置。
-- `CIVITAS_VLLM_MODEL`：高配模式下的 vLLM 模型名，可不配置。
-- `llama-cpp-python`、`vllm`：仅在本地模型或高配推理模式下按需安装，不属于最小复现必需依赖。
-
-## 五、运行环境和安装说明
-
-确保评委按本说明安装作品后能够正常运行作品。
-
-### 1. 目录位置
-
-```powershell
-cd C:\Users\Deng Junxian\Desktop\Civitas_new
-```
-
-### 2. 创建并激活虚拟环境
-
-```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-```
-
-### 3. 安装依赖
-
-常规安装：
-
-```powershell
+python -m venv .venv
+source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-比赛复现推荐安装：
+Windows PowerShell：
 
 ```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+如果需要完全复现锁定环境，可改用：
+
+```bash
 pip install -r requirements-lock.txt
 ```
 
-### 4. 运行时可选配置
+## 启动项目
 
-项目支持在线优先 + 自动离线回退。以下环境变量在接入在线模型时建议配置（未配置也可离线演示）：
+推荐命令：
 
-```powershell
-$env:DEEPSEEK_API_KEY="<set-in-local-shell-or-env-file>"
-$env:ZHIPUAI_API_KEY="<set-in-local-shell-or-env-file>"
-$env:LLM_DEFAULT_PROVIDER="auto"
-$env:LLM_TIMEOUT_SECONDS="20"
-$env:LLM_MAX_RETRIES="2"
-$env:CIVITAS_AGENT_LLM_CALL_TIMEOUT_SECONDS="9"
-$env:CIVITAS_INFERENCE_MODE="lite"
-$env:CIVITAS_LOCAL_MODEL_PATH="D:\models\xxx.gguf"
-$env:CIVITAS_VLLM_MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
-```
-
-模板可参考 `.env.example`。项目启动时会自动读取仓库根目录下的本地 `.env`，但 `.env` 已在 `.gitignore` 中，不应提交。
-
-### 5. 启动方式
-
-推荐入口：
-
-```powershell
+```bash
 python -m streamlit run app.py --server.port 8501
 ```
 
-快捷脚本：
+Windows 快捷脚本：
 
 ```powershell
 scripts\start_competition_demo.bat
@@ -209,188 +65,35 @@ scripts\start_competition_demo.bat
 powershell -ExecutionPolicy Bypass -File scripts\start_competition_demo.ps1
 ```
 
-备用入口：
-
-```powershell
-python main.py
-```
-
-说明：
-
-- `app.py` 是比赛展示推荐入口。
-- `main.py` 更适合开发调试，不建议作为评委首选入口。
-- 默认策略为“在线 API 优先，单次调用失败自动回退离线”。
-- 无 API Key 时会自动进入离线兜底模式。
-- 若仅用于比赛演示，推荐直接使用离线模式与内置场景，避免现场依赖外网稳定性。
-
-### 6. 浏览器访问
-
-启动成功后访问：
-
-- [http://127.0.0.1:8501](http://127.0.0.1:8501)
-
-### 7. C++ 扩展重编译说明
-
-以下情况下需要重新编译：
-
-- Python 版本与 `_civitas_lob.cp314-win_amd64.pyd` 不匹配。
-- 修改了 `core/exchange/c_core/*`。
-- 在其他操作系统/解释器环境中重新部署。
-
-重新编译命令：
-
-```powershell
-python setup.py build_ext --inplace
-```
-
-Windows 如需编译，请先安装 Visual Studio Build Tools 2022（含 MSVC v143）。macOS/Linux 使用同一命令，`setup.py` 会切换到 `-std=c++17`。扩展缺失时系统仍可走 Python 撮合实现；扩展可用时会打印 `High-Performance C++ OrderBook Activated`。
-
-可用以下命令确认本地性能路径：
-
-```powershell
-python scripts\benchmark_simulation.py --agents 6 --ticks 1
-python scripts\benchmark_deepseek_online.py --llm-agents 4
-```
-
-第二条命令会读取本地 `.env` 的 DeepSeek key，做一次严格在线、不使用 GLM/离线兜底的一轮仿真计时。
-
-### 8. 比赛提交包自动命名
-
-为避免提交命名错误，可使用：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build_submission_package.ps1 -School "你的学校" -ContestId "参赛编号"
-```
-
-输出目录默认为 `outputs/submission_packages/`，并自动生成提交包清单 JSON。
-
-## 六、项目目录说明
+浏览器打开：
 
 ```text
-app.py                         Streamlit 比赛前端入口
-main.py                        备用启动入口
-agents/                        多智能体角色、认知与报告模块
-core/                          核心仿真、回测、市场、推理、监管与系统运行逻辑
-engine/                        市场仿真循环与撮合调度
-policy/                        政策结构化解析与政策引擎
-ui/                            页面级组件与图表界面
-demo_scenarios/                比赛内置场景
-data/                          策略模板与样例数据
-docs/                          使用说明、接口说明、答辩辅助材料
-scripts/                       启动、检查、实验脚本
-theme/                         界面主题样式
-requirements.txt              常规依赖
-requirements-lock.txt         锁定依赖
+http://127.0.0.1:8501
 ```
 
-## 七、推荐演示场景
+## 可选配置
 
-无需 API Key，推荐优先使用以下内置场景：
+项目会自动读取本地 `.env`，但该文件不会提交到 Git。可参考 `.env.example` 配置在线模型：
 
-- `tax_cut_liquidity_boost`
-- `rumor_panic_selloff`
-- `regulator_stabilization_intervention`
-
-推荐演示流程：
-
-1. 启动 `app.py`。
-2. 在 `总览首页` 中快速说明项目定位。
-3. 切换到 `政策试验台` 运行默认模板。
-4. 切换到 `历史回测` 说明验证能力。
-5. 切换到 `高级分析` 展示证据链和行为金融指标。
-6. 导出比赛材料或报告。
-
-### 政策试验台会话控制补充
-
-`政策试验台` 现在支持两类推进方式：
-
-- 手动推进：`继续 1 天`、`继续 5 天`、`运行到结束`
-- 自动推进：`自动逐日运行`
-
-说明：
-
-- `自动逐日运行` 的含义是让仿真会话按“模拟交易日”自动播放。
-- 它不会在操作系统里创建真实世界的每日定时任务，也不会后台常驻运行。
-- 自动模式仍然复用同一套 `PolicySession + MarketEnvironment + SimulationRunner` 会话状态，因此可以随时切回手动推进、停止仿真或追加政策。
-- 页面顶部会同步展示 `政策注入 -> 情绪扩散 -> 撮合落地` 的三阶段传导卡片，方便答辩时直接讲清楚从政策到指数路径的因果链。
-
-## 八、已完成的本地实机验证
-
-以下命令已在当前仓库完成验证：
-
-```powershell
-python -m pip check
-python -m compileall -q app.py main.py config.py simulation_ipc.py simulation_runner.py regulator_agent.py agents core engine policy ui tests
-pytest -q
-powershell -ExecutionPolicy Bypass -File scripts\check_competition_delivery.ps1 -FullTest -ReportPath outputs/competition_materials/latest_check.json
+```bash
+DEEPSEEK_API_KEY=your_key
+ZHIPUAI_API_KEY=your_key
+LLM_DEFAULT_PROVIDER=auto
+CIVITAS_INFERENCE_MODE=lite
 ```
 
-本次最新复核结果：
+没有 API Key 时无需额外处理，项目会进入离线可演示模式。
 
-- `python -m pip check`：通过
-- `python -m compileall ...`：通过
-- `pytest -q`：当前已知为 `342 passed / 1 failed` 后修复目标用例，后续应以本轮重新生成的验收报告为准
-- `scripts/check_competition_delivery.ps1`：曾在全量测试失败时同步失败，符合“失败即阻断”的预期
-- `python -m streamlit run app.py --server.headless true --server.port 8501`：启动成功，页面可访问
-- 浏览器自动化烟测：已实测打开 `总览首页 / 政策试验台 / 历史回测 / 高级分析`，未见明显控制台报错
+## 答辩演示建议
 
-说明：
+1. 打开总览首页，说明系统定位和模块结构。
+2. 进入政策试验台，运行默认政策模板。
+3. 查看历史回放或高级分析，展示市场路径、风险指标和行为金融诊断。
+4. 使用导出功能生成现场需要的报告材料。
 
-- 请不要把固定测试通过数字直接写入比赛材料正文，应优先引用最新生成的《工程验收报告》或机器验收 JSON。
-- 若执行测试后发现 `data/` 或 `outputs/` 下有新变更，请先检查是否属于测试副作用工件。
+## 快速自检
 
-## 九、第三方能力与项目自研边界
-
-### 第三方能力负责什么
-
-- Streamlit：承载 Web 页面框架
-- Plotly / Matplotlib：承载图表展示
-- python-docx / reportlab：承载正式文档导出
-- AkShare / yfinance / feedparser：承载外部数据抓取与解析
-- DeepSeek / 智谱等在线模型：承载外部推理能力
-- ChromaDB：承载向量记忆存储
-
-### 项目自研负责什么
-
-- 政策文本到结构化冲击的映射
-- 多智能体行为组织与市场仿真
-- 市场撮合与微观结构建模
-- 历史回测与真实性验证逻辑
-- 行为金融指标、监管优化与比赛材料导出
-- 页面组织、答辩闭环和离线兜底策略
-## 十、常见问题
-
-### 1. 页面无法打开
-
-- 检查 `8501` 端口是否被占用。
-- 可改用：`scripts\start_competition_demo.ps1 -Port 8510`
-
-### 2. `_civitas_lob` 扩展无法加载
-
-- 优先切换到 Python `3.14.x`
-- 或安装 Build Tools 后执行 `python setup.py build_ext --inplace`
-
-### 3. 没有 API Key 是否还能演示
-
-- 可以。项目支持离线演示模式。
-
-### 4. 历史数据拉取失败
-
-- 优先检查网络连接。
-- 若只做比赛答辩，可直接使用内置场景完成展示。
-
-## 十一、提交建议
-
-比赛提交时建议至少包含以下内容：
-
-- 仓库源代码
-- 本 README
-- `requirements.txt` 与 `requirements-lock.txt`
-- `.env.example`
-- `scripts/start_competition_demo.ps1`
-- `scripts/check_competition_delivery.ps1`
-- 桌面输出的《设计说明书》《项目作品小结》《README（桌面版）》
-
-## 十二、免责声明
-
-本项目仅供教学、科研、竞赛展示与仿真分析使用，不构成任何投资建议。
+```bash
+python -c "import app; assert hasattr(app, 'main')"
+python -m streamlit run app.py --server.port 8501
+```

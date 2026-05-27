@@ -1,4 +1,3 @@
-# file: agents/roles/analyst.py
 """
 分析师角色模块
 
@@ -523,7 +522,7 @@ class SentimentAnalyst(Analyst):
         Returns:
             恐贪指数 (0=极度恐惧, 100=极度贪婪)
         """
-        # 波动率成分 (高波动 = 恐惧)
+
         vol_score = max(0, 50 - volatility * 1000)
         
         # 成交量成分 (放量 = 情绪化)
@@ -611,10 +610,10 @@ class SentimentAnalyst(Analyst):
         
         # 恐贪指数信号 (逆向思维)
         if fear_greed['status'] == 'extreme_fear':
-            fg_signal = 1  # 别人恐惧我贪婪
+            fg_signal = 1
             reasoning_parts.append(f"恐贪指数 {fear_greed['index']:.0f} (极度恐惧)，逆向看涨")
         elif fear_greed['status'] == 'extreme_greed':
-            fg_signal = -1  # 别人贪婪我恐惧
+            fg_signal = -1
             reasoning_parts.append(f"恐贪指数 {fear_greed['index']:.0f} (极度贪婪)，逆向看跌")
         else:
             fg_signal = 0

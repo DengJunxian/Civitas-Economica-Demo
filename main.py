@@ -1,6 +1,52 @@
 import sys
 import os
 import subprocess
+import importlib.util
+
+
+MIN_PYTHON = (3, 11)
+REQUIRED_UI_MODULES = {
+    "streamlit": "streamlit",
+    "pandas": "pandas",
+    "numpy": "numpy",
+    "plotly": "plotly",
+    "yaml": "pyyaml",
+    "openai": "openai",
+    "akshare": "akshare",
+}
+
+
+def check_python_version() -> bool:
+    """Fail fast with a readable message when the runtime is too old."""
+
+    if sys.version_info >= MIN_PYTHON:
+        return True
+    current = ".".join(str(part) for part in sys.version_info[:3])
+    required = ".".join(str(part) for part in MIN_PYTHON)
+    print(f"[ERROR] 当前 Python 版本为 {current}，项目需要 Python {required} 及以上。")
+    print("[HINT] 建议创建新环境后安装依赖：")
+    print("       python3.11 -m venv .venv")
+    print("       source .venv/bin/activate")
+    print("       python -m pip install -r requirements.txt")
+    return False
+
+
+def check_required_modules() -> bool:
+    """Check front-end dependencies before spawning Streamlit."""
+
+    missing = [
+        package_name
+        for module_name, package_name in REQUIRED_UI_MODULES.items()
+        if importlib.util.find_spec(module_name) is None
+    ]
+    if not missing:
+        return True
+    print("[ERROR] 缺少启动界面所需依赖：")
+    for package_name in missing:
+        print(f"       - {package_name}")
+    print("[HINT] 请在 Python 3.11+ 虚拟环境中执行：")
+    print("       python -m pip install -r requirements.txt")
+    return False
 
 
 def check_environment():
@@ -54,5 +100,9 @@ def run_ui():
         print(f"[!] 启动失败: {e}")
 
 if __name__ == "__main__":
+    if not check_python_version():
+        sys.exit(1)
+    if not check_required_modules():
+        sys.exit(1)
     GLOBAL_CONFIG = check_environment()
     run_ui()

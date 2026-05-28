@@ -21,7 +21,6 @@ from core.backtester import (
 )
 from core.history_news import HistoryNewsBundle, HistoryNewsService
 from core.performance import compute_backtest_credibility, compute_performance_metrics
-from core.policy_session import PolicySession
 
 
 def _max_drawdown(values: np.ndarray) -> float:
@@ -60,7 +59,14 @@ class NewsDrivenPolicyReplayEngine(FactorBacktestEngine):
             )
         return rows
 
-    def _build_policy_session(self, frame: pd.DataFrame) -> PolicySession:
+    def _build_policy_session(self, frame: pd.DataFrame) -> Any:
+        try:
+            from core.policy_session import PolicySession
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "新闻驱动历史回放依赖未安装完整，无法启动多智能体政策会话。"
+            ) from exc
+
         start_date = str(pd.to_datetime(frame.iloc[0]["date"], errors="coerce").strftime("%Y-%m-%d"))
         model_priority = tuple(self.config.llm_model_priority or ([self.config.llm_model] if self.config.llm_model else ["glm-4-flashx"]))
         return PolicySession.create(

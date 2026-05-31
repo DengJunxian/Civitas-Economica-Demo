@@ -171,6 +171,20 @@ def _remember_narrative(text: str) -> None:
         return
 
 
+def _narrative_llm_disabled() -> bool:
+    try:
+        return bool(st.session_state.get("_ui_narrative_llm_disabled", False))
+    except Exception:
+        return False
+
+
+def _disable_narrative_llm() -> None:
+    try:
+        st.session_state["_ui_narrative_llm_disabled"] = True
+    except Exception:
+        return
+
+
 def _normalized_similarity(left: str, right: str) -> float:
     clean_left = re.sub(r"\s+", "", left or "")
     clean_right = re.sub(r"\s+", "", right or "")
@@ -345,9 +359,12 @@ def _build_prompt(
 
 
 def _llm_narrative(title: str, payload: Any, context: str = "", **context_kwargs: Any) -> str:
+    if _narrative_llm_disabled():
+        return ""
     try:
         from core.inference.api_backend import APIBackend
     except Exception:
+        _disable_narrative_llm()
         return ""
 
     fallback = _fallback_narrative(title, payload, context, **context_kwargs)
@@ -386,9 +403,14 @@ def _llm_narrative(title: str, payload: Any, context: str = "", **context_kwargs
                 or ""
             ).strip()
         except Exception:
+            _disable_narrative_llm()
             content = ""
         if not content or content.startswith("[API Error]"):
+            _disable_narrative_llm()
             continue
+        if content == fallback:
+            _disable_narrative_llm()
+            return ""
         stripped = content.lstrip()
         if stripped.startswith("{") or stripped.startswith("[") or stripped.startswith("```"):
             continue

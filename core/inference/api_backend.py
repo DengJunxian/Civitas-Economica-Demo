@@ -5,6 +5,7 @@ API 推理后端
 """
 
 import os
+import time
 from types import ModuleType
 from typing import Optional, List, Any, cast
 
@@ -19,6 +20,30 @@ try:
 except ImportError:
     OPENAI_AVAILABLE = False
     _openai_module = None
+
+_FALLBACK_BACKOFF_UNTIL = 0.0
+
+
+def _fallback_backoff_seconds() -> float:
+    raw = str(os.getenv("CIVITAS_API_FALLBACK_BACKOFF_SECONDS", "")).strip()
+    if raw:
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            pass
+    return 180.0
+
+
+def _fallback_backoff_active() -> bool:
+    return time.monotonic() < _FALLBACK_BACKOFF_UNTIL
+
+
+def _mark_fallback_backoff() -> None:
+    global _FALLBACK_BACKOFF_UNTIL
+    _FALLBACK_BACKOFF_UNTIL = max(
+        _FALLBACK_BACKOFF_UNTIL,
+        time.monotonic() + _fallback_backoff_seconds(),
+    )
 
 
 class APIBackend:
@@ -98,6 +123,10 @@ class APIBackend:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
+        fallback = kwargs.get("fallback_response")
+
+        if fallback is not None and _fallback_backoff_active():
+            return str(fallback)
 
         try:
             routed = sync_llm_complete(
@@ -108,14 +137,17 @@ class APIBackend:
                 temperature=kwargs.get("temperature", self.temperature),
                 max_tokens=kwargs.get("max_tokens", self.max_tokens),
                 timeout=kwargs.get("timeout_budget", kwargs.get("timeout")),
-                fallback_response=kwargs.get("fallback_response"),
+                fallback_response=fallback,
             )
-            if routed.ok or kwargs.get("fallback_response") is not None:
+            if routed.ok or fallback is not None:
+                if not routed.ok and str(routed.provider).lower() == "offline":
+                    _mark_fallback_backoff()
                 return routed.text
         except Exception:
+            if fallback is not None:
+                _mark_fallback_backoff()
+                return str(fallback)
 
-            pass
-        
         try:
             client = self._get_client()
             response = client.chat.completions.create(
@@ -126,8 +158,8 @@ class APIBackend:
             )
             return response.choices[0].message.content or ""
         except Exception as e:
-            fallback = kwargs.get("fallback_response")
             if fallback is not None:
+                _mark_fallback_backoff()
                 return str(fallback)
             return f"[API Error] {e}"
     

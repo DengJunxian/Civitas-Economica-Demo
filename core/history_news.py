@@ -6,8 +6,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
+import queue
 import re
+import threading
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import pandas as pd
@@ -73,6 +76,7 @@ _PRIORITY_EVENT_TOKENS = (
     "资本市场新国九条",
     "国务院关于加强监管防范风险推动资本市场高质量发展的若干意见",
 )
+DEFAULT_ONLINE_FETCH_TIMEOUT_SECONDS = 2.5
 
 
 def _contains_priority_event(text: str) -> bool:
@@ -140,6 +144,9 @@ class HistoryNewsService:
             if str(local_cache_path) == "data/history_news_cache.jsonl"
             else Path(local_cache_path)
         )
+        self.online_fetch_timeout_seconds = self._read_online_fetch_timeout()
+        self._online_fetch_errors: List[str] = []
+        self._llm_digest_disabled = False
 
     def build_news_bundle(
         self,
@@ -219,9 +226,56 @@ class HistoryNewsService:
             persistence=persistence,
         )
 
+    @staticmethod
+    def _read_online_fetch_timeout() -> float:
+        raw = str(os.environ.get("CIVITAS_HISTORY_NEWS_ONLINE_TIMEOUT_SECONDS", "")).strip()
+        if raw:
+            try:
+                return max(0.5, float(raw))
+            except ValueError:
+                pass
+        return DEFAULT_ONLINE_FETCH_TIMEOUT_SECONDS
+
+    def _fetch_online_frame_with_timeout(
+        self,
+        source_name: str,
+        fetcher: Callable[[], pd.DataFrame],
+    ) -> Optional[pd.DataFrame]:
+        result_queue: queue.Queue[Tuple[str, Any]] = queue.Queue(maxsize=1)
+
+        def _run() -> None:
+            try:
+                result_queue.put(("ok", fetcher()))
+            except Exception as exc:  # pragma: no cover - provider/network dependent
+                result_queue.put(("error", exc))
+
+        worker = threading.Thread(
+            target=_run,
+            name=f"HistoryNewsFetch:{source_name}",
+            daemon=True,
+        )
+        worker.start()
+        worker.join(self.online_fetch_timeout_seconds)
+        if worker.is_alive():
+            self._online_fetch_errors.append(
+                f"{source_name}: timeout>{self.online_fetch_timeout_seconds:.1f}s"
+            )
+            return None
+
+        try:
+            status, payload = result_queue.get_nowait()
+        except queue.Empty:
+            self._online_fetch_errors.append(f"{source_name}: no result")
+            return None
+        if status == "error":
+            self._online_fetch_errors.append(f"{source_name}: {payload}")
+            return None
+        return payload if isinstance(payload, pd.DataFrame) else None
+
     def _load_online_rows(self, start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> List[Dict[str, Any]]:
         if ak is None:
             return []
+        self._online_fetch_errors = []
         fetchers: Sequence[Tuple[str, Callable[[], pd.DataFrame]]] = (
             ("cls", lambda: ak.stock_info_global_cls(symbol="重点")),
             ("eastmoney", ak.stock_info_global_em),
@@ -229,10 +283,7 @@ class HistoryNewsService:
         )
         rows: List[Dict[str, Any]] = []
         for source_name, fn in fetchers:
-            try:
-                frame = fn()
-            except Exception:
-                continue
+            frame = self._fetch_online_frame_with_timeout(source_name, fn)
             if frame is None or frame.empty:
                 continue
             rows.extend(self._normalize_frame_rows(frame, source_name=source_name, start_ts=start_ts, end_ts=end_ts))
@@ -571,9 +622,12 @@ class HistoryNewsService:
     ) -> Optional[Dict[str, Any]]:
         if not rows:
             return {"summary": "当日未检索到可用新闻，沿用政策主线。", "shock_score": 0.0}
+        if self._llm_digest_disabled:
+            return None
         try:
             from core.inference.api_backend import APIBackend
         except Exception:
+            self._llm_digest_disabled = True
             return None
         payload_rows = [
             {
@@ -608,11 +662,14 @@ class HistoryNewsService:
                 or ""
             ).strip()
         except Exception:
+            self._llm_digest_disabled = True
             return None
         if not text or text.startswith("[API Error]"):
+            self._llm_digest_disabled = True
             return None
         parsed = self._parse_json_fragment(text)
         if not isinstance(parsed, dict):
+            self._llm_digest_disabled = True
             return None
         return parsed
 
@@ -675,6 +732,7 @@ class HistoryNewsService:
             "coverage_rate": float(day_hits / max(day_count, 1)),
             "selected_news_count": int(sum(len(items) for items in grouped.values())),
             "online_candidates": int(len(online_rows)),
+            "online_fetch_errors": list(self._online_fetch_errors),
             "local_candidates": int(len(local_rows)),
             "seed_candidates": int((local_breakdown or {}).get("seed_candidates", 0) or 0),
             "event_store_candidates": int((local_breakdown or {}).get("event_store_candidates", 0) or 0),

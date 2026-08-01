@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
-DEFAULT_DEEPSEEK_API_KEY = "sk-bd7577c5041644aa86520191a0e01941"
 DEFAULT_ZHIPU_API_KEY = "4d963afd591d4c93940b08b06d766e91.bWaMIWJnuKhOUo7y"
+DEFAULT_DEEPSEEK_API_KEY = ""
 
 
 def _load_local_env_file(path: str = ".env") -> None:

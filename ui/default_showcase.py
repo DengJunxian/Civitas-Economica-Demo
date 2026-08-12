@@ -415,7 +415,9 @@ def _showcase_image_url(file_name: str) -> str:
     path = PROJECT_ROOT / "static" / "showcase_gallery" / file_name
     if not path.exists():
         return ""
-    return f"/app/static/showcase_gallery/{file_name}"
+    # Keep this URL relative so Streamlit's configured baseUrlPath is preserved
+    # when the app is served behind a proxy or from a hosted subpath.
+    return f"app/static/showcase_gallery/{file_name}"
 
 
 def _gallery_figure(item: Dict[str, str], *, featured: bool = False) -> str:

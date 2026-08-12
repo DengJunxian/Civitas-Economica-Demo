@@ -29,6 +29,7 @@ from core.runtime_mode import merge_mode_feature_flags, normalize_runtime_mode, 
 from core.ui_text import display_runtime_mode, display_scenario_name, localize_dataframe_columns, zh_world_name
 from ui.backtest_panel import render_backtest_panel
 from ui.behavioral_diagnostics import render_behavioral_diagnostics
+from ui.default_showcase import render_default_showcase
 from ui.components.replay_scrubber import render_replay_scrubber
 from ui.components.repro_meta import (
     build_experiment_registry_entry,
@@ -51,18 +52,23 @@ st.set_page_config(
     page_title="数治观澜 | 金融政策智能推演与验证平台",
     page_icon="🎯",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 
+SHOWCASE_ENTRY = "成果展示"
 OVERVIEW_ENTRY = "系统总览"
 ENTRY_POINTS = [
+    SHOWCASE_ENTRY,
     OVERVIEW_ENTRY,
     "政策实验",
     "历史验证",
     "研判分析",
 ]
 ENTRY_ALIASES = {
+    "默认展示": SHOWCASE_ENTRY,
+    "展示窗口": SHOWCASE_ENTRY,
+    "默认展示窗口": SHOWCASE_ENTRY,
     "系统说明": OVERVIEW_ENTRY,
     "总览首页": OVERVIEW_ENTRY,
     "政策试验台": "政策实验",
@@ -79,12 +85,14 @@ ENTRY_ALIASES = {
     "监管优化": "研判分析",
 }
 ENTRY_DESCRIPTIONS = {
+    SHOWCASE_ENTRY: "按研究链路浏览政策实验、反事实评估与历史验证的真实界面记录。",
     OVERVIEW_ENTRY: "用一屏建立平台定位、能力链路、工程特性与代表性结果。",
     "政策实验": "输入政策文本，查看结构化编译、多智能体响应与市场路径。",
     "历史验证": "基于真实历史窗口自动汇总政策与新闻，验证仿真与真实走势的一致性。",
     "研判分析": "聚合大模型证据、行为诊断、监管优化、研究验证与结果归档能力。",
 }
 ENTRY_PURPOSE = {
+    SHOWCASE_ENTRY: "浏览项目实录与完整政策研究证据链",
     OVERVIEW_ENTRY: "快速建立平台认知并进入核心工作流",
     "政策实验": "进行政策仿真、影响评估与结果归档",
     "历史验证": "验证历史区间下的拟真效果与误差边界",
@@ -271,7 +279,7 @@ def _render_value_bridge_tab() -> None:
 
 def _init_state() -> None:
     defaults: Dict[str, Any] = {
-        "entry": OVERVIEW_ENTRY,
+        "entry": SHOWCASE_ENTRY,
         "controller": None,
         "runtime_mode": LIVE_MODE,
         "competition_mode": "",
@@ -304,9 +312,9 @@ def _init_state() -> None:
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
-    st.session_state.entry = _normalize_entry(str(st.session_state.get("entry", OVERVIEW_ENTRY)))
+    st.session_state.entry = _normalize_entry(str(st.session_state.get("entry", SHOWCASE_ENTRY)))
     if st.session_state.entry not in ENTRY_POINTS:
-        st.session_state.entry = OVERVIEW_ENTRY
+        st.session_state.entry = SHOWCASE_ENTRY
     _sync_runtime_mode_profile()
 
 
@@ -335,12 +343,20 @@ def _render_top_entry_selector() -> None:
         unsafe_allow_html=True,
     )
 
-    quick_a, quick_b, quick_c, quick_d = st.columns([1.05, 1.05, 1.05, 1.25])
+    quick_showcase, quick_a, quick_b, quick_c, quick_d = st.columns([1.08, 1.0, 1.0, 1.0, 1.08])
+    with quick_showcase:
+        if st.button(
+            SHOWCASE_ENTRY,
+            key="top_entry_showcase",
+            width="stretch",
+            type="primary" if st.session_state.entry == SHOWCASE_ENTRY else "secondary",
+        ):
+            st.session_state.entry = SHOWCASE_ENTRY
     with quick_a:
         if st.button(
             OVERVIEW_ENTRY,
             key="top_entry_overview",
-            use_container_width=True,
+            width="stretch",
             type="primary" if st.session_state.entry == OVERVIEW_ENTRY else "secondary",
         ):
             st.session_state.entry = OVERVIEW_ENTRY
@@ -348,7 +364,7 @@ def _render_top_entry_selector() -> None:
         if st.button(
             "政策实验",
             key="top_entry_policy_lab",
-            use_container_width=True,
+            width="stretch",
             type="primary" if st.session_state.entry == "政策实验" else "secondary",
         ):
             st.session_state.entry = "政策实验"
@@ -356,7 +372,7 @@ def _render_top_entry_selector() -> None:
         if st.button(
             "历史验证",
             key="top_entry_history_replay",
-            use_container_width=True,
+            width="stretch",
             type="primary" if st.session_state.entry == "历史验证" else "secondary",
         ):
             st.session_state.entry = "历史验证"
@@ -364,11 +380,11 @@ def _render_top_entry_selector() -> None:
         if st.button(
             "研判分析",
             key="top_entry_advanced",
-            use_container_width=True,
+            width="stretch",
             type="primary" if st.session_state.entry == "研判分析" else "secondary",
         ):
             st.session_state.entry = "研判分析"
-        st.caption("建议路径：政策实验 -> 历史验证 -> 研判分析。")
+    st.caption("建议先看成果展示，再按“政策实验 → 历史验证 → 研判分析”进入完整工作流。")
 
 
 def _ensure_demo_loaded() -> None:
@@ -598,9 +614,9 @@ def _render_sidebar_global() -> None:
         )
         
         menu_groups = {
-            "核心工作流": [OVERVIEW_ENTRY, "政策实验", "历史验证", "研判分析"],
+            "核心工作流": [SHOWCASE_ENTRY, OVERVIEW_ENTRY, "政策实验", "历史验证", "研判分析"],
         }
-        st.caption("建议从系统总览进入，再按“政策实验 -> 历史验证 -> 研判分析”完成全链路浏览。")
+        st.caption("成果展示已经跑通默认链路；其余入口用于交互试验与深入分析。")
 
         for group, entries in menu_groups.items():
             st.markdown(f"<div style='margin-top: 16px; margin-bottom: 8px; font-size: 13px; color: #8aa0c2; letter-spacing: 1px;'>{group}</div>", unsafe_allow_html=True)
@@ -609,7 +625,7 @@ def _render_sidebar_global() -> None:
                     if st.button(
                         entry,
                         key=f"entry_{entry}",
-                        use_container_width=True,
+                        width="stretch",
                         type="primary" if st.session_state.entry == entry else "secondary",
                         help=ENTRY_DESCRIPTIONS.get(entry, "")
                     ):
@@ -1161,7 +1177,9 @@ def main() -> None:
     _render_top_entry_selector()
 
     entry = st.session_state.entry
-    if entry == OVERVIEW_ENTRY:
+    if entry == SHOWCASE_ENTRY:
+        render_default_showcase()
+    elif entry == OVERVIEW_ENTRY:
         _render_overview_home()
     elif entry == "政策实验":
         st.session_state.runtime_mode = DEMO_MODE

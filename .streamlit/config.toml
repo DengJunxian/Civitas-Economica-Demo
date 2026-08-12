@@ -27,3 +27,4 @@ showWidgetBorder = true
 [server]
 headless = true
 showEmailPrompt = false
+enableStaticServing = true
